@@ -46,7 +46,16 @@ target_compile_options(gta2 PRIVATE -include ${PORT}/compat/prelude.hpp
     -fno-builtin-wcslen -fno-builtin-wcscpy -fno-builtin-wcscmp -fno-builtin-wcsncmp -fno-builtin-wcschr
     -fno-builtin-wmemcpy -fno-builtin-wmemset -fno-builtin-wmemcmp)
 target_include_directories(gta2 PRIVATE ${PORT}/compat/include ${PORT}/include ${ROOT}/Source ${ROOT})
-target_link_libraries(gta2 PRIVATE SDL3::SDL3-static citro3d ctru m)
+# OpenDSP (build_opendsp.sh's prefix) links in a DSP firmware; without it, sound needs the console's dspfirm.cdc.
+set(OPENDSP_DIR "" CACHE PATH "OpenDSP prefix from build_opendsp.sh, empty for none")
+if(OPENDSP_DIR)
+    set(opendsp ${OPENDSP_DIR}/lib/libopendsp.a)
+    target_compile_definitions(gta2 PRIVATE GTA2_OPENDSP)
+    target_include_directories(gta2 PRIVATE ${OPENDSP_DIR}/include)
+    # Its BSD-2 terms: the notice goes with the binary.
+    configure_file(${OPENDSP_DIR}/LICENSE LICENSE.OpenDSP.txt COPYONLY)
+endif()
+target_link_libraries(gta2 PRIVATE SDL3::SDL3-static ${opendsp} citro3d ctru m)
 # test_pad.cpp adds scripted buttons to what SDL reads.
 target_link_options(gta2 PRIVATE -Wl,--wrap=hidScanInput,--wrap=hidKeysDown,--wrap=hidKeysUp)
 

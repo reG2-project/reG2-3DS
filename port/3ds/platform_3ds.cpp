@@ -8,6 +8,10 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#ifdef GTA2_OPENDSP
+#include <opendsp.h>
+#endif
+
 // The main thread's stack (libctru's default is 32 KB): the game has large locals.
 extern "C" u32 __stacksize__ = 2 * 1024 * 1024;
 // Fixed sizes within the Old 3DS's 64 MB (with the 3 MB image and the stack), so the emulator holds the
@@ -43,6 +47,31 @@ static void LoadEnvironment()
     fclose(f);
 }
 
+#ifdef GTA2_OPENDSP
+// Loads OpenDSP's firmware, linked in, in place of the console's dspfirm.cdc. SDL's n3ds audio calls
+// ndspInit and ndspExit itself, which then only count references.
+static void StartDsp()
+{
+    const char* driver = getenv("GTA2_AUDIO_DRIVER");
+    if (getenv("GTA2_NO_SOUND") || (driver && strcmp(driver, "n3ds") != 0))
+    {
+        return;
+    }
+    const Result rc = opendspInit();
+    if (R_FAILED(rc))
+    {
+        // SDL then tries dspfirm.cdc.
+        fprintf(stderr, "OpenDSP: error 0x%08lX\n", rc);
+        ndspUseComponent(NULL, 0, 0, 0);
+        return;
+    }
+    u32 caps = 0;
+    opendspGetCapabilities(&caps);
+    fprintf(stderr, "OpenDSP: capabilities 0x%lX\n", caps);
+    atexit(opendspExit);
+}
+#endif
+
 // Before main.cpp's EnterGameFolderAtStart (101) and the game's constructors.
 __attribute__((constructor(100))) static void StartUp()
 {
@@ -53,6 +82,9 @@ __attribute__((constructor(100))) static void StartUp()
     setvbuf(stderr, NULL, _IONBF, 0);
     SDL_SetLogOutputFunction(LogToStderr, NULL);
     LoadEnvironment();
+#ifdef GTA2_OPENDSP
+    StartDsp();
+#endif
 }
 
 bool port_PrepareGameFolder(bool)
