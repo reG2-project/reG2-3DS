@@ -1,0 +1,26 @@
+--- a/src/thread/n3ds/SDL_systhread.c
++++ b/src/thread/n3ds/SDL_systhread.c
+@@ -52,11 +52,9 @@
+ 
+     svcGetThreadPriority(&priority, CUR_THREAD_HANDLE);
+ 
+-    // on New 3DS, prefer putting audio thread on system core
++    // prefer putting audio thread on system core (the Old 3DS's too)
+     if (thread->name && (SDL_strncmp(thread->name, "SDLAudioP", 9) == 0)) {
+-        bool new3ds = false;
+-        APT_CheckNew3DS(&new3ds);
+-        if (new3ds && R_SUCCEEDED(APT_SetAppCpuTimeLimit(30))) {
++        if (R_SUCCEEDED(APT_SetAppCpuTimeLimit(30))) {
+             cpu = 1;
+         }
+     }
+@@ -67,6 +65,9 @@
+                                   priority,
+                                   cpu,
+                                   false);
++    if (!thread->handle && cpu != -1) {
++        thread->handle = threadCreate(ThreadEntry, thread, stack_size, priority, -1, false);
++    }
+ 
+     if (!thread->handle) {
+         return SDL_SetError("Couldn't create thread");
