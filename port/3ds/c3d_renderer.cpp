@@ -1,8 +1,10 @@
 #include "c3d_renderer.hpp"
 #include "c3d_context.hpp"
 #include "stats_3ds.hpp"
+#include "../src/hud_screen.hpp"
 #include <3ds.h>
 #include <citro3d.h>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -34,6 +36,8 @@ const s32 kMaxVerts = 65536;
 // The top screen's target, landscape: 800x480, which the display transfer halves into the 400x240 screen.
 const s32 kScreenW = 800;
 const s32 kScreenH = 480;
+const s32 kBottomW = 320;
+const s32 kBottomH = 240;
 const s32 kMaxTexSize = 1024;
 // GLRenderer's default vertex offset: D3D pixel centres are on integers, the PICA's on halves.
 const f32 kPixelOffset = 0.5f - 1.0f / 2048.0f;
@@ -107,6 +111,75 @@ struct ScreenRect
     bool operator!=(const ScreenRect& o) const { return x0 != o.x0 || y0 != o.y0 || x1 != o.x1 || y1 != o.y1; }
 };
 
+// A part of a HUD group on the bottom screen: draws centred in the layout rect `from` (640x480 layout pixels)
+// move by (dx, dy) and are cut to `slot`. A scrolling part taller than its slot scrolls through it.
+struct HudRule
+{
+    ScreenRect from;
+    s32 dx, dy;
+    ScreenRect slot;
+    bool scroll;
+};
+
+struct HudGroupRules
+{
+    const HudRule* rules; // the last one takes what the others leave
+    s32 count;
+};
+
+// The bottom screen: the money row and the gang bars at the top, the wanted level, weapon, power-ups and
+// pagers below them, and the brief (scrolling when long) in the bottom half.
+const ScreenRect kAll = {0, 0, 640, 480};
+const s32 kBriefTop = 114;
+const HudRule kStatsRules[] = {
+    {{560, 44, 640, 100}, -320, 0, {240, 44, 320, kBriefTop}, false}, // weapon and ammo
+    {{0, 100, 640, 480}, -402, -33, {100, 64, 240, kBriefTop}, false}, // power-ups
+    {kAll, -320, 0, {100, 0, 320, 44}, false},                         // clock, multiplier, lives, money, health
+};
+const HudRule kWantedRules[] = {{kAll, -150, 44, {100, 44, 240, 64}, false}};
+const HudRule kGangRules[] = {{kAll, 0, 0, {0, 0, 100, 74}, false}};
+const HudRule kBriefRules[] = {
+    {{0, 0, 60, 480}, 0, -240, {0, kBriefTop, 64, 240}, false}, // the face
+    {kAll, 0, -240, {64, kBriefTop, 320, 240}, true},
+};
+const HudRule kPagerRules[] = {{kAll, 0, -12, {0, 74, 100, kBriefTop}, false}};
+
+#define HUD_RULES(rules) {rules, (s32)(sizeof(rules) / sizeof(rules[0]))}
+const HudGroupRules kHudGroups[PortHudScreen::kGroupCount] = {
+    {0, 0}, // kWorld: the top screen
+    HUD_RULES(kStatsRules),
+    HUD_RULES(kWantedRules),
+    HUD_RULES(kGangRules),
+    HUD_RULES(kBriefRules),
+    HUD_RULES(kPagerRules),
+};
+#undef HUD_RULES
+
+const HudRule* PickRule(const HudGroupRules& group, const RVertex* pVerts, s32 count)
+{
+    f32 x = 0.0f, y = 0.0f;
+    for (s32 i = 0; i < count; i++)
+    {
+        x += pVerts[i].x;
+        y += pVerts[i].y;
+    }
+    x /= count;
+    y /= count;
+    for (s32 i = 0; i < group.count - 1; i++)
+    {
+        const ScreenRect& r = group.rules[i].from;
+        if (x >= r.x0 && x < r.x1 && y >= r.y0 && y < r.y1)
+        {
+            return &group.rules[i];
+        }
+    }
+    return &group.rules[group.count - 1];
+}
+
+// A scrolling part is shown from its top, scrolled to its end and held at both ends, over and over.
+const f32 kScrollHoldMs = 2000.0f;
+const f32 kScrollPxPerMs = 0.012f;
+
 s32 Round(f32 v)
 {
     return (s32)(v < 0.0f ? v - 0.5f : v + 0.5f);
@@ -138,7 +211,31 @@ struct C3DRenderer::Impl
     C3D_Tex* mBoundTex;
     u32 mBoundParam;
 
+    // Set while the group being drawn goes to the bottom screen: its batches wait for the end of the frame.
+    const HudGroupRules* mHudGroup;
+    const HudRule* mBatchRule;
+    struct HudBatch
+    {
+        s32 start, count;
+        RTexture* tex;
+        u32 state;
+        ScreenRect scissor;
+        bool scroll;
+    };
+    std::vector<HudBatch> mHudBatches;
+    // The scrolling part's top this frame (bottom screen pixels) and its slot's; how much of it was hidden above
+    // the slot when its scroll began, and when.
+    s32 mScrollTop, mScrollSlotTop;
+    bool mScrollSeen;
+    s32 mScrollOverflow;
+    u64 mScrollStartMs;
+    C3D_RenderTarget* mBottom;
+    C3D_Mtx mBottomProjection;
+    // The target drawn on, landscape.
+    s32 mTargetW, mTargetH;
+
     bool mInFrame;
+    bool mFrameDrew;
     bool mNeedClear;
     u32 mFrame;
     // Textures the GPU may still read: freed once the next frame has begun (C3D_FrameBegin waits for the GPU).
@@ -150,8 +247,10 @@ struct C3DRenderer::Impl
 
     ScreenRect ToScreen(f32 left, f32 top, f32 right, f32 bottom) const;
     void BeginFrame();
-    void Append(const RVertex* pVerts, s32 count, RTexture* pTex, u32 state, f32 offset, const ScreenRect& scissor);
+    void Append(const RVertex* pVerts, s32 count, RTexture* pTex, u32 state, f32 offset, const ScreenRect& scissor, const HudRule* pRule);
     void Flush();
+    f32 ScrollOffset();
+    void DrawHud();
     void ApplyState(RTexture* pTex, u32 state, const ScreenRect& scissor);
     bool Allocate(RTexture* pTex, s32 tw, s32 th, GPU_TEXCOLOR fmt, bool clear);
 };
@@ -223,6 +322,7 @@ void C3DRenderer::Impl::BeginFrame()
     C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
     Stats3DS_AddFrameBegin(svcGetSystemTick() - t0);
     mInFrame = true;
+    mFrameDrew = false;
     mFrame++;
     for (size_t i = 0; i < mPendingFree.size(); i++)
     {
@@ -235,6 +335,8 @@ void C3DRenderer::Impl::BeginFrame()
         mNeedClear = false;
     }
     C3D_FrameDrawOn(mTarget);
+    mTargetW = kScreenW;
+    mTargetH = kScreenH;
     C3D_BindProgram(&mProgram);
     C3D_AttrInfo* pAttr = C3D_GetAttrInfo();
     AttrInfo_Init(pAttr);
@@ -254,9 +356,9 @@ void C3DRenderer::Impl::BeginFrame()
     mBoundTex = 0;
 }
 
-void C3DRenderer::Impl::Append(const RVertex* pVerts, s32 count, RTexture* pTex, u32 state, f32 offset, const ScreenRect& scissor)
+void C3DRenderer::Impl::Append(const RVertex* pVerts, s32 count, RTexture* pTex, u32 state, f32 offset, const ScreenRect& scissor, const HudRule* pRule)
 {
-    if (mVertCount > mBatchStart && (pTex != mBatchTex || state != mBatchState || scissor != mBatchScissor))
+    if (mVertCount > mBatchStart && (pTex != mBatchTex || state != mBatchState || scissor != mBatchScissor || pRule != mBatchRule))
     {
         Flush();
     }
@@ -272,6 +374,10 @@ void C3DRenderer::Impl::Append(const RVertex* pVerts, s32 count, RTexture* pTex,
     mBatchTex = pTex;
     mBatchState = state;
     mBatchScissor = scissor;
+    mBatchRule = pRule;
+    mFrameDrew = true;
+    const f32 dx = offset + (pRule ? pRule->dx : 0);
+    const f32 dy = offset + (pRule ? pRule->dy : 0);
     const f32 su = pTex ? pTex->mScaleU : 0.0f;
     const f32 sv = pTex ? pTex->mScaleV : 0.0f;
     if (pTex)
@@ -282,12 +388,22 @@ void C3DRenderer::Impl::Append(const RVertex* pVerts, s32 count, RTexture* pTex,
     for (s32 i = 0; i < count; i++)
     {
         const RVertex& s = pVerts[i];
-        pDst[i].x = s.x + offset;
-        pDst[i].y = s.y + offset;
+        pDst[i].x = s.x + dx;
+        pDst[i].y = s.y + dy;
         pDst[i].rhw = s.rhw;
         pDst[i].rgba = s.rgba;
         pDst[i].u = s.u * su;
         pDst[i].v = 1.0f - s.v * sv;
+    }
+    if (pRule && pRule->scroll)
+    {
+        for (s32 i = 0; i < count; i++)
+        {
+            const s32 y = (s32)pDst[i].y;
+            mScrollTop = mScrollSeen && mScrollTop < y ? mScrollTop : y;
+            mScrollSeen = true;
+        }
+        mScrollSlotTop = pRule->slot.y0;
     }
     mVertCount += count;
 }
@@ -297,6 +413,13 @@ void C3DRenderer::Impl::Flush()
     const s32 n = mVertCount - mBatchStart;
     if (n <= 0)
     {
+        return;
+    }
+    if (mBatchRule)
+    {
+        const HudBatch batch = {mBatchStart, n, mBatchTex, mBatchState, mBatchScissor, mBatchRule->scroll};
+        mHudBatches.push_back(batch);
+        mBatchStart = mVertCount;
         return;
     }
     if (C3D_GetCmdBufUsage() > 0.97f)
@@ -316,12 +439,72 @@ void C3DRenderer::Impl::Flush()
     mOwner->mVertices += (u32)n;
 }
 
+// How far down the scrolling part is drawn this frame: from all of its overflow (its top shown) to none.
+f32 C3DRenderer::Impl::ScrollOffset()
+{
+    const s32 overflow = mScrollSeen ? mScrollSlotTop - mScrollTop : 0;
+    mScrollSeen = false;
+    if (overflow <= 0)
+    {
+        mScrollOverflow = 0;
+        return 0.0f;
+    }
+    const u64 now = osGetTime();
+    if (overflow != mScrollOverflow)
+    {
+        mScrollOverflow = overflow;
+        mScrollStartMs = now;
+    }
+    const f32 scrollMs = overflow / kScrollPxPerMs;
+    const f32 t = fmodf((f32)(now - mScrollStartMs), kScrollHoldMs * 2.0f + scrollMs) - kScrollHoldMs;
+    const f32 scrolled = t < 0.0f ? 0.0f : (t > scrollMs ? scrollMs : t) * kScrollPxPerMs;
+    return (f32)Round(overflow - scrolled);
+}
+
+// The bottom screen, after the top one: cleared, with the HUD's batches of the frame.
+void C3DRenderer::Impl::DrawHud()
+{
+    const f32 scroll = ScrollOffset();
+    if (!mBottom)
+    {
+        mHudBatches.clear();
+        return;
+    }
+    C3D_RenderTargetClear(mBottom, C3D_CLEAR_COLOR, 0x000000FF, 0);
+    C3D_FrameDrawOn(mBottom);
+    mTargetW = kBottomW;
+    mTargetH = kBottomH;
+    C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, mUniProjection, &mBottomProjection);
+    mStateValid = false;
+    C3D_Mtx scrolled = mBottomProjection;
+    Mtx_Translate(&scrolled, 0.0f, scroll, 0.0f, true);
+    bool inScroll = false;
+    for (size_t i = 0; i < mHudBatches.size(); i++)
+    {
+        const HudBatch& b = mHudBatches[i];
+        if (C3D_GetCmdBufUsage() > 0.97f)
+        {
+            break;
+        }
+        if (b.scroll != inScroll)
+        {
+            C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, mUniProjection, b.scroll ? &scrolled : &mBottomProjection);
+            inScroll = b.scroll;
+        }
+        ApplyState(b.tex, b.state, b.scissor);
+        C3D_DrawArrays(GPU_TRIANGLES, b.start, b.count);
+        mOwner->mDrawCalls++;
+        mOwner->mVertices += (u32)b.count;
+    }
+    mHudBatches.clear();
+}
+
 void C3DRenderer::Impl::ApplyState(RTexture* pTex, u32 state, const ScreenRect& scissor)
 {
     if (!mStateValid || scissor != mAppliedScissor)
     {
-        // Mtx_OrthoTilt turns the screen: x runs down the 800 rows of the 480x800 target, y across its columns.
-        C3D_SetScissor(GPU_SCISSOR_NORMAL, kScreenH - scissor.y1, kScreenW - scissor.x1, kScreenH - scissor.y0, kScreenW - scissor.x0);
+        // Mtx_OrthoTilt turns the screen: x runs down the rows of the target (800 on top), y across its columns.
+        C3D_SetScissor(GPU_SCISSOR_NORMAL, mTargetH - scissor.y1, mTargetW - scissor.x1, mTargetH - scissor.y0, mTargetW - scissor.x0);
         mAppliedScissor = scissor;
     }
     if (!mStateValid || state != mAppliedState)
@@ -390,6 +573,8 @@ bool C3DRenderer::Init(Loader, const char** ppError)
     Impl* p = new Impl();
     p->mOwner = this;
     p->mTarget = pTarget;
+    p->mBottom = C3DContextBottomTarget();
+    Mtx_OrthoTilt(&p->mBottomProjection, 0.0f, (f32)kBottomW, (f32)kBottomH, 0.0f, 0.0f, 1.0f, true);
     p->mDvlb = DVLB_ParseFile((u32*)render_shbin, (u32)(render_shbin_end - render_shbin));
     p->mVerts = (C3DVertex*)linearAlloc(kMaxVerts * sizeof(C3DVertex));
     if (!p->mDvlb || !p->mVerts)
@@ -514,7 +699,7 @@ void C3DRenderer::Clear(u8 r, u8 g, u8 b, s32 left, s32 top, s32 right, s32 bott
         v[i].rhw = 1.0f;
         v[i].rgba = r | (g << 8) | (b << 16) | 0xFF000000u;
     }
-    mImpl->Append(v, 6, 0, RS_NO_TEXTURE, 0.0f, mImpl->mLogicalRect);
+    mImpl->Append(v, 6, 0, RS_NO_TEXTURE, 0.0f, mImpl->mLogicalRect, 0);
 }
 
 void C3DRenderer::CompositeSurface(const u16* pPixels, s32 pitchBytes, s32 width, s32 height, u16 key)
@@ -566,7 +751,7 @@ void C3DRenderer::CompositeSurface(const u16* pPixels, s32 pitchBytes, s32 width
         v[i].u = xs[i] / width;
         v[i].v = ys[i] / height;
     }
-    p->Append(v, 6, p->mSurface, RS_BLEND_ALPHA, 0.0f, p->mLogicalRect);
+    p->Append(v, 6, p->mSurface, RS_BLEND_ALPHA, 0.0f, p->mLogicalRect, 0);
 }
 
 void C3DRenderer::FinishFrame()
@@ -584,9 +769,13 @@ void C3DRenderer::Present(s32, s32)
     {
         return;
     }
-    // A frame without draws shows the target again.
+    // A frame without draws shows the targets again.
     mImpl->BeginFrame();
     mImpl->Flush();
+    if (p->mFrameDrew)
+    {
+        p->DrawHud();
+    }
     if (p->mVertCount > 0)
     {
         GSPGPU_FlushDataCache(p->mVerts, p->mVertCount * sizeof(C3DVertex));
@@ -717,7 +906,8 @@ void C3DRenderer::DrawTriangles(const RVertex* pVerts, s32 count, RTexture* pTex
         state |= RS_NO_TEXTURE;
     }
     mImpl->BeginFrame();
-    p->Append(pVerts, count, pTex, state & kBatchStateMask, (state & RS_PIXEL_EXACT) ? 0.0f : kPixelOffset, p->mClip);
+    const HudRule* pRule = p->mHudGroup ? PickRule(*p->mHudGroup, pVerts, count) : 0;
+    p->Append(pVerts, count, pTex, state & kBatchStateMask, (state & RS_PIXEL_EXACT) ? 0.0f : kPixelOffset, pRule ? pRule->slot : p->mClip, pRule);
 }
 
 void C3DRenderer::SetClipRect(f32 left, f32 top, f32 right, f32 bottom)
@@ -735,4 +925,21 @@ void C3DRenderer::SetClipRect(f32 left, f32 top, f32 right, f32 bottom)
     r.x1 = r.x1 < l.x1 ? r.x1 : l.x1;
     r.y1 = r.y1 < l.y1 ? r.y1 : l.y1;
     p->mClip = (r.x0 < r.x1 && r.y0 < r.y1) ? r : l;
+}
+
+bool C3DRenderer::SetHudGroup(s32 group)
+{
+    Impl* p = mImpl;
+    if (!p || !p->mBottom)
+    {
+        return false;
+    }
+    const bool hud = group > PortHudScreen::kWorld && group < PortHudScreen::kGroupCount;
+    p->mHudGroup = hud ? &kHudGroups[group] : 0;
+    return hud;
+}
+
+s32 C3DRenderer::HudScreenWidth() const
+{
+    return mImpl && mImpl->mBottom ? kBottomW : 0;
 }

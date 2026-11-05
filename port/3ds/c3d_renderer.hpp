@@ -48,6 +48,9 @@ class C3DRenderer : public IRenderer
     const RenderOptions& Options() const override { return mOptions; }
     void SetLights(const RLight*, s32, const f32*, f32) override {}
     u32 GetDrawCallCount() const override { return mDrawCalls; }
+    // The HUD's groups placed on the bottom screen, 1:1 in layout pixels.
+    bool SetHudGroup(s32 group) override;
+    s32 HudScreenWidth() const override;
     u32 GetUploadCount() const { return mUploads; }
     u32 GetVertexCount() const { return mVertices; }
 

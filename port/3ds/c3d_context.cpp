@@ -8,6 +8,7 @@ namespace
 const size_t kCmdBufSize = 0x100000;
 
 C3D_RenderTarget* gTarget;
+C3D_RenderTarget* gBottom;
 
 // gfxInit (done by SDL) set up the top screen; C3DRenderer::Present ends the citro3d frame, which
 // transfers the target to the screen and swaps, so SwapBuffers has nothing left to do.
@@ -16,6 +17,11 @@ class C3DContext : public IGLContext
   public:
     ~C3DContext()
     {
+        if (gBottom)
+        {
+            C3D_RenderTargetDelete(gBottom);
+            gBottom = 0;
+        }
         if (gTarget)
         {
             C3D_RenderTargetDelete(gTarget);
@@ -37,6 +43,11 @@ class C3DContext : public IGLContext
 C3D_RenderTarget* C3DContextTarget()
 {
     return gTarget;
+}
+
+C3D_RenderTarget* C3DContextBottomTarget()
+{
+    return gBottom;
 }
 
 // citro3d draws to the screen directly: no OpenGL window.
@@ -68,5 +79,14 @@ IGLContext* CreateGLContext(SDL_Window*, const char** ppError)
     const u32 flags = GX_TRANSFER_FLIP_VERT(0) | GX_TRANSFER_OUT_TILED(0) | GX_TRANSFER_RAW_COPY(0) | GX_TRANSFER_IN_FORMAT(GX_TRANSFER_FMT_RGBA8) |
                       GX_TRANSFER_OUT_FORMAT(gfxGetScreenFormat(GFX_TOP)) | GX_TRANSFER_SCALING(GX_TRANSFER_SCALE_XY);
     C3D_RenderTargetSetOutput(gTarget, GFX_TOP, GFX_LEFT, flags);
+    // SDL draws nothing on the bottom screen: no window is on it.
+    gBottom = C3D_RenderTargetCreate(240, 320, GPU_RB_RGBA8, -1);
+    if (gBottom)
+    {
+        const u32 bottomFlags = GX_TRANSFER_FLIP_VERT(0) | GX_TRANSFER_OUT_TILED(0) | GX_TRANSFER_RAW_COPY(0) |
+                                GX_TRANSFER_IN_FORMAT(GX_TRANSFER_FMT_RGBA8) | GX_TRANSFER_OUT_FORMAT(gfxGetScreenFormat(GFX_BOTTOM)) |
+                                GX_TRANSFER_SCALING(GX_TRANSFER_SCALE_NO);
+        C3D_RenderTargetSetOutput(gBottom, GFX_BOTTOM, GFX_LEFT, bottomFlags);
+    }
     return new C3DContext();
 }

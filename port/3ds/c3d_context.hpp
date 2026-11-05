@@ -6,3 +6,5 @@
 
 // Null until CreateGLContext has succeeded.
 C3D_RenderTarget* C3DContextTarget();
+// The bottom screen's target (240x320, rotated, 1:1), for the HUD.
+C3D_RenderTarget* C3DContextBottomTarget();
