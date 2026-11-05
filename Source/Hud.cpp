@@ -5,6 +5,11 @@
 #include "../port/src/view.hpp"
 #include "../port/src/day_night.hpp"
 #include "../port/src/twin_stick.hpp"
+#include "../port/src/hud_screen.hpp"
+// The groups a HUD screen of its own (the 3DS's bottom one) shows.
+#define HUD_GROUP(group) PortHudScreen::SetGroup(PortHudScreen::group)
+#else
+#define HUD_GROUP(group)
 #endif
 #include "hud_message_priority.hpp"
 #include "hud_brief_priority.hpp"
@@ -2154,6 +2159,9 @@ size_t Hud_Brief::FormatCurrentBrief()
     LOCAL_STATIC_INIT(s32, sMaxLineWidth, 576, 0x62689C);
     size_t num_chars;
     char_type brief_face_idx;
+#if defined(GTA2_PORT)
+    sMaxLineWidth = PortHudScreen::BriefLineWidth(576);
+#endif
 
     if (mCurrBriefs)
     {
@@ -3369,9 +3377,11 @@ void Hud::DrawGui()
     if (!bSkip_user)
     {
         SetFullAmbient();
+        HUD_GROUP(kStats);
         mPlayerStats.DrawPlayerStats();
 #if defined(GTA2_PORT)
         PortDayNight::DrawClock();
+        HUD_GROUP(kWorld);
         PortTwinStick::DrawReticle();
         PortView::SetTurn(PortView::kMarkers);
         mUnderRoofArrowMarker.Draw();
@@ -3380,14 +3390,21 @@ void Hud::DrawGui()
         mUnderRoofArrowMarker.Draw();
 #endif
         mPlayerNames.DrawPlayerNames();
+        HUD_GROUP(kWanted);
         mWantedLevel.DrawWantedLevel();
+        HUD_GROUP(kGangs);
         mGangRespectBars.DrawGangRespectBars();
+        HUD_GROUP(kStats);
         mHealth.DrawHealth();
+        HUD_GROUP(kWorld);
         mZoneName.DrawZoneName();
         mCarName.DrawCarName();
         mPickupText.Draw();
+        HUD_GROUP(kBrief);
         mBrief.DrawBrief();
+        HUD_GROUP(kPagers);
         mPagers.DrawPagers();
+        HUD_GROUP(kWorld);
         mTexts.Service();
 #if defined(GTA2_PORT)
         PortView::SetTurn(PortView::kMarkers);

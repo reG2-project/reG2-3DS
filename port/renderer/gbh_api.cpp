@@ -1139,6 +1139,17 @@ void port_SetAmbient(f32 r, f32 g, f32 b, f32 lights)
     gLightsDirty = true;
 }
 
+// The HUD's groups (port/src/hud_screen.hpp), for a renderer with a screen of its own for the HUD.
+bool port_SetHudGroup(s32 group)
+{
+    return gRenderer && gRenderer->SetHudGroup(group);
+}
+
+s32 port_HudScreenWidth()
+{
+    return gRenderer ? gRenderer->HudScreenWidth() : 0;
+}
+
 // TWIN STICK's reticle (port/src/twin_stick.cpp): an aged bronze ring round a red lamp, shaded as the HUD's sprites
 // (lit from the top left), size pixels wide at (x, y).
 void port_DrawReticle(f32 x, f32 y, f32 size, f32 alpha)

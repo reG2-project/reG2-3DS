@@ -4,6 +4,7 @@
 #include "Player.hpp"
 #include "Camera.hpp"
 #include "pause_menu.hpp"
+#include "hud_screen.hpp"
 #include "settings.hpp"
 
 bool port_GameRunning()
@@ -51,11 +52,19 @@ f32 Offset(f32 pos, f32 layoutSize, s32 screenSize)
 
 Fix16 PortUiX(Fix16 x)
 {
+    if (PortHudScreen::LayoutPixels())
+    {
+        return x;
+    }
     return FromF(ToF(x) * ToF(gViewCamera->mUiScale) + Offset(ToF(x), 640.0f, gViewCamera->mScreenPxWidth));
 }
 
 Fix16 PortUiY(Fix16 y)
 {
+    if (PortHudScreen::LayoutPixels())
+    {
+        return y;
+    }
     return FromF(ToF(y) * ToF(gViewCamera->mUiScale) + Offset(ToF(y), 480.0f, gViewCamera->mScreenPxHeight));
 }
 
@@ -63,6 +72,10 @@ Fix16 PortUiY(Fix16 y)
 // decides, so text beside a face or an icon keeps its place.
 Fix16 PortUiStringX(const wchar_t* pStr, Fix16 x, u16 font)
 {
+    if (PortHudScreen::LayoutPixels())
+    {
+        return x;
+    }
     const f32 width = static_cast<f32>(Frontend::GetMaxTextWidth(const_cast<wchar_t*>(pStr), font));
     const f32 start = ToF(x);
     const f32 centred = (640.0f - width) / 2;
