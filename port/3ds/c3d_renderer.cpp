@@ -22,6 +22,7 @@ struct RTexture
     f32 mScaleV;
     u32 mUsedFrame; // last frame that drew it, 0 for none
     bool mPremultiplied; // colours times alpha: blended with ONE, 1 - alpha
+    u8 mLevels;          // mip levels after the first
 };
 
 namespace
@@ -43,8 +44,9 @@ const s32 kBottomH = 240;
 const s32 kMaxTexSize = 1024;
 // GLRenderer's default vertex offset: D3D pixel centres are on integers, the PICA's on halves.
 const f32 kPixelOffset = 0.5f - 1.0f / 2048.0f;
-// Batch state only: the batch's texture is premultiplied.
+// Batch state only: the batch's texture is premultiplied; its draws sample the first mip level only.
 const u32 kStatePremultiplied = 1u << 31;
+const u32 kStateNoMip = 1u << 30;
 const u32 kBatchStateMask = RS_ALPHA_TEST | RS_BLEND_ALPHA | RS_BLEND_ADD | RS_FILTER_LINEAR | RS_NO_TEXTURE;
 
 // Morton order of the low 3 bits of x inside an 8x8 tile; y's bits go one place higher.
@@ -107,6 +109,101 @@ GPU_TEXCOLOR PickFormat(const u32* pRgba, size_t count)
         return GPU_RGBA4;
     }
     return opaque ? GPU_RGB565 : GPU_RGBA5551;
+}
+
+// Texels into a level of a texture of format fmt.
+void WriteLevel(void* pData, GPU_TEXCOLOR fmt, s32 tw, s32 th, const u32* pSrc, s32 width, s32 height, s32 cw, s32 ch)
+{
+    switch (fmt)
+    {
+    case GPU_RGB565:
+        WriteTiles((u16*)pData, tw, th, pSrc, width, height, cw, ch, [](u32 c) {
+            return (u16)((((c >> 3) & 0x1F) << 11) | (((c >> 10) & 0x3F) << 5) | ((c >> 19) & 0x1F));
+        });
+        break;
+    case GPU_RGBA4:
+        WriteTiles((u16*)pData, tw, th, pSrc, width, height, cw, ch, [](u32 c) {
+            return (u16)((((c >> 4) & 0xF) << 12) | (((c >> 12) & 0xF) << 8) | (((c >> 20) & 0xF) << 4) | (c >> 28));
+        });
+        break;
+    case GPU_RGBA5551:
+        WriteTiles((u16*)pData, tw, th, pSrc, width, height, cw, ch, [](u32 c) {
+            return (u16)((((c >> 3) & 0x1F) << 11) | (((c >> 11) & 0x1F) << 6) | (((c >> 19) & 0x1F) << 1) | (c >> 31));
+        });
+        break;
+    default:
+        WriteTiles((u32*)pData, tw, th, pSrc, width, height, cw, ch, [](u32 c) { return __builtin_bswap32(c); });
+        break;
+    }
+}
+
+// x / 255 rounded, for x up to 255 * 255, without a division (the ARM11 has none).
+u32 Div255(u32 x)
+{
+    x += 128;
+    return (x + (x >> 8)) >> 8;
+}
+
+// A channel rounded to the nearest value of `bits` bits, expanded back by replication as the GPU does.
+u32 RoundChannel(u32 v, s32 bits)
+{
+    if (bits == 1)
+    {
+        return v >= 128 ? 255 : 0;
+    }
+    const u32 q = Div255(v * ((1u << bits) - 1));
+    return (q << (8 - bits)) | (q >> (2 * bits - 8));
+}
+
+// The next mip level: each 2x2 block averaged, rounded to what fmt holds so its truncating writes are exact.
+void HalveLevel(u32* pDst, const u32* pSrc, s32 w, s32 h, GPU_TEXCOLOR fmt)
+{
+    static const s8 kBits[][4] = {{8, 8, 8, 8}, {8, 8, 8, 0}, {5, 5, 5, 1}, {5, 6, 5, 0}, {4, 4, 4, 4}};
+    const s8* bits = kBits[fmt <= GPU_RGBA4 ? fmt : 0];
+    for (s32 y = 0; y < h / 2; y++)
+    {
+        const u32* p0 = pSrc + (size_t)(2 * y) * w;
+        const u32* p1 = p0 + w;
+        for (s32 x = 0; x < w / 2; x++)
+        {
+            const u32 a = p0[2 * x], b = p0[2 * x + 1], c = p1[2 * x], d = p1[2 * x + 1];
+            u32 out = 0;
+            for (s32 k = 0; k < 4; k++)
+            {
+                const s32 sh = 8 * k;
+                u32 v = (((a >> sh) & 0xFF) + ((b >> sh) & 0xFF) + ((c >> sh) & 0xFF) + ((d >> sh) & 0xFF) + 2) >> 2;
+                v = bits[k] == 8 ? v : bits[k] == 0 ? 255 : RoundChannel(v, bits[k]);
+                out |= v << sh;
+            }
+            pDst[(size_t)y * (w / 2) + x] = out;
+        }
+    }
+}
+
+// The draw maps texels 1:1 onto logical pixels, axis aligned and without perspective.
+bool OneToOne(const RVertex* pVerts, s32 count, const RTexture* pTex)
+{
+    if (!pTex || count < 3 || pVerts[0].rhw != pVerts[1].rhw || pVerts[0].rhw != pVerts[2].rhw)
+    {
+        return false;
+    }
+    const f32 tw = pTex->mScaleU * pTex->mTex.width, th = pTex->mScaleV * pTex->mTex.height;
+    const f32 x1 = pVerts[1].x - pVerts[0].x, y1 = pVerts[1].y - pVerts[0].y;
+    const f32 x2 = pVerts[2].x - pVerts[0].x, y2 = pVerts[2].y - pVerts[0].y;
+    const f32 u1 = (pVerts[1].u - pVerts[0].u) * tw, v1 = (pVerts[1].v - pVerts[0].v) * th;
+    const f32 u2 = (pVerts[2].u - pVerts[0].u) * tw, v2 = (pVerts[2].v - pVerts[0].v) * th;
+    const f32 det = x1 * y2 - x2 * y1;
+    if (fabsf(det) < 1.0f)
+    {
+        return false;
+    }
+    // Texels per logical pixel along x and y.
+    const f32 dudx = (u1 * y2 - u2 * y1) / det, dudy = (u2 * x1 - u1 * x2) / det;
+    const f32 dvdx = (v1 * y2 - v2 * y1) / det, dvdy = (v2 * x1 - v1 * x2) / det;
+    const f32 e = 0.01f;
+    const bool straight = fabsf(fabsf(dudx) - 1.0f) < e && fabsf(dudy) < e && fabsf(dvdx) < e && fabsf(fabsf(dvdy) - 1.0f) < e;
+    const bool turned = fabsf(dudx) < e && fabsf(fabsf(dudy) - 1.0f) < e && fabsf(fabsf(dvdx) - 1.0f) < e && fabsf(dvdy) < e;
+    return straight || turned;
 }
 
 struct ScreenRect
@@ -223,6 +320,7 @@ struct C3DRenderer::Impl : HudTheme::Sink
     ScreenRect mAppliedScissor;
     C3D_Tex* mBoundTex;
     u32 mBoundParam;
+    u32 mBoundLod;
 
     // Set while the group being drawn goes to the bottom screen: its batches wait for the end of the frame.
     const HudGroupRules* mHudGroup;
@@ -257,6 +355,7 @@ struct C3DRenderer::Impl : HudTheme::Sink
     RTexture* mWhite;
     RTexture* mSurface;
     std::vector<u32> mConverted; // UploadTexture's texels after premultiplying
+    std::vector<u32> mLevel;     // and its mip levels being made
     bool mWarnedVerts, mWarnedCmdBuf, mWarnedAlloc;
     C3DRenderer* mOwner;
 
@@ -268,16 +367,17 @@ struct C3DRenderer::Impl : HudTheme::Sink
     void DrawHud();
     void DrawQuads(const HudTheme::Quad* pQuads, s32 count, RTexture* pTex, u32 state) override;
     void ApplyState(RTexture* pTex, u32 state, const ScreenRect& scissor);
-    bool Allocate(RTexture* pTex, s32 tw, s32 th, GPU_TEXCOLOR fmt, bool clear);
+    bool Allocate(RTexture* pTex, s32 tw, s32 th, GPU_TEXCOLOR fmt, s32 levels, bool clear);
 };
 
 // Storage for new texels: kept when the GPU is done with it and it has the size and format, else replaced.
-bool C3DRenderer::Impl::Allocate(RTexture* pTex, s32 tw, s32 th, GPU_TEXCOLOR fmt, bool clear)
+bool C3DRenderer::Impl::Allocate(RTexture* pTex, s32 tw, s32 th, GPU_TEXCOLOR fmt, s32 levels, bool clear)
 {
     if (pTex->mValid)
     {
         const bool inFlight = pTex->mUsedFrame == mFrame;
-        if (!inFlight && pTex->mTex.width == tw && pTex->mTex.height == th && pTex->mTex.fmt == fmt)
+        pTex->mTex.maxLevel = pTex->mLevels;
+        if (!inFlight && pTex->mTex.width == tw && pTex->mTex.height == th && pTex->mTex.fmt == fmt && pTex->mLevels == levels)
         {
             return true;
         }
@@ -295,7 +395,8 @@ bool C3DRenderer::Impl::Allocate(RTexture* pTex, s32 tw, s32 th, GPU_TEXCOLOR fm
     {
         mBoundTex = 0;
     }
-    if (!C3D_TexInit(&pTex->mTex, (u16)tw, (u16)th, fmt))
+    const C3D_TexInitParams params = {(u16)tw, (u16)th, (u8)levels, fmt, GPU_TEX_2D, false};
+    if (!C3D_TexInitWithParams(&pTex->mTex, NULL, params))
     {
         if (!mWarnedAlloc)
         {
@@ -309,6 +410,7 @@ bool C3DRenderer::Impl::Allocate(RTexture* pTex, s32 tw, s32 th, GPU_TEXCOLOR fm
         memset(pTex->mTex.data, 0, pTex->mTex.size);
     }
     C3D_TexSetWrap(&pTex->mTex, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
+    pTex->mLevels = (u8)levels;
     pTex->mValid = true;
     pTex->mUsedFrame = 0;
     return true;
@@ -382,6 +484,10 @@ void C3DRenderer::Impl::Append(const RVertex* pVerts, s32 count, RTexture* pTex,
     {
         // Nearest sampling at half size would drop every other texel.
         state |= RS_FILTER_LINEAR;
+    }
+    else
+    {
+        state |= kStateNoMip;
     }
     if (mVertCount > mBatchStart && (pTex != mBatchTex || state != mBatchState || scissor != mBatchScissor || pRule != mBatchRule))
     {
@@ -622,11 +728,14 @@ void C3DRenderer::Impl::ApplyState(RTexture* pTex, u32 state, const ScreenRect& 
     RTexture* pBind = pTex ? pTex : mWhite;
     const GPU_TEXTURE_FILTER_PARAM filter = (state & RS_FILTER_LINEAR) ? GPU_LINEAR : GPU_NEAREST;
     C3D_TexSetFilter(&pBind->mTex, filter, filter);
-    if (mBoundTex != &pBind->mTex || mBoundParam != pBind->mTex.param)
+    C3D_TexSetFilterMipmap(&pBind->mTex, GPU_LINEAR);
+    pBind->mTex.maxLevel = (state & kStateNoMip) ? 0 : pBind->mLevels;
+    if (mBoundTex != &pBind->mTex || mBoundParam != pBind->mTex.param || mBoundLod != pBind->mTex.lodParam)
     {
         C3D_TexBind(0, &pBind->mTex);
         mBoundTex = &pBind->mTex;
         mBoundParam = pBind->mTex.param;
+        mBoundLod = pBind->mTex.lodParam;
     }
 }
 
@@ -800,7 +909,7 @@ void C3DRenderer::CompositeSurface(const u16* pPixels, s32 pitchBytes, s32 width
     // Begun first: the GPU is then done with the previous frame's surface, which is rewritten in place.
     p->BeginFrame();
     RTexture* pTex = p->mSurface;
-    if (!p->Allocate(pTex, Pow2(width), Pow2(height), GPU_RGBA5551, true))
+    if (!p->Allocate(pTex, Pow2(width), Pow2(height), GPU_RGBA5551, 0, true))
     {
         return;
     }
@@ -906,39 +1015,58 @@ void C3DRenderer::UploadTexture(RTexture* pTex, s32 width, s32 height, const u32
         for (size_t i = 0; i < n; i++)
         {
             const u32 c = pRgba[i], a = c >> 24;
-            const u32 r = ((c & 0xFF) * a + 127) / 255, g = (((c >> 8) & 0xFF) * a + 127) / 255, b = (((c >> 16) & 0xFF) * a + 127) / 255;
+            const u32 r = Div255((c & 0xFF) * a), g = Div255(((c >> 8) & 0xFF) * a), b = Div255(((c >> 16) & 0xFF) * a);
             p->mConverted[i] = r | (g << 8) | (b << 16) | (a << 24);
         }
         pRgba = &p->mConverted[0];
     }
     pTex->mPremultiplied = premultiply;
-    const GPU_TEXCOLOR fmt = PickFormat(pRgba, n);
-    if (!p->Allocate(pTex, tw, th, fmt, false))
+    GPU_TEXCOLOR fmt = PickFormat(pRgba, n);
+    // The game's textures get mip levels down to 8x8, for the world drawn smaller than 1:1 on the top screen.
+    const s32 levels = mipmaps == RMIP_NONE ? 0 : C3D_TexCalcMaxLevel(tw, th);
+    if (levels > 0 && premultiply && fmt == GPU_RGBA5551)
+    {
+        // Averaged edges need more than one bit of alpha.
+        fmt = GPU_RGBA4;
+    }
+    if (!p->Allocate(pTex, tw, th, fmt, levels, false))
     {
         return;
     }
     mUploads++;
-    void* pData = pTex->mTex.data;
-    switch (fmt)
+    if (levels == 0)
     {
-    case GPU_RGB565:
-        WriteTiles((u16*)pData, tw, th, pRgba, width, height, cw, ch, [](u32 c) {
-            return (u16)((((c >> 3) & 0x1F) << 11) | (((c >> 10) & 0x3F) << 5) | ((c >> 19) & 0x1F));
-        });
-        break;
-    case GPU_RGBA4:
-        WriteTiles((u16*)pData, tw, th, pRgba, width, height, cw, ch, [](u32 c) {
-            return (u16)((((c >> 4) & 0xF) << 12) | (((c >> 12) & 0xF) << 8) | (((c >> 20) & 0xF) << 4) | (c >> 28));
-        });
-        break;
-    case GPU_RGBA5551:
-        WriteTiles((u16*)pData, tw, th, pRgba, width, height, cw, ch, [](u32 c) {
-            return (u16)((((c >> 3) & 0x1F) << 11) | (((c >> 11) & 0x1F) << 6) | (((c >> 19) & 0x1F) << 1) | (c >> 31));
-        });
-        break;
-    default:
-        WriteTiles((u32*)pData, tw, th, pRgba, width, height, cw, ch, [](u32 c) { return __builtin_bswap32(c); });
-        break;
+        WriteLevel(pTex->mTex.data, fmt, tw, th, pRgba, width, height, cw, ch);
+    }
+    else
+    {
+        // Level 0 padded to the texture's size, then each level halved from the one before.
+        std::vector<u32>& level = p->mLevel;
+        level.resize((size_t)tw * th + (size_t)tw * th / 4);
+        for (s32 y = 0; y < th; y++)
+        {
+            const s32 cy = y < ch ? y : ch - 1;
+            const u32* pRow = pRgba + (size_t)(ch == height ? cy : (s32)((long long)cy * height / ch)) * width;
+            for (s32 x = 0; x < tw; x++)
+            {
+                const s32 cx = x < cw ? x : cw - 1;
+                level[(size_t)y * tw + x] = pRow[cw == width ? cx : (s32)((long long)cx * width / cw)];
+            }
+        }
+        u32* pCur = &level[0];
+        u32* pNext = pCur + (size_t)tw * th;
+        for (s32 l = 0; l <= levels; l++)
+        {
+            const s32 w = tw >> l, h = th >> l;
+            WriteLevel(C3D_Tex2DGetImagePtr(&pTex->mTex, l, NULL), fmt, w, h, pCur, w, h, w, h);
+            if (l < levels)
+            {
+                HalveLevel(pNext, pCur, w, h, fmt);
+                u32* pTmp = pCur;
+                pCur = pNext;
+                pNext = pTmp;
+            }
+        }
     }
     C3D_TexFlush(&pTex->mTex);
     Stats3DS_AddUpload(svcGetSystemTick() - t0);
@@ -1013,7 +1141,9 @@ void C3DRenderer::DrawTriangles(const RVertex* pVerts, s32 count, RTexture* pTex
     // On the top screen, no offset puts the pixel centres where the game's 2x2 pixel blocks meet: on the texel
     // corners of its 1:1 quads, where bilinear filtering averages the 4 texels.
     const bool exact = (state & RS_PIXEL_EXACT) || !pRule;
-    p->Append(pVerts, count, pTex, state & kBatchStateMask, exact ? 0.0f : kPixelOffset, pRule ? pRule->slot : p->mClip, pRule);
+    // There, a 1:1 quad samples its first level: on the texel corners, that is the exact average.
+    const u32 noMip = !pRule && OneToOne(pVerts, count, pTex) ? kStateNoMip : 0;
+    p->Append(pVerts, count, pTex, (state & kBatchStateMask) | noMip, exact ? 0.0f : kPixelOffset, pRule ? pRule->slot : p->mClip, pRule);
 }
 
 void C3DRenderer::SetClipRect(f32 left, f32 top, f32 right, f32 bottom)
