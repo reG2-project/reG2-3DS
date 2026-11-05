@@ -59,10 +59,16 @@ target_link_libraries(gta2 PRIVATE SDL3::SDL3-static ${opendsp} citro3d ctru m)
 # test_pad.cpp adds scripted buttons to what SDL reads.
 target_link_options(gta2 PRIVATE -Wl,--wrap=hidScanInput,--wrap=hidKeysDown,--wrap=hidKeysUp)
 
+# The Homebrew Launcher's title, description, author and 48x48 icon.
+set(icon ${CMAKE_CURRENT_BINARY_DIR}/icon.png)
+add_custom_command(OUTPUT ${icon}
+    COMMAND python3 ${CMAKE_CURRENT_LIST_DIR}/make_icon.py ${icon}
+    DEPENDS ${CMAKE_CURRENT_LIST_DIR}/make_icon.py VERBATIM)
 set(smdh ${CMAKE_CURRENT_BINARY_DIR}/gta2.smdh)
 add_custom_command(OUTPUT ${smdh}
-    COMMAND ${DEVKITPRO}/tools/bin/smdhtool --create "GTA2" "Grand Theft Auto 2 (gta2_re port)" "gta2_re" ${CTR_ROOT}/default_icon.png ${smdh}
-    VERBATIM)
+    COMMAND ${DEVKITPRO}/tools/bin/smdhtool --create "GTA2" "Grand Theft Auto 2, from the gta2_re decompilation. Needs the PC game's data."
+            "gta2_re" ${icon} ${smdh}
+    DEPENDS ${icon} VERBATIM)
 add_custom_command(OUTPUT gta2.3dsx
     COMMAND ${DEVKITPRO}/tools/bin/3dsxtool $<TARGET_FILE:gta2> gta2.3dsx --smdh=${smdh}
     DEPENDS gta2 ${smdh} VERBATIM)
