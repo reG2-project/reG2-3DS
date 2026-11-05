@@ -1,4 +1,4 @@
-// The HUD screen's backdrop: a recessed panel behind each HUD part drawn.
+// The HUD screen's backdrop: a dark textured background and a recessed panel behind each HUD part drawn.
 #pragma once
 
 #include "types.hpp"
@@ -42,4 +42,5 @@ class Sink
 
 // Draws the backdrop of a frame whose HUD drew in `parts` (a bit per Part); pPanels[part] is each part's panel.
 void Draw(IRenderer& renderer, Sink& sink, const Rect* pPanels, u32 parts);
+void Shutdown(IRenderer& renderer);
 } // namespace HudTheme

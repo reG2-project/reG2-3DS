@@ -674,6 +674,7 @@ void C3DRenderer::Shutdown()
         C3D_FrameEnd(0);
         p->mInFrame = false;
     }
+    HudTheme::Shutdown(*this);
     FreeTexture(p->mSurface);
     p->mSurface = 0;
     FreeTexture(p->mWhite);
