@@ -236,9 +236,14 @@ FRAME LIMIT 30 ORIGINAL, walking):
 Before the fixes below bil drew 15 frames per second. A sampling profile through Azahar's GDB stub
 found the time in the port, not the game: the car lamps scanned delta images for every car in the
 pool every frame (now cached, cars off screen skipped), the CPU surface was refilled and scanned every
-frame (now only after a frame drew on it), and SDL's gamepad reads take a lock per call, a system call
-each on the 3DS (left as is: about 1 to 2 % on hardware by the profile's estimate). Logic runs at the
-original's 30.3 steps per second throughout. The system core runs the sound (see Sound).
+frame (now only after a frame drew on it, and not at all in game, where nothing writes it), and SDL's
+gamepad reads take a lock per call, a system call each on the 3DS (now each button and axis is read
+once per update, and the pad bindings once from the registry). Night lighting tests each primitive's
+vertices against the lights in its reach only. Logic runs at the original's 30.3 steps per second
+throughout. A second profile (walking and driving, day and night) put the main thread's CPU time at
+12 to 14 ms per frame in Azahar: about 3 ms logic, 5 to 7 ms drawing, 3 to 4 ms input polling.
+Remaining leads: texture uploads while driving (up to six passes per texture, 1 to 2 ms spikes),
+one pad update per frame, fewer draw calls (about 100 per frame) with a tile atlas. The system core runs the sound (see Sound).
 
 On the 3DS any per-frame file access is expensive: each path component of an `fopen`, `access` or
 `stat` is a request to the FS service (tens of milliseconds in Azahar). The pause menu and the
