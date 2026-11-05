@@ -135,6 +135,8 @@ The game folder is the `.3dsx`'s own folder when it holds `data/fstyle.sty` (fro
 Homebrew Launcher passes as `argv[0]`, which libctru sets before the constructors), else `sdmc:/3ds/gta2/`:
 `data/` (without `GTAudio` and `Movie`, about 65 MB), `gta2_registry.ini`, `player/` (the saves), `test/`.
 Without the data in either, the top screen lists the folders tried and the files expected until START.
+The game's own error boxes (a missing city file, for example), which SDL cannot show on the 3DS, appear on
+the bottom screen until START (`--wrap=SDL_ShowSimpleMessageBox`) rather than the game closing silently.
 The port's log is `gta2_log.txt` there (stderr and SDL's log).
 `gta2_env.txt` there sets environment variables, one `KEY=VALUE` per line: `GTA2_3DS_STATS=150` logs
 memory and renderer times every 150 frames, `GTA2_LOOP_STATS=1` steps, frames and their times,

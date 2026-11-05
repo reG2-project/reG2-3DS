@@ -2,9 +2,11 @@
 #include "../setup/setup.hpp"
 #include <3ds.h>
 #include <SDL3/SDL_log.h>
+#include <SDL3/SDL_messagebox.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/iosupport.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <string>
@@ -186,6 +188,35 @@ static void ShowError(const char* text)
         gspWaitForVBlank();
     }
     gfxExit();
+}
+
+// The game's error boxes, as SDL has no message box on the 3DS: on the bottom screen until START.
+// Linked with --wrap=SDL_ShowSimpleMessageBox.
+extern "C" bool __wrap_SDL_ShowSimpleMessageBox(SDL_MessageBoxFlags, const char* title, const char* message, SDL_Window*)
+{
+    const GSPGPU_FramebufferFormat format = gfxGetScreenFormat(GFX_BOTTOM);
+    const devoptab_t* pStdout = devoptab_list[STD_OUT];
+    const devoptab_t* pStderr = devoptab_list[STD_ERR];
+    static PrintConsole sConsole;
+    consoleInit(GFX_BOTTOM, &sConsole);
+    printf("\x1b[31m%s\x1b[0m\n\n%s\n\nPress START.", title ? title : "GTA2", message ? message : "");
+    while (aptMainLoop())
+    {
+        hidScanInput();
+        if (hidKeysDown() & KEY_START)
+        {
+            break;
+        }
+        gfxFlushBuffers();
+        gspWaitForVBlank();
+    }
+    // Back to what SDL and citro3d set up, in case the game goes on.
+    consoleClear();
+    devoptab_list[STD_OUT] = pStdout;
+    devoptab_list[STD_ERR] = pStderr;
+    gfxSetScreenFormat(GFX_BOTTOM, format);
+    gfxSetDoubleBuffering(GFX_BOTTOM, true);
+    return true;
 }
 
 // Before main.cpp's EnterGameFolderAtStart (101) and the game's constructors.
