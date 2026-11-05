@@ -65,12 +65,15 @@ u32 sDrawSteps;
 u32 sMaxFps = 30;
 
 // GTA2_LOOP_TRACE=<file>: the player's position after each step, the drawn camera and player each frame.
-// GTA2_LOOP_STATS=1: steps and frames per second on stderr.
+// GTA2_LOOP_STATS=1: steps and frames per second, and the time each takes, on stderr.
 FILE* spTrace;
 bool sStats;
 u32 sStepCount;
 u32 sStatsSteps;
 u32 sStatsDraws;
+unsigned long long sStatsStepNs;
+unsigned long long sStatsDrawNs;
+unsigned long long sStatsT0;
 unsigned long long sStatsStart;
 
 bool Original()
@@ -117,12 +120,15 @@ void Stats(unsigned long long now)
         u32 jumped;
         u32 snapped;
         PortInterp::TakeCounts(&moved, &jumped, &snapped);
-        fprintf(stderr, "loop: %.2f steps/s, %.1f frames/s (frame limit %u), sprites per frame: %.1f in between, %.2f jumped, %.2f snapped round\n",
-                sStatsSteps / seconds, sStatsDraws / seconds, sMaxFps, moved / (f64)(sStatsDraws ? sStatsDraws : 1),
+        fprintf(stderr, "loop: %.2f steps/s, %.1f frames/s (frame limit %u), %.2f ms per step, %.2f ms per draw, sprites per frame: %.1f in between, %.2f jumped, %.2f snapped round\n",
+                sStatsSteps / seconds, sStatsDraws / seconds, sMaxFps, sStatsStepNs / 1e6 / (sStatsSteps ? sStatsSteps : 1),
+                sStatsDrawNs / 1e6 / (sStatsDraws ? sStatsDraws : 1), moved / (f64)(sStatsDraws ? sStatsDraws : 1),
                 jumped / (f64)(sStatsDraws ? sStatsDraws : 1), snapped / (f64)(sStatsDraws ? sStatsDraws : 1));
         sStatsStart = now;
         sStatsSteps = 0;
         sStatsDraws = 0;
+        sStatsStepNs = 0;
+        sStatsDrawNs = 0;
     }
 }
 } // namespace
@@ -213,6 +219,7 @@ Action Next(s32 stepMs, bool forceStep, bool noDraw)
 
 void BeforeStep()
 {
+    sStatsT0 = sStats ? port_NowNs() : 0;
     PortInterp::Snapshot();
     PortView::Snapshot();
 }
@@ -222,6 +229,7 @@ void AfterStep()
     sStepsSinceDraw++;
     sStepCount++;
     sStatsSteps++;
+    sStatsStepNs += sStats ? port_NowNs() - sStatsT0 : 0;
     port_CountGameStep();
     PortView::Step();
     Trace('S');
@@ -229,6 +237,7 @@ void AfterStep()
 
 void BeginDraw()
 {
+    sStatsT0 = sStats ? port_NowNs() : 0;
     sInDraw = true;
     sDrawSteps = sStepsSinceDraw;
     if (!Original())
@@ -248,6 +257,7 @@ void EndDraw()
     sStepsSinceDraw = 0;
     sInDraw = false;
     sStatsDraws++;
+    sStatsDrawNs += sStats ? port_NowNs() - sStatsT0 : 0;
 }
 
 u32 StepsBeforeDraw()
