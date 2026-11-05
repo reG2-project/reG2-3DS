@@ -65,11 +65,15 @@ as RGBA8 from the gbh_* layer and are stored in the smallest exact PICA format (
 RGB5A1, else RGBA8), padded to a power of two. The CPU surface is composited through an RGB5A1
 texture. One frame of vertices lives in linear memory; texture frees wait for the GPU.
 
-The top screen is drawn at the game's 800x480 into a 480x800 target, and the display transfer averages
-each 2x2 block onto the 400x240 screen: every texel is drawn, thin lines and small text survive as half
-tones and the world does not shimmer. Drawing straight at half size, with nearest sampling, lost
-alternate pixels. The fill rate is four times that of the screen; only hardware can tell its cost
-(Azahar does not time the GPU). A cheaper fallback would be 800x240, halving only x.
+The top screen is drawn at 400x240: the game's 800x480 scaled by half, with no vertex offset and bilinear
+filtering, so the game's 1:1 quads (menus, text) come out as the exact 2x2 average of their texels.
+Blended textures are premultiplied at upload, so filtered edges take no colour from transparent texels.
+The game's tiles, sprites and fonts carry mip levels made on the CPU at upload (a third more texture
+memory, 0.2 to 0.6 MB in the cities), sampled trilinearly, except 1:1 draws and the HUD; the world then
+neither shimmers nor drops texels. What is lost against a 2x2 supersampled image: polygon edges are not
+antialiased (the PICA200 has no MSAA), the overhead wires (lines in transparent tiles) break up in
+places, and walls seen at a steep angle go soft (isotropic mip selection). The top screen fills about
+0.15 to 0.28 Mpixels per frame with overdraw, a small part of the PICA200's rated 4 pixels per clock.
 
 The game keeps its 480 lines rather than drawing at 400x240: its menus are laid out for 640x480, its
 fonts are bitmaps of a fixed size, and its camera shows the area of a 480-line screen. At 400x240 the
@@ -79,10 +83,12 @@ unless the camera zoomed out (sampling textures at half size again).
 The HUD is on the bottom screen at its own pixel size. `Hud::DrawGui` marks its element groups
 (`port/src/hud_screen.*`, `HUD_GROUP` in `Source/Hud.cpp`); a renderer with a HUD screen
 (`IRenderer::SetHudGroup`, `HudScreenWidth`) takes those draws, in 640x480 layout pixels, and places each
-group on the 320x240 screen; the mission brief wraps to its width and scrolls when longer. The world
-stays on the top screen, with the zone and car names, pickup texts, big messages and arrows. The
-frontend and the pause menu stay on the top screen; their text is legible after the 2x2 averaging, but
-small (4 to 5 pixels high).
+group in a panel of a fixed grid on the 320x240 screen (`kHudPanels`); the mission brief wraps to its
+width and scrolls when longer. `port/3ds/hud_theme.*` draws a recessed panel behind each part drawn that
+frame, over a dark backdrop made once per city from its most common plain pavement tile (one 8 KB
+texture, 2 draws per frame). The world stays on the top screen, with the zone and car names, pickup
+texts, big messages and arrows. The frontend and the pause menu stay on the top screen, legible but small
+(4 to 5 pixels high); the bottom screen is black there.
 
 ## Build
 
