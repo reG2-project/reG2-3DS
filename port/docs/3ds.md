@@ -63,7 +63,8 @@ lighting, shadows or bloom). The game's vertices are in logical pixels with 1/w;
 outputs `(x*w, y*w, z*w, w)` so the PICA200 interpolates textures with perspective. Textures arrive
 as RGBA8 from the gbh_* layer and are stored in the smallest exact PICA format (RGB565, RGBA4,
 RGB5A1, else RGBA8), padded to a power of two. The gbh_* layer tells the format from each palette
-entry's bits (`RTexelBits`), so only other textures are scanned; each level is then written in one
+entry's bits (`RTexelBits`), and the frontend's TGA images are known to be opaque 5-6-5, so only the
+port's few own textures are scanned; each level is then written in one
 pass that premultiplies, converts, pads, writes Morton order and averages the next level into a
 scratch buffer. The CPU surface is composited through an RGB5A1 texture. One frame of vertices lives
 in linear memory; texture frees wait for the GPU.
