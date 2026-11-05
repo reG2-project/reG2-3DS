@@ -2,8 +2,8 @@
 
 Status: proof of concept on the `port/3ds` branch. The game builds with devkitARM into a `.3dsx`, boots
 in the Azahar emulator straight into a city (the debug keys below), draws it with a citro3d renderer and
-takes the 3DS buttons, on Old and New 3DS (Old 3DS figures below). No sound yet: Azahar needs the
-console's DSP firmware (`sdmc:/3ds/dspfirm.cdc`), which is not distributed.
+takes the 3DS buttons, on Old and New 3DS (Old 3DS figures below). The HUD is on the bottom screen.
+Sound plays through OpenDSP, a free replacement for the console's DSP firmware (optional, see Sound).
 
 ## What helps
 
@@ -65,6 +65,25 @@ as RGBA8 from the gbh_* layer and are stored in the smallest exact PICA format (
 RGB5A1, else RGBA8), padded to a power of two. The CPU surface is composited through an RGB5A1
 texture. One frame of vertices lives in linear memory; texture frees wait for the GPU.
 
+The top screen is drawn at the game's 800x480 into a 480x800 target, and the display transfer averages
+each 2x2 block onto the 400x240 screen: every texel is drawn, thin lines and small text survive as half
+tones and the world does not shimmer. Drawing straight at half size, with nearest sampling, lost
+alternate pixels. The fill rate is four times that of the screen; only hardware can tell its cost
+(Azahar does not time the GPU). A cheaper fallback would be 800x240, halving only x.
+
+The game keeps its 480 lines rather than drawing at 400x240: its menus are laid out for 640x480, its
+fonts are bitmaps of a fixed size, and its camera shows the area of a 480-line screen. At 400x240 the
+menus and HUD would need new layouts and smaller fonts, and the world would show a quarter of the area
+unless the camera zoomed out (sampling textures at half size again).
+
+The HUD is on the bottom screen at its own pixel size. `Hud::DrawGui` marks its element groups
+(`port/src/hud_screen.*`, `HUD_GROUP` in `Source/Hud.cpp`); a renderer with a HUD screen
+(`IRenderer::SetHudGroup`, `HudScreenWidth`) takes those draws, in 640x480 layout pixels, and places each
+group on the 320x240 screen; the mission brief wraps to its width and scrolls when longer. The world
+stays on the top screen, with the zone and car names, pickup texts, big messages and arrows. The
+frontend and the pause menu stay on the top screen; their text is legible after the 2x2 averaging, but
+small (4 to 5 pixels high).
+
 ## Build
 
 ```bash
@@ -79,6 +98,21 @@ docker run --rm -u $(id -u):$(id -g) -v $PWD:$PWD -v $SDL:$SDL -w $PWD gta2-3ds-
 ```
 
 The result is `build_3ds/gta2.3dsx` (about 2.3 MB).
+
+### Sound
+
+The console's DSP firmware (`dspfirm.cdc`) is Nintendo's and not distributed. OpenDSP
+(https://github.com/Cellenseres/OpenDSP, BSD-2) replaces it: a library with its own DSP image, loaded
+by `opendspInit()` in `platform_3ds.cpp` before SDL opens the audio, SDL's ndsp calls unchanged. Build
+it with `port/3ds/build_opendsp.sh <OpenDSP source> <prefix>` and pass `-DOPENDSP_DIR=<prefix>`; ship
+`LICENSE.OpenDSP.txt` (next to the `.3dsx` in the build) with it. Without it the port asks libctru for
+`sdmc:/3ds/dspfirm.cdc` as other homebrew does.
+
+Azahar plays it with HLE audio (the default, which emulates Nintendo's firmware and only hashes the
+image) and with LLE (Teakra runs OpenDSP's code, at about a quarter of real time). In Azahar, sound costs
+about 0.5 ms per step and 4 frames per second in bil while walking; OpenDSP costs nothing over Nintendo's
+path. OpenDSP was tested by its author on a New 3DS with Luma3DS; whether a stock DSP module accepts its
+unsigned image, and its sleep handling, need a console.
 
 ## Running
 
@@ -106,12 +140,21 @@ in Azahar with scripted presses: the d-pad walks and START pauses. The menus sho
 
 ### Memory
 
-The Old 3DS gives an application 64 MB (memory type 0), New 3DS 124 MB. A `.3dsx` gets the memory of
-the process the Homebrew Launcher runs in: started by title takeover, an application's, so 64 MB on an Old
-3DS; other entry points can give less (not checked on hardware). The port is designed for 64 MB. Azahar
-gives a `.3dsx` more (memory type 2, 96 MB, in Old 3DS mode), so the port fixes its heaps itself
-(`platform_3ds.cpp`) and the emulator holds it to them: 40 MB heap and 16 MB linear heap, plus the 3.2 MB
-image (code, data, bss) and the 2 MB stack, 61 MB in all. Start-up fails if the system cannot give that.
+The Old 3DS gives an application 64 MB (memory type 0), New 3DS 124 MB. Every `.3dsx` starts through
+Luma3DS's loader (hb:ldr), whether from the Homebrew Launcher Loader title, a Rosalina title takeover or
+a chainload from hbmenu: it patches the title's header to the console's current memory mode, so a `.3dsx`
+gets 64 MB on an Old 3DS (124 MB on a New 3DS), never an extended mode; only Luma's autoboot setting
+`autoboot_3ds_app_mem_type` changes it until the next reboot. The image (3.2 MB) and both heaps come out
+of that 64 MB, about 60.8 MB being free at start. A CIA could ask for 72, 80 or 96 MB (dev system
+modes): the console then reboots into that mode at launch and exit, and the system's memory shrinks
+(HOME Menu and applets limited); not worth it here.
+
+Azahar gives a `.3dsx` more (memory type 2, 96 MB, in Old 3DS mode), so the port fixes its heaps
+(`platform_3ds.cpp`) and the emulator holds it to them: 40 MB heap, out of which libctru takes the 2 MB
+stack, and 16 MB linear heap, 59.2 MB in all with the image, which leaves 4.8 MB free on an Old 3DS. If
+the system could not give that, libctru 2.7.0 stops at start-up (`svcBreak` in `allocateHeaps.c`, before
+`main`). Leaving the heap at 0 (all that is left) would panic on a New 3DS with libctru 2.7.0 (more than
+the 96 MB heap area); a run-time size with a readable error would only guard against the image growing.
 
 Measured in Azahar's Old 3DS mode with `GTA2_3DS_STATS` (peaks over a minute and a half of walking):
 
@@ -129,8 +172,11 @@ city (6 MB) is the only addition still to come with the DSP.
 
 ### Speed
 
-Azahar counts instructions rather than ARM11 cycles and charges system calls too much, so its times are
-a rough guide only; New and Old 3DS modes run the same emulated clock. At 100 % (`GTA2_LOOP_STATS`,
+Azahar charges each instruction a fixed number of ARM11 cycles from a table (no caches, memory latency
+or interlocks) and system calls too much, so its times are a rough guide only; its New 3DS mode runs the
+same 268 MHz clock, and `cpu_clock_percentage` only scales the table. No 3DS emulator models Old 3DS
+timing more closely (Panda3DS uses an older table, Mikage and Corgi3DS count one per instruction): only
+hardware gives real figures. At 100 % (`GTA2_LOOP_STATS`,
 FRAME LIMIT 30 ORIGINAL, walking):
 
 | | Steps/s | Frames/s | Logic step | Draw (with the wait for the GPU) |
@@ -150,9 +196,13 @@ original's 30.3 steps per second throughout. The second core is not used.
 
 ## Next steps
 
-- Sound: test on hardware or with a dumped `dspfirm.cdc` (SDL3's 3DS audio uses NDSP). A day.
+- The pause menu draws at about 3 frames per second (330 ms per draw) in Azahar: to profile.
+- HUD: the zone and car name banners, pickup texts and big messages on the bottom screen too; a
+  second pager; multiplayer scores; bonus stages.
+- Menus: the port's own menus (pause, options) with a larger font scale on the 3DS, or on the bottom
+  screen at 1:1; 3DS button glyphs instead of the Xbox ones.
+- Sound, the console's DSP load and sleep with OpenDSP on hardware.
 - Real Old 3DS timings: Azahar's are optimistic for memory bound code (no cache model). If the
   hardware is short, the next candidates are the per-vertex lighting at night and SDL's pad reads.
-- The menus' button glyphs and prompts for the 3DS layout; the bottom screen for the map or the HUD.
 - The game folder from the `.3dsx`'s own folder rather than a fixed `sdmc:/3ds/gta2`.
 - Real hardware: a 3DS or New 3DS with custom firmware.
