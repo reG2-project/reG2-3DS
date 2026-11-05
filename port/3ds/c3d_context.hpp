@@ -1,5 +1,4 @@
-// The 3DS context of CreateGLContext: citro3d and the top screen's render target (480x800, rotated,
-// shown at half size).
+// The 3DS context of CreateGLContext: citro3d and the top screen's render target (240x400, rotated, 1:1).
 #pragma once
 
 #include <citro3d.h>

@@ -21,6 +21,7 @@ struct RTexture
     f32 mScaleU;
     f32 mScaleV;
     u32 mUsedFrame; // last frame that drew it, 0 for none
+    bool mPremultiplied; // colours times alpha: blended with ONE, 1 - alpha
 };
 
 namespace
@@ -34,14 +35,16 @@ struct C3DVertex
 };
 
 const s32 kMaxVerts = 65536;
-// The top screen's target, landscape: 800x480, which the display transfer halves into the 400x240 screen.
-const s32 kScreenW = 800;
-const s32 kScreenH = 480;
+// The top screen's target, landscape: the game's 800x480 at half size.
+const s32 kScreenW = 400;
+const s32 kScreenH = 240;
 const s32 kBottomW = 320;
 const s32 kBottomH = 240;
 const s32 kMaxTexSize = 1024;
 // GLRenderer's default vertex offset: D3D pixel centres are on integers, the PICA's on halves.
 const f32 kPixelOffset = 0.5f - 1.0f / 2048.0f;
+// Batch state only: the batch's texture is premultiplied.
+const u32 kStatePremultiplied = 1u << 31;
 const u32 kBatchStateMask = RS_ALPHA_TEST | RS_BLEND_ALPHA | RS_BLEND_ADD | RS_FILTER_LINEAR | RS_NO_TEXTURE;
 
 // Morton order of the low 3 bits of x inside an 8x8 tile; y's bits go one place higher.
@@ -253,6 +256,7 @@ struct C3DRenderer::Impl : HudTheme::Sink
     std::vector<C3D_Tex> mPendingFree;
     RTexture* mWhite;
     RTexture* mSurface;
+    std::vector<u32> mConverted; // UploadTexture's texels after premultiplying
     bool mWarnedVerts, mWarnedCmdBuf, mWarnedAlloc;
     C3DRenderer* mOwner;
 
@@ -370,6 +374,15 @@ void C3DRenderer::Impl::BeginFrame()
 
 void C3DRenderer::Impl::Append(const RVertex* pVerts, s32 count, RTexture* pTex, u32 state, f32 offset, const ScreenRect& scissor, const HudRule* pRule)
 {
+    if (pTex && pTex->mPremultiplied)
+    {
+        state |= kStatePremultiplied;
+    }
+    if (!pRule)
+    {
+        // Nearest sampling at half size would drop every other texel.
+        state |= RS_FILTER_LINEAR;
+    }
     if (mVertCount > mBatchStart && (pTex != mBatchTex || state != mBatchState || scissor != mBatchScissor || pRule != mBatchRule))
     {
         Flush();
@@ -558,7 +571,7 @@ void C3DRenderer::Impl::ApplyState(RTexture* pTex, u32 state, const ScreenRect& 
 {
     if (!mStateValid || scissor != mAppliedScissor)
     {
-        // Mtx_OrthoTilt turns the screen: x runs down the rows of the target (800 on top), y across its columns.
+        // Mtx_OrthoTilt turns the screen: x runs down the rows of the target (400 on top), y across its columns.
         C3D_SetScissor(GPU_SCISSOR_NORMAL, mTargetH - scissor.y1, mTargetW - scissor.x1, mTargetH - scissor.y0, mTargetW - scissor.x0);
         mAppliedScissor = scissor;
     }
@@ -567,6 +580,10 @@ void C3DRenderer::Impl::ApplyState(RTexture* pTex, u32 state, const ScreenRect& 
         if (state & RS_BLEND_ADD)
         {
             C3D_AlphaBlend(GPU_BLEND_ADD, GPU_BLEND_ADD, GPU_ONE, GPU_ONE, GPU_ONE, GPU_ONE);
+        }
+        else if ((state & RS_BLEND_ALPHA) && (state & kStatePremultiplied))
+        {
+            C3D_AlphaBlend(GPU_BLEND_ADD, GPU_BLEND_ADD, GPU_ONE, GPU_ONE_MINUS_SRC_ALPHA, GPU_ONE, GPU_ONE_MINUS_SRC_ALPHA);
         }
         else if (state & RS_BLEND_ALPHA)
         {
@@ -588,6 +605,15 @@ void C3DRenderer::Impl::ApplyState(RTexture* pTex, u32 state, const ScreenRect& 
         {
             C3D_TexEnvSrc(pEnv, C3D_Both, GPU_TEXTURE0, GPU_PRIMARY_COLOR, GPU_PRIMARY_COLOR);
             C3D_TexEnvFunc(pEnv, C3D_Both, GPU_MODULATE);
+        }
+        // A premultiplied texel's colour takes the vertex alpha as well.
+        C3D_TexEnv* pEnv1 = C3D_GetTexEnv(1);
+        C3D_TexEnvInit(pEnv1);
+        if ((state & (RS_BLEND_ALPHA | kStatePremultiplied)) == (RS_BLEND_ALPHA | kStatePremultiplied))
+        {
+            C3D_TexEnvSrc(pEnv1, C3D_RGB, GPU_PREVIOUS, GPU_PRIMARY_COLOR, GPU_PRIMARY_COLOR);
+            C3D_TexEnvOpRgb(pEnv1, GPU_TEVOP_RGB_SRC_COLOR, GPU_TEVOP_RGB_SRC_ALPHA, GPU_TEVOP_RGB_SRC_COLOR);
+            C3D_TexEnvFunc(pEnv1, C3D_RGB, GPU_MODULATE);
         }
         mAppliedState = state;
     }
@@ -658,6 +684,8 @@ bool C3DRenderer::Init(Loader, const char** ppError)
     p->mWhite = CreateTexture();
     UploadTexture(p->mWhite, n, n, &white[0], RMIP_NONE);
     p->mSurface = CreateTexture();
+    // The colour key becomes 0: transparent black.
+    p->mSurface->mPremultiplied = true;
     SetLogicalSize(mLogicalW, mLogicalH);
     return true;
 }
@@ -849,7 +877,7 @@ RTexture* C3DRenderer::CreateTexture()
     return pTex;
 }
 
-void C3DRenderer::UploadTexture(RTexture* pTex, s32 width, s32 height, const u32* pRgba, RMipmaps)
+void C3DRenderer::UploadTexture(RTexture* pTex, s32 width, s32 height, const u32* pRgba, RMipmaps mipmaps)
 {
     Impl* p = mImpl;
     if (!p || !pTex || !pRgba || width <= 0 || height <= 0)
@@ -865,7 +893,26 @@ void C3DRenderer::UploadTexture(RTexture* pTex, s32 width, s32 height, const u32
     const s32 tw = Pow2(cw);
     const s32 th = Pow2(ch);
     const u64 t0 = svcGetSystemTick();
-    const GPU_TEXCOLOR fmt = PickFormat(pRgba, (size_t)width * height);
+    // Blended textures are premultiplied: filtered, transparent texels lend no colour.
+    const size_t n = (size_t)width * height;
+    bool premultiply = false;
+    for (size_t i = 0; mipmaps == RMIP_ALPHA && i < n && !premultiply; i++)
+    {
+        premultiply = (pRgba[i] >> 24) != 0xFF;
+    }
+    if (premultiply)
+    {
+        p->mConverted.resize(n);
+        for (size_t i = 0; i < n; i++)
+        {
+            const u32 c = pRgba[i], a = c >> 24;
+            const u32 r = ((c & 0xFF) * a + 127) / 255, g = (((c >> 8) & 0xFF) * a + 127) / 255, b = (((c >> 16) & 0xFF) * a + 127) / 255;
+            p->mConverted[i] = r | (g << 8) | (b << 16) | (a << 24);
+        }
+        pRgba = &p->mConverted[0];
+    }
+    pTex->mPremultiplied = premultiply;
+    const GPU_TEXCOLOR fmt = PickFormat(pRgba, n);
     if (!p->Allocate(pTex, tw, th, fmt, false))
     {
         return;
@@ -963,7 +1010,10 @@ void C3DRenderer::DrawTriangles(const RVertex* pVerts, s32 count, RTexture* pTex
     }
     mImpl->BeginFrame();
     const HudRule* pRule = p->mHudGroup ? PickRule(*p->mHudGroup, pVerts, count) : 0;
-    p->Append(pVerts, count, pTex, state & kBatchStateMask, (state & RS_PIXEL_EXACT) ? 0.0f : kPixelOffset, pRule ? pRule->slot : p->mClip, pRule);
+    // On the top screen, no offset puts the pixel centres where the game's 2x2 pixel blocks meet: on the texel
+    // corners of its 1:1 quads, where bilinear filtering averages the 4 texels.
+    const bool exact = (state & RS_PIXEL_EXACT) || !pRule;
+    p->Append(pVerts, count, pTex, state & kBatchStateMask, exact ? 0.0f : kPixelOffset, pRule ? pRule->slot : p->mClip, pRule);
 }
 
 void C3DRenderer::SetClipRect(f32 left, f32 top, f32 right, f32 bottom)
