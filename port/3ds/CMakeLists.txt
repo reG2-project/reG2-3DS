@@ -47,6 +47,8 @@ target_compile_options(gta2 PRIVATE -include ${PORT}/compat/prelude.hpp
     -fno-builtin-wmemcpy -fno-builtin-wmemset -fno-builtin-wmemcmp)
 target_include_directories(gta2 PRIVATE ${PORT}/compat/include ${PORT}/include ${ROOT}/Source ${ROOT})
 target_link_libraries(gta2 PRIVATE SDL3::SDL3-static citro3d ctru m)
+# test_pad.cpp adds scripted buttons to what SDL reads.
+target_link_options(gta2 PRIVATE -Wl,--wrap=hidScanInput,--wrap=hidKeysDown,--wrap=hidKeysUp)
 
 set(smdh ${CMAKE_CURRENT_BINARY_DIR}/gta2.smdh)
 add_custom_command(OUTPUT ${smdh}
