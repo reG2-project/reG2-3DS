@@ -8,6 +8,7 @@
 #include <map>
 #include <string>
 #include "port_platform.hpp"
+#include "../../renderer/gl_context.hpp"
 
 namespace
 {
@@ -153,7 +154,7 @@ HWND WINAPI CreateWindowExA(DWORD exStyle, LPCSTR className, LPCSTR title, DWORD
     int windowW;
     int windowH;
     port_GetWindowSize(&windowW, &windowH);
-    SDL_Window* pSdl = SDL_CreateWindow(title, windowW, windowH, SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE);
+    SDL_Window* pSdl = SDL_CreateWindow(title, windowW, windowH, GLWindowFlags() | SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE);
     if (!pSdl)
     {
         return NULL;

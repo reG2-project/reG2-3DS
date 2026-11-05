@@ -13,5 +13,8 @@ class IGLContext
 
 struct SDL_Window;
 
-// Creates the context on a window made with SDL_WINDOW_OPENGL.
+// The flags the game window needs for this context (SDL_WindowFlags).
+unsigned long long GLWindowFlags();
+
+// Creates the context on a window made with GLWindowFlags().
 IGLContext* CreateGLContext(SDL_Window* pWindow, const char** ppError);

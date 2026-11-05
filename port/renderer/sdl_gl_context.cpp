@@ -40,6 +40,11 @@ class SDLGLContext : public IGLContext
 };
 } // namespace
 
+unsigned long long GLWindowFlags()
+{
+    return SDL_WINDOW_OPENGL;
+}
+
 // OpenGL ES 3.0 first; else OpenGL 3.3 core, for Windows drivers and wine without ES contexts.
 IGLContext* CreateGLContext(SDL_Window* pWindow, const char** ppError)
 {
