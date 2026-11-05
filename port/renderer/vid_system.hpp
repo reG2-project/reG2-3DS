@@ -3,7 +3,13 @@
 
 #include "capture.hpp"
 #include "options.hpp"
+#if defined(__3DS__)
+#include "../3ds/c3d_renderer.hpp"
+typedef C3DRenderer BackendRenderer;
+#else
 #include "gl_renderer.hpp"
+typedef GLRenderer BackendRenderer;
+#endif
 #include "renderer.hpp"
 #include <vector>
 
@@ -46,7 +52,7 @@ class VidSystem
     void Clear(u8 r, u8 g, u8 b, s32 left, s32 top, s32 right, s32 bottom);
     s32 SetGamma(f32 r, f32 g, f32 b);
 
-    GLRenderer& Renderer() { return mRenderer; }
+    BackendRenderer& Renderer() { return mRenderer; }
     const u32* FrameCounter() const { return &mFrame; }
     // GTA2GL_CAPTURE frames are these test frames (port_FrameCount), or flips with GTA2GL_CAPTURE_FLIPS=1.
     void SetTestFrame(u32 frame) { mTestFrame = frame; }
@@ -55,7 +61,7 @@ class VidSystem
     void ResizeSurface(s32 width, s32 height);
 
     GLVideoHeader mHeader; // must stay first
-    GLRenderer mRenderer;
+    BackendRenderer mRenderer;
     IGLContext* mContext;
     std::vector<SDisplayMode> mModes;
     s32 mEnumIdx;
