@@ -62,8 +62,8 @@ RTexture* sTile;
 bool sHaveTile;
 // The city the tile was taken from; 0 for none.
 u32 sCity;
+} // namespace
 
-// Changes whenever another city is loaded, 0 while none is.
 u32 CitySignature()
 {
     if (!gMap_0x370 || !gMap_0x370->mpDmap || !gGtx_0x106C || !gGtx_0x106C->has_tiles())
@@ -80,6 +80,8 @@ u32 CitySignature()
     return h ? h : 1;
 }
 
+namespace
+{
 // The lid tile of the highest block with one at a map column (0 for none), with that block's z and ground type.
 u16 TopLid(s32 x, s32 y, s32* pZ, s32* pType)
 {

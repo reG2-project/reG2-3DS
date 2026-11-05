@@ -50,6 +50,8 @@ const f32 kPixelOffset = 0.5f - 1.0f / 2048.0f;
 // Batch state only: the batch's texture is premultiplied; its draws sample the first mip level only.
 const u32 kStatePremultiplied = 1u << 31;
 const u32 kStateNoMip = 1u << 30;
+// Batch state only: the texture is A8, drawn in the vertex colour with its alpha.
+const u32 kStateAlphaTexture = 1u << 29;
 const u32 kBatchStateMask = RS_ALPHA_TEST | RS_BLEND_ALPHA | RS_BLEND_ADD | RS_FILTER_LINEAR | RS_NO_TEXTURE;
 
 // Morton order of the low 3 bits of x inside an 8x8 tile; y's bits go one place higher.
@@ -428,6 +430,7 @@ struct C3DRenderer::Impl : HudTheme::Sink
     u32 BottomSignature(f32 scroll) const;
     void DrawHud();
     void DrawQuads(const HudTheme::Quad* pQuads, s32 count, RTexture* pTex, u32 state) override;
+    void DrawTriangles(const RVertex* pVerts, s32 count, RTexture* pTex, u32 state) override;
     void ApplyState(RTexture* pTex, u32 state, const ScreenRect& scissor);
     bool Allocate(RTexture* pTex, s32 tw, s32 th, GPU_TEXCOLOR fmt, s32 levels, bool clear);
 };
@@ -542,12 +545,17 @@ void C3DRenderer::Impl::Append(const RVertex* pVerts, s32 count, RTexture* pTex,
     {
         state |= kStatePremultiplied;
     }
-    if (!pRule)
+    if (pTex && pTex->mTex.fmt == GPU_A8)
+    {
+        state |= kStateAlphaTexture;
+    }
+    if (!pRule && !(state & C3DRenderer::kStateNearest))
     {
         // Nearest sampling at half size would drop every other texel.
         state |= RS_FILTER_LINEAR;
     }
-    else
+    state &= ~C3DRenderer::kStateNearest;
+    if (pRule)
     {
         state |= kStateNoMip;
     }
@@ -769,7 +777,21 @@ void C3DRenderer::Impl::DrawQuads(const HudTheme::Quad* pQuads, s32 count, RText
             v[k].u = us[c];
             v[k].v = vs[c];
         }
-        Append(v, 6, pTex, state & kBatchStateMask, 0.0f, bottom, 0);
+        Append(v, 6, pTex, state & (kBatchStateMask | C3DRenderer::kStateNearest), 0.0f, bottom, 0);
+    }
+}
+
+void C3DRenderer::Impl::DrawTriangles(const RVertex* pVerts, s32 count, RTexture* pTex, u32 state)
+{
+    const ScreenRect bottom = {0, 0, kBottomW, kBottomH};
+    if (!pTex || !pTex->mValid)
+    {
+        pTex = 0;
+        state |= RS_NO_TEXTURE;
+    }
+    if (count > 0)
+    {
+        Append(pVerts, count, pTex, state & (kBatchStateMask | C3DRenderer::kStateNearest), 0.0f, bottom, 0);
     }
 }
 
@@ -806,6 +828,13 @@ void C3DRenderer::Impl::ApplyState(RTexture* pTex, u32 state, const ScreenRect& 
         {
             C3D_TexEnvSrc(pEnv, C3D_Both, GPU_PRIMARY_COLOR, GPU_PRIMARY_COLOR, GPU_PRIMARY_COLOR);
             C3D_TexEnvFunc(pEnv, C3D_Both, GPU_REPLACE);
+        }
+        else if (state & kStateAlphaTexture)
+        {
+            C3D_TexEnvSrc(pEnv, C3D_RGB, GPU_PRIMARY_COLOR, GPU_PRIMARY_COLOR, GPU_PRIMARY_COLOR);
+            C3D_TexEnvFunc(pEnv, C3D_RGB, GPU_REPLACE);
+            C3D_TexEnvSrc(pEnv, C3D_Alpha, GPU_TEXTURE0, GPU_PRIMARY_COLOR, GPU_PRIMARY_COLOR);
+            C3D_TexEnvFunc(pEnv, C3D_Alpha, GPU_MODULATE);
         }
         else
         {
@@ -1143,6 +1172,37 @@ void C3DRenderer::UploadTexture(RTexture* pTex, s32 width, s32 height, const u32
     Stats3DS_AddUpload(svcGetSystemTick() - t0);
     pTex->mScaleU = (f32)cw / tw;
     pTex->mScaleV = (f32)ch / th;
+}
+
+void* C3DRenderer::LockTiled(RTexture* pTex, s32 size, bool alphaOnly)
+{
+    Impl* p = mImpl;
+    if (!p || !pTex || size < 8 || size > kMaxTexSize || (size & (size - 1)))
+    {
+        return 0;
+    }
+    if (pTex == p->mBatchTex)
+    {
+        p->Flush();
+    }
+    if (!p->Allocate(pTex, size, size, alphaOnly ? GPU_A8 : GPU_RGB565, 0, false))
+    {
+        return 0;
+    }
+    pTex->mPremultiplied = false;
+    pTex->mScaleU = 1.0f;
+    pTex->mScaleV = 1.0f;
+    return pTex->mTex.data;
+}
+
+void C3DRenderer::UnlockTiled(RTexture* pTex)
+{
+    if (pTex && pTex->mValid)
+    {
+        C3D_TexFlush(&pTex->mTex);
+        pTex->mVersion++;
+        mUploads++;
+    }
 }
 
 void C3DRenderer::FreeTexture(RTexture* pTex)

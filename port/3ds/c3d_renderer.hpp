@@ -5,10 +5,20 @@
 #include "../renderer/renderer.hpp"
 #include <vector>
 
+// Texel (x, y) of a texture `width` texels wide in the PICA's layout: 8x8 tiles in rows, Morton order inside.
+inline u32 TiledIndex(s32 x, s32 y, s32 width)
+{
+    const u32 morton = (x & 1) | ((y & 1) << 1) | ((x & 2) << 1) | ((y & 2) << 2) | ((x & 4) << 2) | ((y & 4) << 3);
+    return ((u32)(y >> 3) * (u32)(width >> 3) + (u32)(x >> 3)) * 64 + morton;
+}
+
 class C3DRenderer : public IRenderer
 {
   public:
     typedef void* (*Loader)(const char* name);
+
+    // A bottom screen draw state: nearest sampling (the bottom screen's own draws are linear otherwise).
+    static const u32 kStateNearest = 1u << 28;
 
     C3DRenderer();
     ~C3DRenderer();
@@ -52,6 +62,10 @@ class C3DRenderer : public IRenderer
     bool SetHudGroup(s32 group) override;
     s32 HudScreenWidth() const override;
     u32 GetUploadCount() const { return mUploads; }
+    // Storage for a size x size texture (a power of two) that the caller fills in the tiled order (TiledIndex), then
+    // UnlockTiled: RGB565 texels, or with alphaOnly A8 ones drawn in the vertex colour. Null if it does not fit.
+    void* LockTiled(RTexture* pTex, s32 size, bool alphaOnly);
+    void UnlockTiled(RTexture* pTex);
     u32 GetVertexCount() const { return mVertices; }
 
   private:

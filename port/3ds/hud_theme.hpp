@@ -5,6 +5,7 @@
 
 class IRenderer;
 struct RTexture;
+struct RVertex;
 
 namespace HudTheme
 {
@@ -38,7 +39,12 @@ class Sink
   public:
     // One draw on the HUD screen: plain quads (pTex null) or textured ones times their colour; state is RS_* bits.
     virtual void DrawQuads(const Quad* pQuads, s32 count, RTexture* pTex, u32 state) = 0;
+    // Triangles in HUD screen pixels, three vertices each.
+    virtual void DrawTriangles(const RVertex* pVerts, s32 count, RTexture* pTex, u32 state) = 0;
 };
+
+// Changes whenever another city is loaded, 0 while none is.
+u32 CitySignature();
 
 // Draws the backdrop of a frame whose HUD drew in `parts` (a bit per Part); pPanels[part] is each part's panel.
 void Draw(IRenderer& renderer, Sink& sink, const Rect* pPanels, u32 parts);
