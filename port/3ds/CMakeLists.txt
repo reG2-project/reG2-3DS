@@ -16,9 +16,9 @@ list(REMOVE_ITEM lib_src Source/ImGuiDebug.cpp)
 list(TRANSFORM lib_src PREPEND ${ROOT}/)
 
 # Everything the Linux build takes from port/, except the OpenGL renderer and the first-start setup.
-file(GLOB port_src ${PORT}/src/*.cpp ${PORT}/compat/src/*.cpp ${PORT}/renderer/*.cpp)
+file(GLOB port_src CONFIGURE_DEPENDS ${PORT}/src/*.cpp ${PORT}/compat/src/*.cpp ${PORT}/renderer/*.cpp)
 list(FILTER port_src EXCLUDE REGEX "/renderer/(gl_[a-z_]+|sdl_gl_context)\\.cpp$")
-file(GLOB ctr_src ${CMAKE_CURRENT_LIST_DIR}/*.cpp)
+file(GLOB ctr_src CONFIGURE_DEPENDS ${CMAKE_CURRENT_LIST_DIR}/*.cpp)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
