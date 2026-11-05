@@ -61,6 +61,30 @@ enum RMipmaps
     RMIP_ALPHA,  // blended: transparent texels lend no colour
 };
 
+// What every texel of an upload is, when the caller knows: the AND of TexelBits over its texels, so a
+// renderer can choose how to store them without a scan. Without RTX_KNOWN nothing is known.
+enum RTexelBits
+{
+    RTX_KNOWN = 1 << 0,
+    RTX_OPAQUE = 1 << 1, // alpha 255
+    RTX_BINARY = 1 << 2, // alpha 0 or 255
+    RTX_4444 = 1 << 3,   // each channel a 4-bit value expanded by replication
+    RTX_565 = 1 << 4,    // red, green and blue 5, 6 and 5-bit values expanded by replication
+};
+
+// A texel's RTexelBits; in an RMIP_ALPHA upload a texel of alpha 0 counts as transparent black.
+inline u32 TexelBits(u32 c, RMipmaps mipmaps)
+{
+    if (mipmaps == RMIP_ALPHA && (c >> 24) == 0)
+    {
+        c = 0;
+    }
+    const u32 r = c & 0xFF, g = (c >> 8) & 0xFF, b = (c >> 16) & 0xFF, a = c >> 24;
+    const bool fits565 = r == ((r & 0xF8) | (r >> 5)) && g == ((g & 0xFC) | (g >> 6)) && b == ((b & 0xF8) | (b >> 5));
+    return RTX_KNOWN | (a == 255 ? RTX_OPAQUE : 0) | (a == 0 || a == 255 ? RTX_BINARY : 0) |
+           (((c ^ (c >> 4)) & 0x0F0F0F0F) == 0 ? RTX_4444 : 0) | (fits565 ? RTX_565 : 0);
+}
+
 struct RTexture;
 
 class IRenderer
@@ -68,9 +92,9 @@ class IRenderer
   public:
     virtual ~IRenderer() {}
 
-    // Texture contents are given as RGBA8, top row first. The backend may defer GL work.
+    // Texture contents are given as RGBA8, top row first, texels as RTexelBits. The backend may defer GL work.
     virtual RTexture* CreateTexture() = 0;
-    virtual void UploadTexture(RTexture* pTex, s32 width, s32 height, const u32* pRgba, RMipmaps mipmaps) = 0;
+    virtual void UploadTexture(RTexture* pTex, s32 width, s32 height, const u32* pRgba, RMipmaps mipmaps, u32 texels = 0) = 0;
     virtual void FreeTexture(RTexture* pTex) = 0;
 
     virtual void BeginScene() = 0;

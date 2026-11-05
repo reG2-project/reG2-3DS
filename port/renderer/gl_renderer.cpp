@@ -890,7 +890,7 @@ RTexture* GLRenderer::CreateTexture()
     return pTex;
 }
 
-void GLRenderer::UploadTexture(RTexture* pTex, s32 width, s32 height, const u32* pRgba, RMipmaps mipmaps)
+void GLRenderer::UploadTexture(RTexture* pTex, s32 width, s32 height, const u32* pRgba, RMipmaps mipmaps, u32)
 {
     if (!mReady || !pTex || width <= 0 || height <= 0)
     {

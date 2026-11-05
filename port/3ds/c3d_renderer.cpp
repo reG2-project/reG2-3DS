@@ -62,90 +62,55 @@ s32 Pow2(s32 n)
     return p;
 }
 
-// Texels into the PICA's tiled layout, image row y at t = 1 - y / th (Append flips v); the padding repeats the edges.
-template <typename T, typename Conv>
-void WriteTiles(T* pDst, s32 tw, s32 th, const u32* pSrc, s32 width, s32 height, s32 cw, s32 ch, Conv conv)
-{
-    for (s32 y = 0; y < th; y++)
-    {
-        const s32 cy = y < ch ? y : ch - 1;
-        const s32 sy = ch == height ? cy : (s32)((long long)cy * height / ch);
-        const u32* pRow = pSrc + (size_t)sy * width;
-        T* pTiles = pDst + (size_t)(y >> 3) * (tw >> 3) * 64;
-        const u32 my = (u32)kMorton[y & 7] << 1;
-        for (s32 x = 0; x < tw; x++)
-        {
-            const s32 cx = x < cw ? x : cw - 1;
-            const s32 sx = cw == width ? cx : (s32)((long long)cx * width / cw);
-            pTiles[(x >> 3) * 64 + (kMorton[x & 7] | my)] = conv(pRow[sx]);
-        }
-    }
-}
-
-// The smallest format that holds the texels exactly, else 16 bits with the alpha kept, else RGBA8.
-GPU_TEXCOLOR PickFormat(const u32* pRgba, size_t count)
-{
-    bool opaque = true, binary = true, fits4 = true, fits565 = true;
-    for (size_t i = 0; i < count; i++)
-    {
-        const u32 c = pRgba[i];
-        const u32 r = c & 0xFF, g = (c >> 8) & 0xFF, b = (c >> 16) & 0xFF, a = c >> 24;
-        opaque = opaque && a == 255;
-        binary = binary && (a == 0 || a == 255);
-        // A 4-bit channel expanded by replication is a multiple of 17.
-        fits4 = fits4 && ((c ^ (c >> 4)) & 0x0F0F0F0F) == 0;
-        fits565 = fits565 && r == ((r & 0xF8) | (r >> 5)) && g == ((g & 0xFC) | (g >> 6)) && b == ((b & 0xF8) | (b >> 5));
-        if (!binary && !fits4)
-        {
-            return GPU_RGBA8;
-        }
-    }
-    if (opaque && fits565)
-    {
-        return GPU_RGB565;
-    }
-    if (fits4)
-    {
-        return GPU_RGBA4;
-    }
-    return opaque ? GPU_RGB565 : GPU_RGBA5551;
-}
-
-// Texels into a level of a texture of format fmt.
-void WriteLevel(void* pData, GPU_TEXCOLOR fmt, s32 tw, s32 th, const u32* pSrc, s32 width, s32 height, s32 cw, s32 ch)
-{
-    switch (fmt)
-    {
-    case GPU_RGB565:
-        WriteTiles((u16*)pData, tw, th, pSrc, width, height, cw, ch, [](u32 c) {
-            return (u16)((((c >> 3) & 0x1F) << 11) | (((c >> 10) & 0x3F) << 5) | ((c >> 19) & 0x1F));
-        });
-        break;
-    case GPU_RGBA4:
-        WriteTiles((u16*)pData, tw, th, pSrc, width, height, cw, ch, [](u32 c) {
-            return (u16)((((c >> 4) & 0xF) << 12) | (((c >> 12) & 0xF) << 8) | (((c >> 20) & 0xF) << 4) | (c >> 28));
-        });
-        break;
-    case GPU_RGBA5551:
-        WriteTiles((u16*)pData, tw, th, pSrc, width, height, cw, ch, [](u32 c) {
-            return (u16)((((c >> 3) & 0x1F) << 11) | (((c >> 11) & 0x1F) << 6) | (((c >> 19) & 0x1F) << 1) | (c >> 31));
-        });
-        break;
-    default:
-        WriteTiles((u32*)pData, tw, th, pSrc, width, height, cw, ch, [](u32 c) { return __builtin_bswap32(c); });
-        break;
-    }
-}
-
 // x / 255 rounded, for x up to 255 * 255, without a division (the ARM11 has none).
-u32 Div255(u32 x)
+constexpr u32 Div255(u32 x)
 {
     x += 128;
     return (x + (x >> 8)) >> 8;
 }
 
+// Colours times alpha, for blended textures.
+u32 Premultiply(u32 c)
+{
+    const u32 a = c >> 24;
+    if (a == 255 || a == 0)
+    {
+        return a ? c : 0;
+    }
+    return Div255((c & 0xFF) * a) | (Div255(((c >> 8) & 0xFF) * a) << 8) | (Div255(((c >> 16) & 0xFF) * a) << 16) | (a << 24);
+}
+
+// The RTexelBits of texels as stored: premultiplied when blended.
+u32 ScanTexels(const u32* pRgba, size_t count, RMipmaps mipmaps)
+{
+    u32 bits = ~0u;
+    for (size_t i = 0; i < count && (bits & (RTX_BINARY | RTX_4444)); i++)
+    {
+        bits &= TexelBits(mipmaps == RMIP_ALPHA ? Premultiply(pRgba[i]) : pRgba[i], mipmaps);
+    }
+    return bits;
+}
+
+// The smallest format that holds the texels exactly, else 16 bits with the alpha kept, else RGBA8.
+GPU_TEXCOLOR PickFormat(u32 bits)
+{
+    if ((bits & (RTX_OPAQUE | RTX_565)) == (RTX_OPAQUE | RTX_565))
+    {
+        return GPU_RGB565;
+    }
+    if (bits & RTX_4444)
+    {
+        return GPU_RGBA4;
+    }
+    if (!(bits & RTX_BINARY))
+    {
+        return GPU_RGBA8;
+    }
+    return (bits & RTX_OPAQUE) ? GPU_RGB565 : GPU_RGBA5551;
+}
+
 // A channel rounded to the nearest value of `bits` bits, expanded back by replication as the GPU does.
-u32 RoundChannel(u32 v, s32 bits)
+constexpr u32 RoundChannel(u32 v, s32 bits)
 {
     if (bits == 1)
     {
@@ -155,28 +120,119 @@ u32 RoundChannel(u32 v, s32 bits)
     return (q << (8 - bits)) | (q >> (2 * bits - 8));
 }
 
-// The next mip level: each 2x2 block averaged, rounded to what fmt holds so its truncating writes are exact.
-void HalveLevel(u32* pDst, const u32* pSrc, s32 w, s32 h, GPU_TEXCOLOR fmt)
+// RoundChannel for the formats' channel sizes: [bits][v], 255 for an absent channel (0 bits).
+struct RoundTables
+{
+    u8 mRound[9][256];
+    constexpr RoundTables() : mRound()
+    {
+        for (s32 bits : {0, 1, 4, 5, 6, 8})
+        {
+            for (u32 v = 0; v < 256; v++)
+            {
+                mRound[bits][v] = (u8)(bits == 8 ? v : bits == 0 ? 255 : RoundChannel(v, bits));
+            }
+        }
+    }
+};
+constexpr RoundTables kRound;
+
+// A 2x2 block averaged, each channel rounded by its table so the format's truncating writes are exact.
+// Red and blue, then green and alpha, are summed two at a time in 16-bit lanes.
+u32 Average(u32 a, u32 b, u32 c, u32 d, const u8* const* round)
+{
+    const u32 m = 0x00FF00FF;
+    const u32 rb = (((a & m) + (b & m) + (c & m) + (d & m) + 0x00020002) >> 2) & m;
+    const u32 ga = ((((a >> 8) & m) + ((b >> 8) & m) + ((c >> 8) & m) + ((d >> 8) & m) + 0x00020002) >> 2) & m;
+    return round[0][rb & 0xFF] | (round[1][ga & 0xFF] << 8) | (round[2][rb >> 16] << 16) | ((u32)round[3][ga >> 16] << 24);
+}
+
+// The caller's texels as the first level: premultiplied if asked, cut to cw x ch (scaled down when larger),
+// with the last column and row repeated out to the texture's size.
+struct SourceLevel
+{
+    const u32* mRgba;
+    s32 mWidth, mHeight, mCw, mCh;
+    bool mPremultiply;
+
+    const u32* Row(s32 y) const
+    {
+        const s32 cy = y < mCh ? y : mCh - 1;
+        return mRgba + (size_t)(mCh == mHeight ? cy : (s32)((long long)cy * mHeight / mCh)) * mWidth;
+    }
+    u32 At(const u32* pRow, s32 x) const
+    {
+        const s32 cx = x < mCw ? x : mCw - 1;
+        const u32 c = pRow[mCw == mWidth ? cx : (s32)((long long)cx * mWidth / mCw)];
+        return mPremultiply ? Premultiply(c) : c;
+    }
+};
+
+// A level made by Average, row by row.
+struct ScratchLevel
+{
+    const u32* mTexels;
+    s32 mWidth;
+
+    const u32* Row(s32 y) const { return mTexels + (size_t)y * mWidth; }
+    u32 At(const u32* pRow, s32 x) const { return pRow[x]; }
+};
+
+// A w x h level into the PICA's tiled layout, image row y at t = 1 - y / h (Append flips v), and the next
+// level into pHalf when given. pHalf may be the source's storage: each average lands before what is still unread.
+template <typename T, typename Conv, typename Source>
+void WriteTiles(T* pDst, s32 w, s32 h, const Source& src, Conv conv, u32* pHalf, const u8* const* round)
+{
+    for (s32 y = 0; y < h; y += 2)
+    {
+        const u32* pRow0 = src.Row(y);
+        const u32* pRow1 = src.Row(y + 1);
+        T* pTiles = pDst + (size_t)(y >> 3) * (w >> 3) * 64 + ((u32)kMorton[y & 7] << 1);
+        u32* pOut = pHalf ? pHalf + (size_t)(y / 2) * (w / 2) : 0;
+        for (s32 x = 0; x < w; x += 2)
+        {
+            const u32 a = src.At(pRow0, x), b = src.At(pRow0, x + 1), c = src.At(pRow1, x), d = src.At(pRow1, x + 1);
+            // A 2x2 block is 4 consecutive texels in Morton order.
+            T* p = pTiles + (x >> 3) * 64 + kMorton[x & 7];
+            p[0] = conv(a);
+            p[1] = conv(b);
+            p[2] = conv(c);
+            p[3] = conv(d);
+            if (pOut)
+            {
+                pOut[x / 2] = Average(a, b, c, d, round);
+            }
+        }
+    }
+}
+
+// A level of a texture of format fmt, and the next one into pHalf when given.
+template <typename Source>
+void WriteLevel(void* pData, GPU_TEXCOLOR fmt, s32 w, s32 h, const Source& src, u32* pHalf)
 {
     static const s8 kBits[][4] = {{8, 8, 8, 8}, {8, 8, 8, 0}, {5, 5, 5, 1}, {5, 6, 5, 0}, {4, 4, 4, 4}};
     const s8* bits = kBits[fmt <= GPU_RGBA4 ? fmt : 0];
-    for (s32 y = 0; y < h / 2; y++)
+    const u8* round[4] = {kRound.mRound[bits[0]], kRound.mRound[bits[1]], kRound.mRound[bits[2]], kRound.mRound[bits[3]]};
+    switch (fmt)
     {
-        const u32* p0 = pSrc + (size_t)(2 * y) * w;
-        const u32* p1 = p0 + w;
-        for (s32 x = 0; x < w / 2; x++)
-        {
-            const u32 a = p0[2 * x], b = p0[2 * x + 1], c = p1[2 * x], d = p1[2 * x + 1];
-            u32 out = 0;
-            for (s32 k = 0; k < 4; k++)
-            {
-                const s32 sh = 8 * k;
-                u32 v = (((a >> sh) & 0xFF) + ((b >> sh) & 0xFF) + ((c >> sh) & 0xFF) + ((d >> sh) & 0xFF) + 2) >> 2;
-                v = bits[k] == 8 ? v : bits[k] == 0 ? 255 : RoundChannel(v, bits[k]);
-                out |= v << sh;
-            }
-            pDst[(size_t)y * (w / 2) + x] = out;
-        }
+    case GPU_RGB565:
+        WriteTiles((u16*)pData, w, h, src, [](u32 c) {
+            return (u16)((((c >> 3) & 0x1F) << 11) | (((c >> 10) & 0x3F) << 5) | ((c >> 19) & 0x1F));
+        }, pHalf, round);
+        break;
+    case GPU_RGBA4:
+        WriteTiles((u16*)pData, w, h, src, [](u32 c) {
+            return (u16)((((c >> 4) & 0xF) << 12) | (((c >> 12) & 0xF) << 8) | (((c >> 20) & 0xF) << 4) | (c >> 28));
+        }, pHalf, round);
+        break;
+    case GPU_RGBA5551:
+        WriteTiles((u16*)pData, w, h, src, [](u32 c) {
+            return (u16)((((c >> 3) & 0x1F) << 11) | (((c >> 11) & 0x1F) << 6) | (((c >> 19) & 0x1F) << 1) | (c >> 31));
+        }, pHalf, round);
+        break;
+    default:
+        WriteTiles((u32*)pData, w, h, src, [](u32 c) { return __builtin_bswap32(c); }, pHalf, round);
+        break;
     }
 }
 
@@ -354,8 +410,7 @@ struct C3DRenderer::Impl : HudTheme::Sink
     std::vector<C3D_Tex> mPendingFree;
     RTexture* mWhite;
     RTexture* mSurface;
-    std::vector<u32> mConverted; // UploadTexture's texels after premultiplying
-    std::vector<u32> mLevel;     // and its mip levels being made
+    std::vector<u32> mLevel; // UploadTexture's next mip level being made
     bool mWarnedVerts, mWarnedCmdBuf, mWarnedAlloc;
     C3DRenderer* mOwner;
 
@@ -986,7 +1041,7 @@ RTexture* C3DRenderer::CreateTexture()
     return pTex;
 }
 
-void C3DRenderer::UploadTexture(RTexture* pTex, s32 width, s32 height, const u32* pRgba, RMipmaps mipmaps)
+void C3DRenderer::UploadTexture(RTexture* pTex, s32 width, s32 height, const u32* pRgba, RMipmaps mipmaps, u32 texels)
 {
     Impl* p = mImpl;
     if (!p || !pTex || !pRgba || width <= 0 || height <= 0)
@@ -1002,26 +1057,15 @@ void C3DRenderer::UploadTexture(RTexture* pTex, s32 width, s32 height, const u32
     const s32 tw = Pow2(cw);
     const s32 th = Pow2(ch);
     const u64 t0 = svcGetSystemTick();
+    // Partial alpha changes the colours when premultiplied, so only a scan tells their format.
+    if (!(texels & RTX_KNOWN) || (mipmaps == RMIP_ALPHA && !(texels & RTX_BINARY)))
+    {
+        texels = ScanTexels(pRgba, (size_t)width * height, mipmaps);
+    }
     // Blended textures are premultiplied: filtered, transparent texels lend no colour.
-    const size_t n = (size_t)width * height;
-    bool premultiply = false;
-    for (size_t i = 0; mipmaps == RMIP_ALPHA && i < n && !premultiply; i++)
-    {
-        premultiply = (pRgba[i] >> 24) != 0xFF;
-    }
-    if (premultiply)
-    {
-        p->mConverted.resize(n);
-        for (size_t i = 0; i < n; i++)
-        {
-            const u32 c = pRgba[i], a = c >> 24;
-            const u32 r = Div255((c & 0xFF) * a), g = Div255(((c >> 8) & 0xFF) * a), b = Div255(((c >> 16) & 0xFF) * a);
-            p->mConverted[i] = r | (g << 8) | (b << 16) | (a << 24);
-        }
-        pRgba = &p->mConverted[0];
-    }
+    const bool premultiply = mipmaps == RMIP_ALPHA && !(texels & RTX_OPAQUE);
     pTex->mPremultiplied = premultiply;
-    GPU_TEXCOLOR fmt = PickFormat(pRgba, n);
+    GPU_TEXCOLOR fmt = PickFormat(texels);
     // The game's textures get mip levels down to 8x8, for the world drawn smaller than 1:1 on the top screen.
     const s32 levels = mipmaps == RMIP_NONE ? 0 : C3D_TexCalcMaxLevel(tw, th);
     if (levels > 0 && premultiply && fmt == GPU_RGBA5551)
@@ -1034,39 +1078,19 @@ void C3DRenderer::UploadTexture(RTexture* pTex, s32 width, s32 height, const u32
         return;
     }
     mUploads++;
-    if (levels == 0)
+    // One pass per level: each writes its texels and averages the next level into the scratch buffer.
+    u32* pHalf = 0;
+    if (levels > 0)
     {
-        WriteLevel(pTex->mTex.data, fmt, tw, th, pRgba, width, height, cw, ch);
+        p->mLevel.resize((size_t)(tw / 2) * (th / 2));
+        pHalf = &p->mLevel[0];
     }
-    else
+    const SourceLevel src = {pRgba, width, height, cw, ch, premultiply};
+    WriteLevel(pTex->mTex.data, fmt, tw, th, src, pHalf);
+    for (s32 l = 1; l <= levels; l++)
     {
-        // Level 0 padded to the texture's size, then each level halved from the one before.
-        std::vector<u32>& level = p->mLevel;
-        level.resize((size_t)tw * th + (size_t)tw * th / 4);
-        for (s32 y = 0; y < th; y++)
-        {
-            const s32 cy = y < ch ? y : ch - 1;
-            const u32* pRow = pRgba + (size_t)(ch == height ? cy : (s32)((long long)cy * height / ch)) * width;
-            for (s32 x = 0; x < tw; x++)
-            {
-                const s32 cx = x < cw ? x : cw - 1;
-                level[(size_t)y * tw + x] = pRow[cw == width ? cx : (s32)((long long)cx * width / cw)];
-            }
-        }
-        u32* pCur = &level[0];
-        u32* pNext = pCur + (size_t)tw * th;
-        for (s32 l = 0; l <= levels; l++)
-        {
-            const s32 w = tw >> l, h = th >> l;
-            WriteLevel(C3D_Tex2DGetImagePtr(&pTex->mTex, l, NULL), fmt, w, h, pCur, w, h, w, h);
-            if (l < levels)
-            {
-                HalveLevel(pNext, pCur, w, h, fmt);
-                u32* pTmp = pCur;
-                pCur = pNext;
-                pNext = pTmp;
-            }
-        }
+        const ScratchLevel level = {pHalf, tw >> l};
+        WriteLevel(C3D_Tex2DGetImagePtr(&pTex->mTex, l, NULL), fmt, tw >> l, th >> l, level, l < levels ? pHalf : 0);
     }
     C3D_TexFlush(&pTex->mTex);
     Stats3DS_AddUpload(svcGetSystemTick() - t0);

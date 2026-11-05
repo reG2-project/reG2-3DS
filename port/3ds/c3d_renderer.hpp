@@ -39,7 +39,7 @@ class C3DRenderer : public IRenderer
     s32 MaxSamples() const { return 0; }
 
     RTexture* CreateTexture() override;
-    void UploadTexture(RTexture* pTex, s32 width, s32 height, const u32* pRgba, RMipmaps mipmaps) override;
+    void UploadTexture(RTexture* pTex, s32 width, s32 height, const u32* pRgba, RMipmaps mipmaps, u32 texels = 0) override;
     void FreeTexture(RTexture* pTex) override;
     void BeginScene() override;
     void EndScene() override;

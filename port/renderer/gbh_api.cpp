@@ -40,6 +40,7 @@ struct PalEntry
     u16 m565[512];
     u32 mRgba[2][256];
     u32 mRaw[256]; // game palette colours, 0x00RRGGBB
+    u8 mBits[2][256]; // TexelBits of mRgba
 };
 
 // field_1C_ptr of a texture.
@@ -245,9 +246,13 @@ RTexture* Resolve(STexture* pTexture, int variant)
         }
         else if (pTexture->field_14_original_pixel_data_ptr && pTexture->field_18_pPaltData && w > 0 && h > 0)
         {
-            const u32* pal = ((const PalEntry*)pTexture->field_18_pPaltData)->mRgba[variant];
+            const PalEntry* pPal = (const PalEntry*)pTexture->field_18_pPaltData;
+            const u32* pal = pPal->mRgba[variant];
+            const u8* bits = pPal->mBits[variant];
+            const RMipmaps mipmaps = variant == kAlpha ? RMIP_ALPHA : RMIP_OPAQUE;
             const s32 slot = SlotSize(w, h);
-            gConvertBuffer.assign((size_t)slot * slot, 0);
+            gConvertBuffer.resize((size_t)slot * slot);
+            u32 texels = ~0u;
             for (s32 y = 0; y < h; y++)
             {
                 // Sprite and tile pages are 256 pixels wide.
@@ -256,17 +261,24 @@ RTexture* Resolve(STexture* pTexture, int variant)
                 for (s32 x = 0; x < w; x++)
                 {
                     dst[x] = pal[src[x]];
+                    texels &= bits[src[x]];
                 }
                 if (w < slot)
                 {
                     dst[w] = dst[w - 1];
+                    memset(dst + w + 1, 0, (size_t)(slot - w - 1) * 4);
                 }
             }
             if (h < slot)
             {
                 memcpy(&gConvertBuffer[(size_t)h * slot], &gConvertBuffer[(size_t)(h - 1) * slot], (size_t)slot * 4);
+                memset(&gConvertBuffer[(size_t)(h + 1) * slot], 0, (size_t)(slot - h - 1) * slot * 4);
             }
-            gRenderer->UploadTexture(pData->mTex[variant], slot, slot, &gConvertBuffer[0], variant == kAlpha ? RMIP_ALPHA : RMIP_OPAQUE);
+            if (w + 1 < slot || h + 1 < slot)
+            {
+                texels &= TexelBits(0, mipmaps);
+            }
+            gRenderer->UploadTexture(pData->mTex[variant], slot, slot, &gConvertBuffer[0], mipmaps, texels);
         }
         else
         {
@@ -292,6 +304,11 @@ void ConvertPalette(PalEntry* pPal)
         // 16-bit textures: bits truncated, expanded by replication when sampled.
         pPal->mRgba[kOpaque][i] = ((r & 0xF8) | (r >> 5)) | (((g & 0xFC) | (g >> 6)) << 8) | (((b & 0xF8) | (b >> 5)) << 16) | a;
         pPal->mRgba[kAlpha][i] = ((r >> 4) * 17) | (((g >> 4) * 17) << 8) | (((b >> 4) * 17) << 16) | a;
+    }
+    for (s32 i = 0; i < 256; i++)
+    {
+        pPal->mBits[kOpaque][i] = (u8)TexelBits(pPal->mRgba[kOpaque][i], RMIP_OPAQUE);
+        pPal->mBits[kAlpha][i] = (u8)TexelBits(pPal->mRgba[kAlpha][i], RMIP_ALPHA);
     }
 }
 

@@ -62,8 +62,11 @@ Each is small and makes sense on `port/m0` too:
 lighting, shadows or bloom). The game's vertices are in logical pixels with 1/w; the vertex shader
 outputs `(x*w, y*w, z*w, w)` so the PICA200 interpolates textures with perspective. Textures arrive
 as RGBA8 from the gbh_* layer and are stored in the smallest exact PICA format (RGB565, RGBA4,
-RGB5A1, else RGBA8), padded to a power of two. The CPU surface is composited through an RGB5A1
-texture. One frame of vertices lives in linear memory; texture frees wait for the GPU.
+RGB5A1, else RGBA8), padded to a power of two. The gbh_* layer tells the format from each palette
+entry's bits (`RTexelBits`), so only other textures are scanned; each level is then written in one
+pass that premultiplies, converts, pads, writes Morton order and averages the next level into a
+scratch buffer. The CPU surface is composited through an RGB5A1 texture. One frame of vertices lives
+in linear memory; texture frees wait for the GPU.
 
 The top screen is drawn at 400x240: the game's 800x480 scaled by half, with no vertex offset and bilinear
 filtering, so the game's 1:1 quads (menus, text) come out as the exact 2x2 average of their texels.
@@ -242,8 +245,9 @@ once per update, and the pad bindings once from the registry). Night lighting te
 vertices against the lights in its reach only. Logic runs at the original's 30.3 steps per second
 throughout. A second profile (walking and driving, day and night) put the main thread's CPU time at
 12 to 14 ms per frame in Azahar: about 3 ms logic, 5 to 7 ms drawing, 3 to 4 ms input polling.
-Remaining leads: texture uploads while driving (up to six passes per texture, 1 to 2 ms spikes),
-one pad update per frame, fewer draw calls (about 100 per frame) with a tile atlas. The system core runs the sound (see Sound).
+Texture uploads went from up to six passes per texture to one per level, 2.5 to 3 times faster
+in Azahar (a 64x64 sprite 2.3 to 0.84 ms, a 128x128 one 9.2 to 3.1 ms; upload time in a frame of a
+long drive at most 7 to 10 ms instead of 19 to 29). Remaining leads: one pad update per frame, fewer draw calls (about 100 per frame) with a tile atlas. The system core runs the sound (see Sound).
 
 On the 3DS any per-frame file access is expensive: each path component of an `fopen`, `access` or
 `stat` is a request to the FS service (tens of milliseconds in Azahar). The pause menu and the

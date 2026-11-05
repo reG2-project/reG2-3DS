@@ -66,7 +66,7 @@ class GLRenderer : public IRenderer
 
     // IRenderer
     RTexture* CreateTexture();
-    void UploadTexture(RTexture* pTex, s32 width, s32 height, const u32* pRgba, RMipmaps mipmaps);
+    void UploadTexture(RTexture* pTex, s32 width, s32 height, const u32* pRgba, RMipmaps mipmaps, u32 texels = 0);
     void FreeTexture(RTexture* pTex);
     void BeginScene();
     void EndScene();
