@@ -31,8 +31,9 @@ struct C3DVertex
 };
 
 const s32 kMaxVerts = 65536;
-const s32 kScreenW = 400;
-const s32 kScreenH = 240;
+// The top screen's target, landscape: 800x480, which the display transfer halves into the 400x240 screen.
+const s32 kScreenW = 800;
+const s32 kScreenH = 480;
 const s32 kMaxTexSize = 1024;
 // GLRenderer's default vertex offset: D3D pixel centres are on integers, the PICA's on halves.
 const f32 kPixelOffset = 0.5f - 1.0f / 2048.0f;
@@ -319,7 +320,7 @@ void C3DRenderer::Impl::ApplyState(RTexture* pTex, u32 state, const ScreenRect& 
 {
     if (!mStateValid || scissor != mAppliedScissor)
     {
-        // Mtx_OrthoTilt turns the screen: x runs down the 400 rows of the 240x400 target, y across its columns.
+        // Mtx_OrthoTilt turns the screen: x runs down the 800 rows of the 480x800 target, y across its columns.
         C3D_SetScissor(GPU_SCISSOR_NORMAL, kScreenH - scissor.y1, kScreenW - scissor.x1, kScreenH - scissor.y0, kScreenW - scissor.x0);
         mAppliedScissor = scissor;
     }

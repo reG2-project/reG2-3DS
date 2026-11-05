@@ -57,7 +57,8 @@ IGLContext* CreateGLContext(SDL_Window*, const char** ppError)
         *ppError = "C3D_Init failed";
         return 0;
     }
-    gTarget = C3D_RenderTargetCreate(240, 400, GPU_RB_RGBA8, -1);
+    // Twice the screen's size each way: the display transfer averages 2x2 pixels into one.
+    gTarget = C3D_RenderTargetCreate(480, 800, GPU_RB_RGBA8, -1);
     if (!gTarget)
     {
         C3D_Fini();
@@ -65,7 +66,7 @@ IGLContext* CreateGLContext(SDL_Window*, const char** ppError)
         return 0;
     }
     const u32 flags = GX_TRANSFER_FLIP_VERT(0) | GX_TRANSFER_OUT_TILED(0) | GX_TRANSFER_RAW_COPY(0) | GX_TRANSFER_IN_FORMAT(GX_TRANSFER_FMT_RGBA8) |
-                      GX_TRANSFER_OUT_FORMAT(gfxGetScreenFormat(GFX_TOP)) | GX_TRANSFER_SCALING(GX_TRANSFER_SCALE_NO);
+                      GX_TRANSFER_OUT_FORMAT(gfxGetScreenFormat(GFX_TOP)) | GX_TRANSFER_SCALING(GX_TRANSFER_SCALE_XY);
     C3D_RenderTargetSetOutput(gTarget, GFX_TOP, GFX_LEFT, flags);
     return new C3DContext();
 }
