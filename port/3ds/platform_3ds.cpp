@@ -7,6 +7,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <string>
 
 #ifdef GTA2_OPENDSP
 #include <opendsp.h>
@@ -19,7 +20,14 @@ extern "C" u32 __stacksize__ = 2 * 1024 * 1024;
 extern "C" u32 __ctru_heap_size = 40 * 1024 * 1024;
 extern "C" u32 __ctru_linear_heap_size = 16 * 1024 * 1024;
 
-static const char kGameDir[] = "sdmc:/3ds/gta2";
+extern "C" int __system_argc;
+extern "C" char** __system_argv;
+
+// The game folder: the .3dsx's own folder when it holds the data, else this one.
+static const char kFallbackDir[] = "sdmc:/3ds/gta2";
+static char sTried[2][256];
+static int sTriedCount;
+static bool sHasData;
 
 static void SDLCALL LogToStderr(void*, int, SDL_LogPriority, const char* message)
 {
@@ -72,11 +80,76 @@ static void StartDsp()
 }
 #endif
 
+static bool HasData(const char* dir)
+{
+    char path[300];
+    snprintf(path, sizeof(path), "%s/data/fstyle.sty", dir);
+    struct stat st;
+    return stat(path, &st) == 0;
+}
+
+static bool TryFolder(const char* dir)
+{
+    for (int i = 0; i < sTriedCount; i++)
+    {
+        if (strcmp(sTried[i], dir) == 0)
+        {
+            return false;
+        }
+    }
+    snprintf(sTried[sTriedCount], sizeof(sTried[0]), "%s", dir);
+    sTriedCount++;
+    return HasData(dir) && chdir(dir) == 0;
+}
+
+// The .3dsx's folder from the path the launcher passes (hbmenu: "sdmc:/3ds/gta2/gta2.3dsx"); none from
+// 3dslink, a CIA or an emulator that gives no arguments.
+static bool TryLaunchFolder()
+{
+    if (__system_argc < 1 || !__system_argv[0] || strncmp(__system_argv[0], "sdmc:/", 6) != 0)
+    {
+        return false;
+    }
+    char dir[256];
+    snprintf(dir, sizeof(dir), "%s", __system_argv[0]);
+    char* pSlash = strrchr(dir, '/');
+    if (!pSlash || pSlash - dir < 6)
+    {
+        return false;
+    }
+    *pSlash = 0;
+    return TryFolder(dir);
+}
+
+// A message on the top screen until START, before SDL owns the screens.
+static void ShowError(const char* text)
+{
+    gfxInitDefault();
+    consoleInit(GFX_TOP, NULL);
+    fputs(text, stdout);
+    while (aptMainLoop())
+    {
+        hidScanInput();
+        if (hidKeysDown() & KEY_START)
+        {
+            break;
+        }
+        gfxFlushBuffers();
+        gfxSwapBuffers();
+        gspWaitForVBlank();
+    }
+    gfxExit();
+}
+
 // Before main.cpp's EnterGameFolderAtStart (101) and the game's constructors.
 __attribute__((constructor(100))) static void StartUp()
 {
     osSetSpeedupEnable(true);
-    chdir(kGameDir);
+    sHasData = TryLaunchFolder() || TryFolder(kFallbackDir);
+    if (!sHasData)
+    {
+        return;
+    }
     // The log: stderr and SDL's, unbuffered so that it survives a crash.
     freopen("gta2_log.txt", "w", stderr);
     setvbuf(stderr, NULL, _IONBF, 0);
@@ -89,11 +162,25 @@ __attribute__((constructor(100))) static void StartUp()
 
 bool port_PrepareGameFolder(bool)
 {
-    struct stat st;
-    if (stat("data/fstyle.sty", &st) != 0)
+    if (sHasData)
     {
-        fprintf(stderr, "gta2: no game data in %s/data\n", kGameDir);
-        return false;
+        char cwd[256];
+        fprintf(stderr, "gta2: started from %s, game folder %s\n", __system_argc > 0 && __system_argv[0] ? __system_argv[0] : "(no path)",
+                getcwd(cwd, sizeof(cwd)) ? cwd : "?");
+        return true;
     }
-    return true;
+    std::string text = "\x1b[31mGTA2: no game data found\x1b[0m\n\nLooked for data/fstyle.sty in:\n";
+    for (int i = 0; i < sTriedCount; i++)
+    {
+        text += "  ";
+        text += sTried[i];
+        text += "/\n";
+    }
+    text += "\nCopy the PC version's data folder (fstyle.sty,\n"
+            "e.gxt, the cities' .gmp, .sty and .scr files)\n"
+            "to the folder of gta2.3dsx or to sdmc:/3ds/gta2,\n"
+            "as data/.\n"
+            "\nPress START to exit.";
+    ShowError(text.c_str());
+    return false;
 }

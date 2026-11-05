@@ -130,14 +130,18 @@ unsigned image, and its sleep handling, need a console.
 
 ## Running
 
-The game folder is `sdmc:/3ds/gta2/`: `data/` (without `GTAudio` and `Movie`, about 65 MB),
-`gta2_registry.ini`, `player/`, `test/`. The port's log is `gta2_log.txt` there (stderr and SDL's log).
+The game folder is the `.3dsx`'s own folder when it holds `data/fstyle.sty` (from the path the
+Homebrew Launcher passes as `argv[0]`, which libctru sets before the constructors), else `sdmc:/3ds/gta2/`:
+`data/` (without `GTAudio` and `Movie`, about 65 MB), `gta2_registry.ini`, `player/` (the saves), `test/`.
+Without the data in either, the top screen lists the folders tried and the files expected until START.
+The port's log is `gta2_log.txt` there (stderr and SDL's log).
 `gta2_env.txt` there sets environment variables, one `KEY=VALUE` per line: `GTA2_3DS_STATS=150` logs
 memory and renderer times every 150 frames, `GTA2_LOOP_STATS=1` steps, frames and their times,
 `GTA2_AUDIO_DRIVER=dummy` runs the sound without the DSP. To boot into a city, the registry's `Debug` keys
 `skip_frontend`, `mapname`, `stylename` and `scriptname` (see `Source/debug.cpp`).
 
-Azahar (2126.2) runs the `.3dsx` without firmware or system files, in Old or New 3DS mode. The start
+Azahar (2126.2) runs the `.3dsx` without firmware or system files, in Old or New 3DS mode. It passes
+no arguments, so the game folder there is always `sdmc:/3ds/gta2/`. The start
 to the first city frame takes about 15 seconds there.
 
 Tests: `test/pad_input.txt` presses buttons, one `<first frame> <last frame> <hex KEY_* mask>` per line
@@ -223,5 +227,4 @@ draws at the 30 fps limit.
 - Sound on hardware: OpenDSP's DSP load and sleep, the Old 3DS's audio thread on the system core.
 - Real Old 3DS timings: Azahar's are optimistic for memory bound code (no cache model). If the
   hardware is short, the next candidates are the per-vertex lighting at night and SDL's pad reads.
-- The game folder from the `.3dsx`'s own folder rather than a fixed `sdmc:/3ds/gta2`.
 - Real hardware: a 3DS or New 3DS with custom firmware.
