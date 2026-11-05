@@ -23,6 +23,7 @@ struct RTexture
     u32 mUsedFrame; // last frame that drew it, 0 for none
     bool mPremultiplied; // colours times alpha: blended with ONE, 1 - alpha
     u8 mLevels;          // mip levels after the first
+    u32 mVersion;        // counts the uploads, for the bottom screen's signature
 };
 
 namespace
@@ -42,6 +43,8 @@ const s32 kScreenH = 240;
 const s32 kBottomW = 320;
 const s32 kBottomH = 240;
 const s32 kMaxTexSize = 1024;
+// The bottom screen is drawn at most every that many frames, and only when what it shows changed.
+const u32 kBottomEvery = 2;
 // GLRenderer's default vertex offset: D3D pixel centres are on integers, the PICA's on halves.
 const f32 kPixelOffset = 0.5f - 1.0f / 2048.0f;
 // Batch state only: the batch's texture is premultiplied; its draws sample the first mip level only.
@@ -397,6 +400,9 @@ struct C3DRenderer::Impl : HudTheme::Sink
     bool mScrollSeen;
     s32 mScrollOverflow;
     u64 mScrollStartMs;
+    // The signature of the bottom screen's last drawn frame, and that frame (0 before the first).
+    u32 mBottomSig;
+    u32 mBottomFrame;
     C3D_RenderTarget* mBottom;
     C3D_Mtx mBottomProjection;
     // The target drawn on, landscape.
@@ -419,6 +425,7 @@ struct C3DRenderer::Impl : HudTheme::Sink
     void Append(const RVertex* pVerts, s32 count, RTexture* pTex, u32 state, f32 offset, const ScreenRect& scissor, const HudRule* pRule);
     void Flush();
     f32 ScrollOffset();
+    u32 BottomSignature(f32 scroll) const;
     void DrawHud();
     void DrawQuads(const HudTheme::Quad* pQuads, s32 count, RTexture* pTex, u32 state) override;
     void ApplyState(RTexture* pTex, u32 state, const ScreenRect& scissor);
@@ -651,7 +658,33 @@ f32 C3DRenderer::Impl::ScrollOffset()
     return (f32)Round(overflow - scrolled);
 }
 
-// The bottom screen, after the top one: cleared, with the HUD's batches of the frame.
+// What the bottom screen would show: its panels, scroll and HUD batches, with their vertices and textures.
+u32 C3DRenderer::Impl::BottomSignature(f32 scroll) const
+{
+    u32 h = 2166136261u;
+    const auto mix = [&h](u32 v) { h = (h ^ v) * 16777619u; };
+    mix(mHudPanels);
+    mix((u32)(s32)scroll);
+    for (size_t i = 0; i < mHudBatches.size(); i++)
+    {
+        const HudBatch& b = mHudBatches[i];
+        mix((u32)(size_t)b.tex);
+        mix(b.tex ? b.tex->mVersion : 0);
+        mix(b.state);
+        mix((u32)b.scissor.x0 | ((u32)b.scissor.y0 << 16));
+        mix((u32)b.scissor.x1 | ((u32)b.scissor.y1 << 16));
+        mix(b.scroll);
+        const u32* pWords = reinterpret_cast<const u32*>(mVerts + b.start);
+        for (size_t w = 0; w < b.count * (sizeof(C3DVertex) / 4); w++)
+        {
+            mix(pWords[w]);
+        }
+    }
+    return h;
+}
+
+// The bottom screen, after the top one: cleared, with the HUD's batches of the frame. When nothing on it changed,
+// or it was drawn less than kBottomEvery frames ago, it is left alone and keeps showing its last frame.
 void C3DRenderer::Impl::DrawHud()
 {
     const u64 t0 = svcGetSystemTick();
@@ -661,6 +694,16 @@ void C3DRenderer::Impl::DrawHud()
         mHudBatches.clear();
         return;
     }
+    const u32 sig = BottomSignature(scroll);
+    if (mBottomFrame && (sig == mBottomSig || mFrame - mBottomFrame < kBottomEvery))
+    {
+        mHudBatches.clear();
+        mHudPanels = 0;
+        Stats3DS_AddBottom(svcGetSystemTick() - t0, false);
+        return;
+    }
+    mBottomSig = sig;
+    mBottomFrame = mFrame;
     C3D_RenderTargetClear(mBottom, C3D_CLEAR_COLOR, 0x000000FF, 0);
     C3D_FrameDrawOn(mBottom);
     mTargetW = kBottomW;
@@ -971,6 +1014,7 @@ void C3DRenderer::CompositeSurface(const u16* pPixels, s32 pitchBytes, s32 width
         return;
     }
     mUploads++;
+    pTex->mVersion++;
     u16* pData = (u16*)pTex->mTex.data;
     const s32 tilesPerRow = pTex->mTex.width >> 3;
     for (s32 y = 0; y < height; y++)
@@ -1080,6 +1124,7 @@ void C3DRenderer::UploadTexture(RTexture* pTex, s32 width, s32 height, const u32
         return;
     }
     mUploads++;
+    pTex->mVersion++;
     // One pass per level: each writes its texels and averages the next level into the scratch buffer.
     u32* pHalf = 0;
     if (levels > 0)
