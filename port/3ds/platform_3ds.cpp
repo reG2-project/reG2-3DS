@@ -10,6 +10,10 @@
 
 // The main thread's stack (libctru's default is 32 KB): the game has large locals.
 extern "C" u32 __stacksize__ = 2 * 1024 * 1024;
+// Fixed sizes within the Old 3DS's 64 MB (with the 3 MB image and the stack), so the emulator holds the
+// game to them in either mode. The game peaks near 22 MB of heap (frontend) and 7 MB of linear heap.
+extern "C" u32 __ctru_heap_size = 40 * 1024 * 1024;
+extern "C" u32 __ctru_linear_heap_size = 16 * 1024 * 1024;
 
 static const char kGameDir[] = "sdmc:/3ds/gta2";
 
