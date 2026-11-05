@@ -116,7 +116,7 @@ class IRenderer
     // The HUD draws that follow belong to that group (PortHudScreen::Group, port/src/hud_screen.hpp). True if the
     // renderer shows the group on a HUD screen of its own: its draws then come in 640x480 layout pixels.
     virtual bool SetHudGroup(s32) { return false; }
-    // That screen's width in layout pixels, 0 without one.
+    // How much of that screen's width the brief may take, in layout pixels; 0 without one.
     virtual s32 HudScreenWidth() const { return 0; }
 };
 

@@ -3,10 +3,12 @@
 #include "stats_3ds.hpp"
 #include "../src/hud_screen.hpp"
 #include "hud_theme.hpp"
+#include "minimap.hpp"
 #include <3ds.h>
 #include <citro3d.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 // render.v.pica assembled by picasso and embedded by bin2s.
@@ -291,14 +293,26 @@ struct HudGroupRules
 };
 
 // The bottom screen: gang bars and pager on the left, the status row along the top, wanted level, power-ups and
-// weapon below it, the brief (scrolling when long) at the bottom; each part in its panel (HudTheme::Part).
+// weapon below it, the brief (scrolling when long) bottom left and the minimap in its frame bottom right; each part
+// in its panel (HudTheme::Part). Without the minimap the brief takes the whole bottom row.
 const HudTheme::Rect kHudPanels[HudTheme::kPartCount] = {
     {2, 2, 102, 80},     // kGangs
     {2, 84, 102, 124},   // kPager
     {106, 2, 318, 50},   // kStatus
     {106, 54, 236, 124}, // kWanted
     {240, 54, 318, 124}, // kWeapon
-    {2, 128, 318, 238},  // kBrief
+    {2, 128, 206, 238},  // kBrief
+};
+const s16 kBriefRightNoMinimap = 318;
+const HudTheme::Rect kMinimapFrame = {208, 128, 318, 238};
+// GTA2_3DS_MINIMAP=wide: the whole bottom row while no brief shows.
+const HudTheme::Rect kMinimapWideFrame = {2, 128, 318, 238};
+
+enum MinimapMode
+{
+    kMinimapOn,
+    kMinimapWide,
+    kMinimapOff,
 };
 const ScreenRect kAll = {0, 0, 640, 480};
 const HudRule kStatsRules[] = {
@@ -311,7 +325,7 @@ const HudRule kWantedRules[] = {{kAll, -149, 57, {106, 54, 236, 124}, false, Hud
 const HudRule kGangRules[] = {{kAll, 0, 0, {2, 2, 102, 80}, false, HudTheme::kGangs}};
 const HudRule kBriefRules[] = {
     {{0, 0, 60, 480}, 0, -244, {2, 128, 64, 238}, false, HudTheme::kBrief}, // the face
-    {kAll, 0, -244, {64, 130, 318, 236}, true, HudTheme::kBrief},
+    {kAll, 0, -244, {64, 130, 206, 236}, true, HudTheme::kBrief},
 };
 const HudRule kPagerRules[] = {{kAll, 21, -2, {0, 80, 104, 128}, false, HudTheme::kPager}};
 
@@ -407,6 +421,11 @@ struct C3DRenderer::Impl : HudTheme::Sink
     u32 mBottomFrame;
     C3D_RenderTarget* mBottom;
     C3D_Mtx mBottomProjection;
+    // The layout: kHudPanels and kHudGroups, with the brief's right edge for the minimap's mode.
+    MinimapMode mMinimap;
+    HudTheme::Rect mPanels[HudTheme::kPartCount];
+    HudRule mBriefRules[sizeof(kBriefRules) / sizeof(kBriefRules[0])];
+    HudGroupRules mGroups[PortHudScreen::kGroupCount];
     // The target drawn on, landscape.
     s32 mTargetW, mTargetH;
 
@@ -427,7 +446,7 @@ struct C3DRenderer::Impl : HudTheme::Sink
     void Append(const RVertex* pVerts, s32 count, RTexture* pTex, u32 state, f32 offset, const ScreenRect& scissor, const HudRule* pRule);
     void Flush();
     f32 ScrollOffset();
-    u32 BottomSignature(f32 scroll) const;
+    u32 BottomSignature(f32 scroll, u32 minimap) const;
     void DrawHud();
     void DrawQuads(const HudTheme::Quad* pQuads, s32 count, RTexture* pTex, u32 state) override;
     void DrawTriangles(const RVertex* pVerts, s32 count, RTexture* pTex, u32 state) override;
@@ -667,11 +686,12 @@ f32 C3DRenderer::Impl::ScrollOffset()
 }
 
 // What the bottom screen would show: its panels, scroll and HUD batches, with their vertices and textures.
-u32 C3DRenderer::Impl::BottomSignature(f32 scroll) const
+u32 C3DRenderer::Impl::BottomSignature(f32 scroll, u32 minimap) const
 {
     u32 h = 2166136261u;
     const auto mix = [&h](u32 v) { h = (h ^ v) * 16777619u; };
     mix(mHudPanels);
+    mix(minimap);
     mix((u32)(s32)scroll);
     for (size_t i = 0; i < mHudBatches.size(); i++)
     {
@@ -702,7 +722,10 @@ void C3DRenderer::Impl::DrawHud()
         mHudBatches.clear();
         return;
     }
-    const u32 sig = BottomSignature(scroll);
+    // The minimap shows with the HUD, in game only.
+    const u32 minimap = mHudPanels && mMinimap != kMinimapOff ? Minimap::Update(*mOwner) : 0;
+    const bool wide = mMinimap == kMinimapWide && !(mHudPanels & (1u << HudTheme::kBrief));
+    const u32 sig = BottomSignature(scroll, minimap ^ wide);
     if (mBottomFrame && (sig == mBottomSig || mFrame - mBottomFrame < kBottomEvery))
     {
         mHudBatches.clear();
@@ -720,7 +743,11 @@ void C3DRenderer::Impl::DrawHud()
     mStateValid = false;
     if (mHudPanels)
     {
-        HudTheme::Draw(*mOwner, *this, kHudPanels, mHudPanels);
+        HudTheme::Draw(*mOwner, *this, mPanels, mHudPanels);
+        if (minimap)
+        {
+            Minimap::Draw(*mOwner, *this, wide ? kMinimapWideFrame : kMinimapFrame);
+        }
         Flush();
         mHudPanels = 0;
     }
@@ -893,6 +920,17 @@ bool C3DRenderer::Init(Loader, const char** ppError)
     p->mOwner = this;
     p->mTarget = pTarget;
     p->mBottom = C3DContextBottomTarget();
+    const char* pMinimap = getenv("GTA2_3DS_MINIMAP");
+    p->mMinimap = !pMinimap ? kMinimapOn : !strcmp(pMinimap, "off") ? kMinimapOff : !strcmp(pMinimap, "wide") ? kMinimapWide : kMinimapOn;
+    memcpy(p->mPanels, kHudPanels, sizeof(kHudPanels));
+    memcpy(p->mBriefRules, kBriefRules, sizeof(kBriefRules));
+    memcpy(p->mGroups, kHudGroups, sizeof(kHudGroups));
+    p->mGroups[PortHudScreen::kBrief].rules = p->mBriefRules;
+    if (p->mMinimap == kMinimapOff)
+    {
+        p->mPanels[HudTheme::kBrief].x1 = kBriefRightNoMinimap;
+        p->mBriefRules[1].slot.x1 = kBriefRightNoMinimap;
+    }
     Mtx_OrthoTilt(&p->mBottomProjection, 0.0f, (f32)kBottomW, (f32)kBottomH, 0.0f, 0.0f, 1.0f, true);
     p->mDvlb = DVLB_ParseFile((u32*)render_shbin, (u32)(render_shbin_end - render_shbin));
     p->mVerts = (C3DVertex*)linearAlloc(kMaxVerts * sizeof(C3DVertex));
@@ -941,6 +979,7 @@ void C3DRenderer::Shutdown()
         p->mInFrame = false;
     }
     HudTheme::Shutdown(*this);
+    Minimap::Shutdown(*this);
     FreeTexture(p->mSurface);
     p->mSurface = 0;
     FreeTexture(p->mWhite);
@@ -1302,11 +1341,12 @@ bool C3DRenderer::SetHudGroup(s32 group)
         return false;
     }
     const bool hud = group > PortHudScreen::kWorld && group < PortHudScreen::kGroupCount;
-    p->mHudGroup = hud ? &kHudGroups[group] : 0;
+    p->mHudGroup = hud ? &p->mGroups[group] : 0;
     return hud;
 }
 
 s32 C3DRenderer::HudScreenWidth() const
 {
-    return mImpl && mImpl->mBottom ? kBottomW : 0;
+    // The brief's panel: the minimap takes the rest of its row.
+    return mImpl && mImpl->mBottom ? mImpl->mPanels[HudTheme::kBrief].x1 : 0;
 }
