@@ -654,6 +654,7 @@ f32 C3DRenderer::Impl::ScrollOffset()
 // The bottom screen, after the top one: cleared, with the HUD's batches of the frame.
 void C3DRenderer::Impl::DrawHud()
 {
+    const u64 t0 = svcGetSystemTick();
     const f32 scroll = ScrollOffset();
     if (!mBottom)
     {
@@ -693,6 +694,7 @@ void C3DRenderer::Impl::DrawHud()
         mOwner->mVertices += (u32)b.count;
     }
     mHudBatches.clear();
+    Stats3DS_AddBottom(svcGetSystemTick() - t0, true);
 }
 
 // The HUD theme's draws, under the HUD on the bottom screen.
