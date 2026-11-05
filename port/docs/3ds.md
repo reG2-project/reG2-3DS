@@ -109,9 +109,17 @@ it with `port/3ds/build_opendsp.sh <OpenDSP source> <prefix>` and pass `-DOPENDS
 `sdmc:/3ds/dspfirm.cdc` as other homebrew does.
 
 Azahar plays it with HLE audio (the default, which emulates Nintendo's firmware and only hashes the
-image) and with LLE (Teakra runs OpenDSP's code, at about a quarter of real time). In Azahar, sound costs
-about 0.5 ms per step and 4 frames per second in bil while walking; OpenDSP costs nothing over Nintendo's
-path. OpenDSP was tested by its author on a New 3DS with Luma3DS; whether a stock DSP module accepts its
+image) and with LLE (Teakra runs OpenDSP's code, at about a quarter of real time). OpenDSP costs nothing over Nintendo's path.
+
+The port mixes the game's sounds on the CPU (`compat/src/miles.cpp`) at the DSP's 32728 Hz, and SDL's
+audio thread runs on the system core (core 1, 30 % of it, `APT_SetAppCpuTimeLimit`) on both models:
+SDL 3.4.18 does that on the New 3DS only, `build_sdl3.sh` applies `sdl3_audio_syscore.patch` for the Old.
+Mixing takes about 1.9 ms per frame in bil (5 voices), off the game's core; SDL's conversion, ndsp and
+the DSP cost nothing measurable. bil walks at 30 frames per second with sound. Two mixer changes made
+that possible (bit-exact with the previous output): the limiter scanned its 64-frame lookahead for every
+output frame (a quarter of the Old 3DS core), and each voice now has a loop per sample format with a
+steady-state path. Azahar's GDB stub only shows the main thread: the audio time was measured with tick
+counters and a lowest-priority thread counting idle time on core 0. OpenDSP was tested by its author on a New 3DS with Luma3DS; whether a stock DSP module accepts its
 unsigned image, and its sleep handling, need a console.
 
 ## Running
@@ -192,16 +200,21 @@ found the time in the port, not the game: the car lamps scanned delta images for
 pool every frame (now cached, cars off screen skipped), the CPU surface was refilled and scanned every
 frame (now only after a frame drew on it), and SDL's gamepad reads take a lock per call, a system call
 each on the 3DS (left as is: about 1 to 2 % on hardware by the profile's estimate). Logic runs at the
-original's 30.3 steps per second throughout. The second core is not used.
+original's 30.3 steps per second throughout. The system core runs the sound (see Sound).
+
+On the 3DS any per-frame file access is expensive: each path component of an `fopen`, `access` or
+`stat` is a request to the FS service (tens of milliseconds in Azahar). The pause menu and the
+frontend's OPTIONS page drew at 3 frames per second because the port's menus checked every frame
+whether the language's `data/?.gxt` existed; each language is now looked up once, and the pause menu
+draws at the 30 fps limit.
 
 ## Next steps
 
-- The pause menu draws at about 3 frames per second (330 ms per draw) in Azahar: to profile.
 - HUD: the zone and car name banners, pickup texts and big messages on the bottom screen too; a
   second pager; multiplayer scores; bonus stages.
 - Menus: the port's own menus (pause, options) with a larger font scale on the 3DS, or on the bottom
   screen at 1:1; 3DS button glyphs instead of the Xbox ones.
-- Sound, the console's DSP load and sleep with OpenDSP on hardware.
+- Sound on hardware: OpenDSP's DSP load and sleep, the Old 3DS's audio thread on the system core.
 - Real Old 3DS timings: Azahar's are optimistic for memory bound code (no cache model). If the
   hardware is short, the next candidates are the per-vertex lighting at night and SDL's pad reads.
 - The game folder from the `.3dsx`'s own folder rather than a fixed `sdmc:/3ds/gta2`.
