@@ -1,7 +1,8 @@
 # A minimap for the port
 
-Status: design study, nothing in the game yet. This note records the frame designs, the map
-treatments, where every map layer comes from, and how it would be built.
+Status: design study. The 3DS port draws frame E with the block-kind map on its bottom screen, with
+a stingier choice of layers (`port/docs/3ds.md`, Renderer). This note records the frame designs, the
+map treatments, where every map layer comes from, and how it would be built.
 
 The goal is a minimap that looks like part of GTA2's own HUD rather than a modern overlay.
 

@@ -2,7 +2,8 @@
 
 Status: proof of concept on the `port/3ds` branch. The game builds with devkitARM into a `.3dsx`, boots
 in the Azahar emulator straight into a city (the debug keys below), draws it with a citro3d renderer and
-takes the 3DS buttons, on Old and New 3DS (Old 3DS figures below). The HUD is on the bottom screen.
+takes the 3DS buttons, on Old and New 3DS (Old 3DS figures below). The HUD and a minimap are on the bottom
+screen.
 Sound plays through OpenDSP, a free replacement for the console's DSP firmware (optional, see Sound).
 
 ## What helps
@@ -93,6 +94,35 @@ texture, 2 draws per frame). The world stays on the top screen, with the zone an
 texts, big messages and arrows. The frontend and the pause menu stay on the top screen, legible but small
 (4 to 5 pixels high); the bottom screen is black there.
 
+The bottom screen's last row holds the brief on the left and a minimap on the right (`port/3ds/minimap*`):
+the tube frame E of the design study (`port/docs/minimap`), north up, 21x21 blocks around the player at 4
+pixels per block. It is meant to be fair, so it shows little:
+
+- the ground by block kind (water, road, pavement, field, buildings lighter when taller), with the
+  study's rims and shadows and a little of each lid's colour;
+- the gang territory the player is in, as a tint in the gang's colour (its respect meter's), stronger
+  along its edge; the other gangs' territories are not shown;
+- the player's arrow;
+- that gang's phones, under the rules of the game's own phone arrows (`Hud_Arrow::CheckVisibility`):
+  only inside the territory, not on a mission or in an arrow blocker zone, a mission phone only once the
+  player has the respect it asks for (green, yellow, red), answered phones left out; the info phone is a
+  square in the gang's colour. A phone off the map shows as an arrow on its edge, in its direction.
+
+Nothing else: no pickups, hidden weapons, secret tokens, frenzies, garages, churches or mission targets.
+The map is built once per city from the map and tiles in memory (about 260 ms in Azahar's Old 3DS mode,
+260 KB of heap while it runs) into a 512x512 RGB565 texture filled in place, 2x2 texels per block (512 KB
+of linear memory); the tint is a 256x256 A8 texture (64 KB) rebuilt when the gang changes, and the frame
+and markers, embedded at build time from the study's PNGs by `embed_png.py`, a 32 KB atlas. The game's
+headers and the renderer's clash, so `minimap_game.cpp` reads the game and `minimap.cpp` draws.
+`GTA2_3DS_MINIMAP=wide` gives the map the whole row while no brief shows; `off` leaves it out and gives the
+row to the brief.
+
+The bottom screen is drawn only when what it shows changed, at most every other frame (15 per second at
+30): a signature of the HUD's batches (vertices, textures and their uploads, states), its panels, the
+brief's scroll and the minimap's state (the player's position to the pixel, heading in 64 steps, gang and
+markers). citro3d transfers and swaps a screen only when its target was drawn on, so otherwise the screen
+keeps its last frame.
+
 ## Build
 
 ```bash
@@ -143,7 +173,8 @@ the bottom screen until START (`--wrap=SDL_ShowSimpleMessageBox`) rather than th
 The port's log is `gta2_log.txt` there (stderr and SDL's log).
 `gta2_env.txt` there sets environment variables, one `KEY=VALUE` per line: `GTA2_3DS_STATS=150` logs
 memory and renderer times every 150 frames, `GTA2_LOOP_STATS=1` steps, frames and their times,
-`GTA2_AUDIO_DRIVER=dummy` runs the sound without the DSP. To boot into a city, the registry's `Debug` keys
+`GTA2_AUDIO_DRIVER=dummy` runs the sound without the DSP, `GTA2_3DS_MINIMAP=wide` or `off` sets the
+minimap's place (see Renderer). To boot into a city, the registry's `Debug` keys
 `skip_frontend`, `mapname`, `stylename` and `scriptname` (see `Source/debug.cpp`).
 
 Azahar (2126.2) runs the `.3dsx` without firmware or system files, in Old or New 3DS mode. It passes
@@ -217,7 +248,8 @@ Measured in Azahar's Old 3DS mode with `GTA2_3DS_STATS` (peaks over a minute and
 | bil with sound (SDL's dummy driver) | 22.2 MB | 6.8 MB |
 
 New 3DS mode gives the same figures: the game's needs do not depend on the model. The sound bank of a
-city (6 MB) is the only addition still to come with the DSP.
+city (6 MB) is the only addition still to come with the DSP. The minimap adds its 608 KB of linear memory
+(walking for 100 s with sound: bil 8.1 to 8.7 MB, ste 8.2 to 8.8 MB at peak); the heap does not change.
 
 ### Speed
 
@@ -254,6 +286,11 @@ On the 3DS any per-frame file access is expensive: each path component of an `fo
 frontend's OPTIONS page drew at 3 frames per second because the port's menus checked every frame
 whether the language's `data/?.gxt` existed; each language is now looked up once, and the pause menu
 draws at the 30 fps limit.
+
+The bottom screen's CPU time per frame (`GTA2_3DS_STATS`, walking, Old 3DS mode): 0.38 to 0.42 ms
+(0.45 to 0.51 at most) when it was drawn every frame without a minimap; with the minimap and drawn only
+on a change, 0.05 ms standing (5 frames of 150 drawn, for the clock), 0.18 to 0.44 ms walking (up to 75
+of 150), and 0.65 to 0.87 ms in a frame that draws it. The frame rate stays at 30.3 in bil and ste.
 
 ## Next steps
 
