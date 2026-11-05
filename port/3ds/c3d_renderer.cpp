@@ -1,5 +1,6 @@
 #include "c3d_renderer.hpp"
 #include "c3d_context.hpp"
+#include "stats_3ds.hpp"
 #include <3ds.h>
 #include <citro3d.h>
 #include <stdio.h>
@@ -217,7 +218,9 @@ void C3DRenderer::Impl::BeginFrame()
     {
         return;
     }
+    const u64 t0 = svcGetSystemTick();
     C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
+    Stats3DS_AddFrameBegin(svcGetSystemTick() - t0);
     mInFrame = true;
     mFrame++;
     for (size_t i = 0; i < mPendingFree.size(); i++)
@@ -587,8 +590,10 @@ void C3DRenderer::Present(s32, s32)
     {
         GSPGPU_FlushDataCache(p->mVerts, p->mVertCount * sizeof(C3DVertex));
     }
+    const u64 t0 = svcGetSystemTick();
     C3D_FrameEnd(0);
     p->mInFrame = false;
+    Stats3DS_Frame(svcGetSystemTick() - t0);
 }
 
 RTexture* C3DRenderer::CreateTexture()
@@ -613,6 +618,7 @@ void C3DRenderer::UploadTexture(RTexture* pTex, s32 width, s32 height, const u32
     const s32 ch = height < kMaxTexSize ? height : kMaxTexSize;
     const s32 tw = Pow2(cw);
     const s32 th = Pow2(ch);
+    const u64 t0 = svcGetSystemTick();
     const GPU_TEXCOLOR fmt = PickFormat(pRgba, (size_t)width * height);
     if (!p->Allocate(pTex, tw, th, fmt, false))
     {
@@ -642,6 +648,7 @@ void C3DRenderer::UploadTexture(RTexture* pTex, s32 width, s32 height, const u32
         break;
     }
     C3D_TexFlush(&pTex->mTex);
+    Stats3DS_AddUpload(svcGetSystemTick() - t0);
     pTex->mScaleU = (f32)cw / tw;
     pTex->mScaleV = (f32)ch / th;
 }
