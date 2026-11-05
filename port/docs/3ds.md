@@ -157,6 +157,21 @@ X enter or exit, Y special 1, L and R the weapons, START the pause menu, SELECT 
 circle pad move; ZL and ZR (New 3DS) are specials 2 and 3, and brake and accelerate in vehicles. Tested
 in Azahar with scripted presses: the d-pad walks and START pauses. The menus show the Xbox glyphs.
 
+## HOME, sleep and exit
+
+SDL's event pump calls `aptMainLoop` once per game frame (the game's `PeekMessage`), between citro3d
+frames: HOME and the power button open the HOME Menu there, closing the lid sleeps there, and the
+suspend and sleep hooks of citro3d (GPU state) and ndsp (the DSP) do the rest. Nothing is pumped during a
+city load, so HOME waits for its end. After a resume the frame loop drops the steps it missed (at most 4
+are caught up). Closing from the HOME Menu makes `aptMainLoop` return false, SDL sends a quit event and
+the game shuts down as on a window close (`GTA2_EXIT_AT` tests the same path). None of this can be
+driven in a headless Azahar; it needs a console. The 3D slider does nothing: `gfxInit` leaves the top
+screen in 2D mode. `osSetSpeedupEnable` turns on the New 3DS's 804 MHz and L2 cache.
+
+A `.cia` (a HOME Menu icon without the Homebrew Launcher) would need `makerom` and `bannertool`, which
+the devkitPro image lacks, an `.rsf` with a unique ID and a 256x128 banner with a sound; it would get no
+`argv[0]` and so use `sdmc:/3ds/gta2/`. Not done: little gain over the `.3dsx`.
+
 ## Old 3DS
 
 ### Memory
