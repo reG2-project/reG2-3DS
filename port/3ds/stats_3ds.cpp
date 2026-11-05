@@ -29,9 +29,11 @@ void Init()
     const char* pInterval = getenv("GTA2_3DS_STATS");
     sInterval = pInterval ? (u32)atoi(pInterval) : 0;
     sLinearTotal = envGetLinearHeapSize();
-    fprintf(stderr, "3ds: memory type %lu, application region %lu KB, heap %lu KB, linear heap %lu KB\n",
-            osGetApplicationMemType(), osGetMemRegionSize(MEMREGION_APPLICATION) / 1024, envGetHeapSize() / 1024,
-            envGetLinearHeapSize() / 1024);
+    bool isNew3DS = false;
+    APT_CheckNew3DS(&isNew3DS);
+    fprintf(stderr, "3ds: %s, memory type %lu, application region %lu KB, heap %lu KB, linear heap %lu KB\n",
+            isNew3DS ? "New 3DS" : "Old 3DS", osGetApplicationMemType(), osGetMemRegionSize(MEMREGION_APPLICATION) / 1024,
+            envGetHeapSize() / 1024, envGetLinearHeapSize() / 1024);
 }
 } // namespace
 
