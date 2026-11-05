@@ -170,9 +170,11 @@ modes): the console then reboots into that mode at launch and exit, and the syst
 Azahar gives a `.3dsx` more (memory type 2, 96 MB, in Old 3DS mode), so the port fixes its heaps
 (`platform_3ds.cpp`) and the emulator holds it to them: 40 MB heap, out of which libctru takes the 2 MB
 stack, and 16 MB linear heap, 59.2 MB in all with the image, which leaves 4.8 MB free on an Old 3DS. If
-the system could not give that, libctru 2.7.0 stops at start-up (`svcBreak` in `allocateHeaps.c`, before
-`main`). Leaving the heap at 0 (all that is left) would panic on a New 3DS with libctru 2.7.0 (more than
-the 96 MB heap area); a run-time size with a readable error would only guard against the image growing.
+the system cannot give that (the Homebrew Launcher in applet mode, a bigger image), libctru 2.7.0 would
+stop at start-up (`svcBreak` in `allocateHeaps.c`, before `main`); the port replaces that function
+(`__system_allocateHeaps`, weak) and then takes smaller heaps, enough for an error screen with the sizes.
+Leaving the heap at 0 (all that is left) would panic on a New 3DS with libctru 2.7.0 (more than the 96 MB
+heap area).
 
 Measured in Azahar's Old 3DS mode with `GTA2_3DS_STATS` (peaks over a minute and a half of walking):
 

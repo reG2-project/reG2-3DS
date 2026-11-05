@@ -20,6 +20,53 @@ extern "C" u32 __stacksize__ = 2 * 1024 * 1024;
 extern "C" u32 __ctru_heap_size = 40 * 1024 * 1024;
 extern "C" u32 __ctru_linear_heap_size = 16 * 1024 * 1024;
 
+extern "C" u32 __ctru_heap;
+extern "C" u32 __ctru_linear_heap;
+extern "C" char* fake_heap_start;
+extern "C" char* fake_heap_end;
+
+// What the system lacked for the fixed heaps, 0 when they fit.
+static u32 sHeapShortfall;
+static u32 sHeapFree;
+
+// libctru's own stops with svcBreak, before main, when the heaps do not fit (an applet's memory, a bigger
+// image). Smaller heaps then, enough for StartUp's error screen.
+extern "C" void __system_allocateHeaps()
+{
+    Handle limit;
+    s64 max = 0;
+    s64 used = 0;
+    ResourceLimitType type = RESLIMIT_COMMIT;
+    if (R_FAILED(svcGetResourceLimit(&limit, CUR_PROCESS_HANDLE)))
+    {
+        svcBreak(USERBREAK_PANIC);
+    }
+    svcGetResourceLimitLimitValues(&max, limit, &type, 1);
+    svcGetResourceLimitCurrentValues(&used, limit, &type, 1);
+    svcCloseHandle(limit);
+    sHeapFree = static_cast<u32>(max - used) & ~0xFFFu;
+    if (__ctru_heap_size + __ctru_linear_heap_size > sHeapFree)
+    {
+        const u32 kSmallLinear = 2 * 1024 * 1024;
+        if (sHeapFree < kSmallLinear + __stacksize__ + 1024 * 1024)
+        {
+            svcBreak(USERBREAK_PANIC);
+        }
+        sHeapShortfall = __ctru_heap_size + __ctru_linear_heap_size - sHeapFree;
+        __ctru_linear_heap_size = kSmallLinear;
+        __ctru_heap_size = sHeapFree - kSmallLinear;
+    }
+    const MemPerm rw = static_cast<MemPerm>(MEMPERM_READ | MEMPERM_WRITE);
+    if (R_FAILED(svcControlMemory(&__ctru_heap, OS_HEAP_AREA_BEGIN, 0, __ctru_heap_size, MEMOP_ALLOC, rw)) ||
+        R_FAILED(svcControlMemory(&__ctru_linear_heap, 0, 0, __ctru_linear_heap_size, MEMOP_ALLOC_LINEAR, rw)))
+    {
+        svcBreak(USERBREAK_PANIC);
+    }
+    mappableInit(OS_MAP_AREA_BEGIN, OS_MAP_AREA_END);
+    fake_heap_start = reinterpret_cast<char*>(__ctru_heap);
+    fake_heap_end = fake_heap_start + __ctru_heap_size;
+}
+
 extern "C" int __system_argc;
 extern "C" char** __system_argv;
 
@@ -145,6 +192,21 @@ static void ShowError(const char* text)
 __attribute__((constructor(100))) static void StartUp()
 {
     osSetSpeedupEnable(true);
+    if (sHeapShortfall)
+    {
+        const u32 kMB = 1024 * 1024;
+        char text[512];
+        snprintf(text, sizeof(text),
+                 "\x1b[31mGTA2: not enough memory\x1b[0m\n\n"
+                 "Its heaps need %lu MB, %lu MB are free.\n\n"
+                 "Start the Homebrew Launcher with a title\n"
+                 "takeover (hold R while starting a game)\n"
+                 "rather than in applet mode.\n"
+                 "\nPress START to exit.",
+                 (sHeapFree + sHeapShortfall + kMB - 1) / kMB, sHeapFree / kMB);
+        ShowError(text);
+        exit(0);
+    }
     sHasData = TryLaunchFolder() || TryFolder(kFallbackDir);
     if (!sHasData)
     {
