@@ -178,6 +178,12 @@ std::vector<FullscreenMode> FullscreenModes()
 // with the screen (Camera::UpdateBoundaries), its HUD follows (Camera::SetScreenSize).
 void GameSize(int screenW, int screenH, int* pW, int* pH)
 {
+    // A screen under 480 lines (the 3DS's 400x240) is drawn scaled up from 480 lines of its shape.
+    if (screenH > 0 && screenH < 480)
+    {
+        screenW = screenW * 480 / screenH;
+        screenH = 480;
+    }
     *pW = screenW < 640 ? 640 : screenW & ~1;
     *pH = screenH < 480 ? 480 : screenH;
 }
