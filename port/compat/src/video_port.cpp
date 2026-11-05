@@ -87,7 +87,7 @@ void port_SetGameFlip(bool gameFlip)
 
 unsigned long long port_NowNs()
 {
-    return SDL_GetTicksNS();
+    return port_GameTicksNs();
 }
 
 void port_DelayNs(unsigned long long ns)

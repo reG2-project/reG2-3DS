@@ -219,10 +219,28 @@ extern "C" bool __wrap_SDL_ShowSimpleMessageBox(SDL_MessageBoxFlags, const char*
     return true;
 }
 
+void port_Suspend(bool suspended);
+
+// HOME Menu, power button and sleep: called on the main thread within aptMainLoop, which returns
+// only once the game is back; citro3d's and ndsp's hooks keep the GPU and DSP state.
+void port_3dsAptHook(APT_HookType hook, void*)
+{
+    if (hook == APTHOOK_ONSUSPEND || hook == APTHOOK_ONSLEEP)
+    {
+        port_Suspend(true);
+    }
+    else if (hook == APTHOOK_ONRESTORE || hook == APTHOOK_ONWAKEUP)
+    {
+        port_Suspend(false);
+    }
+}
+
 // Before main.cpp's EnterGameFolderAtStart (101) and the game's constructors.
 __attribute__((constructor(100))) static void StartUp()
 {
     osSetSpeedupEnable(true);
+    static aptHookCookie sAptHook;
+    aptHook(&sAptHook, port_3dsAptHook, NULL);
     if (sHeapShortfall)
     {
         const u32 kMB = 1024 * 1024;

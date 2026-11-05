@@ -161,12 +161,20 @@ in Azahar with scripted presses: the d-pad walks and START pauses. The menus sho
 
 SDL's event pump calls `aptMainLoop` once per game frame (the game's `PeekMessage`), between citro3d
 frames: HOME and the power button open the HOME Menu there, closing the lid sleeps there, and the
-suspend and sleep hooks of citro3d (GPU state) and ndsp (the DSP) do the rest. Nothing is pumped during a
-city load, so HOME waits for its end. After a resume the frame loop drops the steps it missed (at most 4
-are caught up). Closing from the HOME Menu makes `aptMainLoop` return false, SDL sends a quit event and
-the game shuts down as on a window close (`GTA2_EXIT_AT` tests the same path). None of this can be
-driven in a headless Azahar; it needs a console. The 3D slider does nothing: `gfxInit` leaves the top
-screen in 2D mode. `osSetSpeedupEnable` turns on the New 3DS's 804 MHz and L2 cache.
+suspend and sleep hooks of citro3d (GPU state) and ndsp (the DSP) do the rest. The port's own hook
+(`platform_3ds.cpp`, run there on the main thread) calls `port_Suspend` (`compat/src/kernel.cpp`): the
+game's clocks (`timeGetTime`, the frame loop's) leave out the time away and SDL's audio device pauses, so
+the game and its sound go on where they stopped, without catch-up steps. Nothing is pumped during a city
+load, so HOME waits for its end. Closing from the HOME Menu makes `aptMainLoop` return false, SDL sends a
+quit event and the game shuts down as on a window close (`GTA2_EXIT_AT` tests the same path). The 3D
+slider does nothing: `gfxInit` leaves the top screen in 2D mode. `osSetSpeedupEnable` turns on the New
+3DS's 804 MHz and L2 cache.
+
+Azahar ignores HOME without a HOME Menu title and has no sleep control, so `GTA2_TEST_SUSPEND=<frame>,<seconds>`
+calls the hook's suspend and resume around a wait at that frame, from the event pump. In bil with sound
+(8 s): the HUD clock and the steps stop, the second after the resume runs 30 steps, the sound is silent
+through the wait and comes back without a click, and the game draws 30 frames per second again. The real
+hooks, sleep with the lid, and the GPU and DSP state across them need a console.
 
 A `.cia` (a HOME Menu icon without the Homebrew Launcher) would need `makerom` and `bannertool`, which
 the devkitPro image lacks, an `.rsf` with a unique ID and a 256x128 banner with a sound; it would get no

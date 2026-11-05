@@ -76,7 +76,6 @@ struct Stream
 
 struct Driver
 {
-    SDL_AudioStream* mDevice = NULL;
     S32 mMasterVolume = 127;
     std::vector<Sample*> mSamples;
     std::vector<Stream*> mStreams;
@@ -668,6 +667,30 @@ DXDEC void AILCALL AIL_delay(S32 intervals)
 // The game closes and reopens the driver to switch 3D sound on or off: the SDL device stays open
 // (silent while no driver), since reopening it takes a noticeable time.
 static SDL_AudioStream* sDevice;
+// The device plays while the game holds the driver and the system has not suspended the game.
+static bool sReleased;
+static bool sSuspended;
+
+static void UpdatePause()
+{
+    if (sDevice)
+    {
+        if (sReleased || sSuspended)
+        {
+            SDL_PauseAudioStreamDevice(sDevice);
+        }
+        else
+        {
+            SDL_ResumeAudioStreamDevice(sDevice);
+        }
+    }
+}
+
+void port_SuspendSound(bool suspended)
+{
+    sSuspended = suspended;
+    UpdatePause();
+}
 
 DXDEC S32 AILCALL AIL_waveOutOpen(HDIGDRIVER FAR* drvr, LPHWAVEOUT FAR*, S32, LPWAVEFORMAT)
 {
@@ -688,8 +711,8 @@ DXDEC S32 AILCALL AIL_waveOutOpen(HDIGDRIVER FAR* drvr, LPHWAVEOUT FAR*, S32, LP
         SDL_Log("Audio: %s", SDL_GetCurrentAudioDriver());
     }
     sDriver = new Driver();
-    sDriver->mDevice = sDevice;
-    SDL_ResumeAudioStreamDevice(sDevice);
+    sReleased = false;
+    UpdatePause();
     *drvr = reinterpret_cast<HDIGDRIVER>(sDriver);
     return 0;
 }
@@ -706,7 +729,8 @@ DXDEC S32 AILCALL AIL_digital_handle_release(HDIGDRIVER)
 {
     if (sDriver)
     {
-        SDL_PauseAudioStreamDevice(sDriver->mDevice);
+        sReleased = true;
+        UpdatePause();
     }
     return 1;
 }
@@ -715,7 +739,8 @@ DXDEC S32 AILCALL AIL_digital_handle_reacquire(HDIGDRIVER)
 {
     if (sDriver)
     {
-        SDL_ResumeAudioStreamDevice(sDriver->mDevice);
+        sReleased = false;
+        UpdatePause();
     }
     return 1;
 }

@@ -6,9 +6,14 @@
 #include <SDL3/SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include "port_platform.hpp"
 
 namespace
 {
+bool sSuspended;
+Uint64 sSuspendStart;
+Uint64 sSuspendedNs;
+
 enum class HandleKind
 {
     Mutex,
@@ -20,6 +25,29 @@ struct Handle
     HandleKind mKind;
 };
 } // namespace
+
+void port_Suspend(bool suspended)
+{
+    if (suspended == sSuspended)
+    {
+        return;
+    }
+    sSuspended = suspended;
+    if (suspended)
+    {
+        sSuspendStart = SDL_GetTicksNS();
+    }
+    else
+    {
+        sSuspendedNs += SDL_GetTicksNS() - sSuspendStart;
+    }
+    port_SuspendSound(suspended);
+}
+
+unsigned long long port_GameTicksNs()
+{
+    return (sSuspended ? sSuspendStart : SDL_GetTicksNS()) - sSuspendedNs;
+}
 
 extern "C" {
 
@@ -57,12 +85,12 @@ void WINAPI Sleep(DWORD ms)
 
 DWORD WINAPI GetTickCount()
 {
-    return (DWORD)SDL_GetTicks();
+    return (DWORD)(port_GameTicksNs() / 1000000);
 }
 
 DWORD WINAPI timeGetTime()
 {
-    return (DWORD)SDL_GetTicks();
+    return (DWORD)(port_GameTicksNs() / 1000000);
 }
 
 void WINAPI OutputDebugStringA(LPCSTR s)

@@ -106,6 +106,13 @@ void port_PadVehicleInput(float* pForward, float* pBackward, float* pSteer);
 // Every SDL event, as the message loop pumps them.
 void port_OnInputEvent(const SDL_Event& e);
 
+// The system takes the game away (HOME Menu, sleep) and gives it back (kernel.cpp): the game's clocks
+// leave that time out and the sound pauses, so it goes on where it stopped.
+void port_Suspend(bool suspended);
+// SDL_GetTicksNS without the time suspended: timeGetTime and the frame loop's clock.
+unsigned long long port_GameTicksNs();
+void port_SuspendSound(bool suspended); // miles.cpp
+
 #include "../../renderer/port_exports.hpp"
 
 // Exports of a DLL the game loads by name, linked into the executable instead.

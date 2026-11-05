@@ -1,10 +1,14 @@
 // Scripted buttons for tests, as GTA2_INPUT is for keys: test/pad_input.txt in the game folder holds
 // lines "<first frame> <last frame> <hex KEY_* mask>", frames as port_FrameCount counts them.
+// GTA2_TEST_SUSPEND=<frame>,<seconds>: HOME's suspend and resume at that frame, with the main thread held
+// in between as aptMainLoop holds it, then the steps run in the second after the resume are logged.
 #include <3ds.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <vector>
 
 unsigned port_FrameCount();
+void port_3dsAptHook(APT_HookType hook, void*);
 
 extern "C" void __real_hidScanInput();
 extern "C" u32 __real_hidKeysDown();
@@ -23,10 +27,18 @@ std::vector<Press> sPresses;
 bool sLoaded;
 u32 sHeld;
 u32 sPrevHeld;
+unsigned sSuspendFrame;
+unsigned sSuspendSeconds;
+u64 sResumeMs;
+unsigned sResumeFrame;
 
 void Load()
 {
     sLoaded = true;
+    if (const char* pSuspend = getenv("GTA2_TEST_SUSPEND"))
+    {
+        sscanf(pSuspend, "%u,%u", &sSuspendFrame, &sSuspendSeconds);
+    }
     FILE* f = fopen("test/pad_input.txt", "r");
     if (!f)
     {
@@ -49,6 +61,21 @@ extern "C" void __wrap_hidScanInput()
         Load();
     }
     const unsigned frame = port_FrameCount();
+    if (sSuspendFrame && frame >= sSuspendFrame)
+    {
+        sSuspendFrame = 0;
+        fprintf(stderr, "test suspend: frame %u, %u s\n", frame, sSuspendSeconds);
+        port_3dsAptHook(APTHOOK_ONSUSPEND, NULL);
+        svcSleepThread(sSuspendSeconds * 1000000000LL);
+        port_3dsAptHook(APTHOOK_ONRESTORE, NULL);
+        sResumeMs = osGetTime();
+        sResumeFrame = frame;
+    }
+    if (sResumeMs && osGetTime() - sResumeMs >= 1000)
+    {
+        fprintf(stderr, "test suspend: %u steps in the second after the resume\n", frame - sResumeFrame);
+        sResumeMs = 0;
+    }
     sPrevHeld = sHeld;
     sHeld = 0;
     for (const Press& p : sPresses)
