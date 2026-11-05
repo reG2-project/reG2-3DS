@@ -37,15 +37,24 @@ add_custom_command(OUTPUT ${shbin}.o
     COMMAND sh -c "${DEVKITPRO}/tools/bin/bin2s -a 4 ${shbin} | ${DEVKITARM}/bin/arm-none-eabi-as -o ${shbin}.o"
     DEPENDS ${CMAKE_CURRENT_LIST_DIR}/render.v.pica VERBATIM)
 
+# The minimap's frame and markers (port/docs/minimap/assets, original art) as C arrays.
+set(minimap_assets ${PORT}/docs/minimap/assets)
+set(minimap_png Frame=${minimap_assets}/frames/E_tube_frame/frame_1x.png
+    Arrow=${minimap_assets}/markers/player_arrow_1x.png Blip=${minimap_assets}/markers/blip_1x.png)
+string(REGEX REPLACE "[A-Za-z]+=" "" minimap_png_files "${minimap_png}")
+add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/minimap_assets.h
+    COMMAND python3 ${CMAKE_CURRENT_LIST_DIR}/embed_png.py ${CMAKE_CURRENT_BINARY_DIR}/minimap_assets.h ${minimap_png}
+    DEPENDS ${CMAKE_CURRENT_LIST_DIR}/embed_png.py ${minimap_png_files} VERBATIM)
+
 add_executable(gta2 ${lib_src} ${ROOT}/test.cpp ${ROOT}/StdAfx.cpp ${ROOT}/Source/3rdParty/bink.cpp
-    ${port_src} ${ctr_src} ${shbin}.o)
+    ${port_src} ${ctr_src} ${shbin}.o ${CMAKE_CURRENT_BINARY_DIR}/minimap_assets.h)
 set_target_properties(gta2 PROPERTIES SUFFIX .elf)
 set_source_files_properties(${PORT}/compat/src/miles.cpp ${PORT}/compat/src/miles3d.cpp PROPERTIES COMPILE_DEFINITIONS BUILD_MSS)
 set_source_files_properties(${ROOT}/Source/3rdParty/bink.cpp PROPERTIES COMPILE_DEFINITIONS BUILD_BINK)
 target_compile_options(gta2 PRIVATE -include ${PORT}/compat/prelude.hpp
     -fno-builtin-wcslen -fno-builtin-wcscpy -fno-builtin-wcscmp -fno-builtin-wcsncmp -fno-builtin-wcschr
     -fno-builtin-wmemcpy -fno-builtin-wmemset -fno-builtin-wmemcmp)
-target_include_directories(gta2 PRIVATE ${PORT}/compat/include ${PORT}/include ${ROOT}/Source ${ROOT})
+target_include_directories(gta2 PRIVATE ${PORT}/compat/include ${PORT}/include ${ROOT}/Source ${ROOT} ${CMAKE_CURRENT_BINARY_DIR})
 # OpenDSP (build_opendsp.sh's prefix) links in a DSP firmware; without it, sound needs the console's dspfirm.cdc.
 set(OPENDSP_DIR "" CACHE PATH "OpenDSP prefix from build_opendsp.sh, empty for none")
 if(OPENDSP_DIR)
