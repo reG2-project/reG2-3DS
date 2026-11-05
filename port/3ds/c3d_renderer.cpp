@@ -2,6 +2,7 @@
 #include "c3d_context.hpp"
 #include "stats_3ds.hpp"
 #include "../src/hud_screen.hpp"
+#include "hud_theme.hpp"
 #include <3ds.h>
 #include <citro3d.h>
 #include <math.h>
@@ -119,6 +120,7 @@ struct HudRule
     s32 dx, dy;
     ScreenRect slot;
     bool scroll;
+    HudTheme::Part panel;
 };
 
 struct HudGroupRules
@@ -127,22 +129,30 @@ struct HudGroupRules
     s32 count;
 };
 
-// The bottom screen: the money row and the gang bars at the top, the wanted level, weapon, power-ups and
-// pagers below them, and the brief (scrolling when long) in the bottom half.
+// The bottom screen: gang bars and pager on the left, the status row along the top, wanted level, power-ups and
+// weapon below it, the brief (scrolling when long) at the bottom; each part in its panel (HudTheme::Part).
+const HudTheme::Rect kHudPanels[HudTheme::kPartCount] = {
+    {2, 2, 102, 80},     // kGangs
+    {2, 84, 102, 124},   // kPager
+    {106, 2, 318, 50},   // kStatus
+    {106, 54, 236, 124}, // kWanted
+    {240, 54, 318, 124}, // kWeapon
+    {2, 128, 318, 238},  // kBrief
+};
 const ScreenRect kAll = {0, 0, 640, 480};
-const s32 kBriefTop = 114;
 const HudRule kStatsRules[] = {
-    {{560, 44, 640, 100}, -320, 0, {240, 44, 320, kBriefTop}, false}, // weapon and ammo
-    {{0, 100, 640, 480}, -402, -33, {100, 64, 240, kBriefTop}, false}, // power-ups
-    {kAll, -320, 0, {100, 0, 320, 44}, false},                         // clock, multiplier, lives, money, health
+    {{560, 44, 640, 100}, -324, 14, {240, 54, 318, 124}, false, HudTheme::kWeapon}, // weapon and ammo
+    {{0, 100, 640, 480}, -407, -25, {106, 54, 236, 124}, false, HudTheme::kWanted}, // power-ups
+    {{400, 0, 492, 44}, -334, 3, {106, 2, 318, 50}, false, HudTheme::kStatus},     // clock
+    {kAll, -326, 3, {106, 2, 318, 50}, false, HudTheme::kStatus},                  // multiplier, lives, money, health
 };
-const HudRule kWantedRules[] = {{kAll, -150, 44, {100, 44, 240, 64}, false}};
-const HudRule kGangRules[] = {{kAll, 0, 0, {0, 0, 100, 74}, false}};
+const HudRule kWantedRules[] = {{kAll, -149, 57, {106, 54, 236, 124}, false, HudTheme::kWanted}};
+const HudRule kGangRules[] = {{kAll, 0, 0, {2, 2, 102, 80}, false, HudTheme::kGangs}};
 const HudRule kBriefRules[] = {
-    {{0, 0, 60, 480}, 0, -240, {0, kBriefTop, 64, 240}, false}, // the face
-    {kAll, 0, -240, {64, kBriefTop, 320, 240}, true},
+    {{0, 0, 60, 480}, 0, -244, {2, 128, 64, 238}, false, HudTheme::kBrief}, // the face
+    {kAll, 0, -244, {64, 130, 318, 236}, true, HudTheme::kBrief},
 };
-const HudRule kPagerRules[] = {{kAll, 0, -12, {0, 74, 100, kBriefTop}, false}};
+const HudRule kPagerRules[] = {{kAll, 21, -2, {0, 80, 104, 128}, false, HudTheme::kPager}};
 
 #define HUD_RULES(rules) {rules, (s32)(sizeof(rules) / sizeof(rules[0]))}
 const HudGroupRules kHudGroups[PortHudScreen::kGroupCount] = {
@@ -186,7 +196,7 @@ s32 Round(f32 v)
 }
 } // namespace
 
-struct C3DRenderer::Impl
+struct C3DRenderer::Impl : HudTheme::Sink
 {
     C3D_RenderTarget* mTarget;
     DVLB_s* mDvlb;
@@ -223,6 +233,7 @@ struct C3DRenderer::Impl
         bool scroll;
     };
     std::vector<HudBatch> mHudBatches;
+    u32 mHudPanels; // a bit per HudTheme::Part drawn in this frame
     // The scrolling part's top this frame (bottom screen pixels) and its slot's; how much of it was hidden above
     // the slot when its scroll began, and when.
     s32 mScrollTop, mScrollSlotTop;
@@ -251,6 +262,7 @@ struct C3DRenderer::Impl
     void Flush();
     f32 ScrollOffset();
     void DrawHud();
+    void DrawQuads(const HudTheme::Quad* pQuads, s32 count, RTexture* pTex, u32 state) override;
     void ApplyState(RTexture* pTex, u32 state, const ScreenRect& scissor);
     bool Allocate(RTexture* pTex, s32 tw, s32 th, GPU_TEXCOLOR fmt, bool clear);
 };
@@ -395,6 +407,10 @@ void C3DRenderer::Impl::Append(const RVertex* pVerts, s32 count, RTexture* pTex,
         pDst[i].u = s.u * su;
         pDst[i].v = 1.0f - s.v * sv;
     }
+    if (pRule)
+    {
+        mHudPanels |= 1u << pRule->panel;
+    }
     if (pRule && pRule->scroll)
     {
         for (s32 i = 0; i < count; i++)
@@ -476,6 +492,12 @@ void C3DRenderer::Impl::DrawHud()
     mTargetH = kBottomH;
     C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, mUniProjection, &mBottomProjection);
     mStateValid = false;
+    if (mHudPanels)
+    {
+        HudTheme::Draw(*mOwner, *this, kHudPanels, mHudPanels);
+        Flush();
+        mHudPanels = 0;
+    }
     C3D_Mtx scrolled = mBottomProjection;
     Mtx_Translate(&scrolled, 0.0f, scroll, 0.0f, true);
     bool inScroll = false;
@@ -497,6 +519,39 @@ void C3DRenderer::Impl::DrawHud()
         mOwner->mVertices += (u32)b.count;
     }
     mHudBatches.clear();
+}
+
+// The HUD theme's draws, under the HUD on the bottom screen.
+void C3DRenderer::Impl::DrawQuads(const HudTheme::Quad* pQuads, s32 count, RTexture* pTex, u32 state)
+{
+    const ScreenRect bottom = {0, 0, kBottomW, kBottomH};
+    if (!pTex || !pTex->mValid)
+    {
+        pTex = 0;
+        state |= RS_NO_TEXTURE;
+    }
+    for (s32 i = 0; i < count; i++)
+    {
+        const HudTheme::Quad& q = pQuads[i];
+        const f32 xs[4] = {q.x0, q.x1, q.x1, q.x0};
+        const f32 ys[4] = {q.y0, q.y0, q.y1, q.y1};
+        const f32 us[4] = {q.u0, q.u1, q.u1, q.u0};
+        const f32 vs[4] = {q.v0, q.v0, q.v1, q.v1};
+        static const s32 kCorners[6] = {0, 1, 2, 0, 2, 3};
+        RVertex v[6];
+        memset(v, 0, sizeof(v));
+        for (s32 k = 0; k < 6; k++)
+        {
+            const s32 c = kCorners[k];
+            v[k].x = xs[c];
+            v[k].y = ys[c];
+            v[k].rhw = 1.0f;
+            v[k].rgba = q.rgba[c];
+            v[k].u = us[c];
+            v[k].v = vs[c];
+        }
+        Append(v, 6, pTex, state & kBatchStateMask, 0.0f, bottom, 0);
+    }
 }
 
 void C3DRenderer::Impl::ApplyState(RTexture* pTex, u32 state, const ScreenRect& scissor)
