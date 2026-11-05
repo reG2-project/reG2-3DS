@@ -2,8 +2,8 @@
 
 Status: proof of concept on the `port/3ds` branch. The game builds with devkitARM into a `.3dsx`, boots
 in the Azahar emulator straight into a city (the debug keys below), draws it with a citro3d renderer and
-takes the 3DS buttons. No sound yet: Azahar needs the console's DSP firmware (`sdmc:/3ds/dspfirm.cdc`),
-which is not distributed.
+takes the 3DS buttons, on Old and New 3DS (Old 3DS figures below). No sound yet: Azahar needs the
+console's DSP firmware (`sdmc:/3ds/dspfirm.cdc`), which is not distributed.
 
 ## What helps
 
@@ -83,12 +83,14 @@ The result is `build_3ds/gta2.3dsx` (about 2.3 MB).
 ## Running
 
 The game folder is `sdmc:/3ds/gta2/`: `data/` (without `GTAudio` and `Movie`, about 65 MB),
-`gta2_registry.ini`, `player/`, `test/`. The port's log is `gta2_log.txt` there; stderr goes to the
-emulator's log through `svcOutputDebugString`. To boot into a city, the registry's `Debug` keys
+`gta2_registry.ini`, `player/`, `test/`. The port's log is `gta2_log.txt` there (stderr and SDL's log).
+`gta2_env.txt` there sets environment variables, one `KEY=VALUE` per line: `GTA2_3DS_STATS=150` logs
+memory and renderer times every 150 frames, `GTA2_LOOP_STATS=1` steps, frames and their times,
+`GTA2_AUDIO_DRIVER=dummy` runs the sound without the DSP. To boot into a city, the registry's `Debug` keys
 `skip_frontend`, `mapname`, `stylename` and `scriptname` (see `Source/debug.cpp`).
 
-Azahar (2126.2) runs the `.3dsx` without firmware or system files, in New 3DS mode. The start to the
-first city frame takes about 15 seconds there.
+Azahar (2126.2) runs the `.3dsx` without firmware or system files, in Old or New 3DS mode. The start
+to the first city frame takes about 15 seconds there.
 
 Tests: `test/pad_input.txt` presses buttons, one `<first frame> <last frame> <hex KEY_* mask>` per line
 (frames as `port_FrameCount` counts them), for example `150 170 8` for START.
@@ -100,12 +102,57 @@ X enter or exit, Y special 1, L and R the weapons, START the pause menu, SELECT 
 circle pad move; ZL and ZR (New 3DS) are specials 2 and 3, and brake and accelerate in vehicles. Tested
 in Azahar with scripted presses: the d-pad walks and START pauses. The menus show the Xbox glyphs.
 
+## Old 3DS
+
+### Memory
+
+The Old 3DS gives an application 64 MB (memory type 0), New 3DS 124 MB. A `.3dsx` gets the memory of
+the process the Homebrew Launcher runs in: started by title takeover, an application's, so 64 MB on an Old
+3DS; other entry points can give less (not checked on hardware). The port is designed for 64 MB. Azahar
+gives a `.3dsx` more (memory type 2, 96 MB, in Old 3DS mode), so the port fixes its heaps itself
+(`platform_3ds.cpp`) and the emulator holds it to them: 40 MB heap and 16 MB linear heap, plus the 3.2 MB
+image (code, data, bss) and the 2 MB stack, 61 MB in all. Start-up fails if the system cannot give that.
+
+Measured in Azahar's Old 3DS mode with `GTA2_3DS_STATS` (peaks over a minute and a half of walking):
+
+| | Heap | Linear heap (textures, vertices, commands) |
+|---|---|---|
+| Frontend | 21.8 MB | 5.7 MB |
+| Frontend, then wil | 21.8 MB (15.9 MB in game) | 7.8 MB |
+| wil | 15.9 MB | 5.9 MB |
+| ste | 16.0 MB | 6.7 MB |
+| bil | 16.1 MB | 6.8 MB |
+| bil with sound (SDL's dummy driver) | 22.2 MB | 6.8 MB |
+
+New 3DS mode gives the same figures: the game's needs do not depend on the model. The sound bank of a
+city (6 MB) is the only addition still to come with the DSP.
+
+### Speed
+
+Azahar counts instructions rather than ARM11 cycles and charges system calls too much, so its times are
+a rough guide only; New and Old 3DS modes run the same emulated clock. At 100 % (`GTA2_LOOP_STATS`,
+FRAME LIMIT 30 ORIGINAL, walking):
+
+| | Steps/s | Frames/s | Logic step | Draw (with the wait for the GPU) |
+|---|---|---|---|---|
+| wil | 30.3 | 30.3 | 1.1 ms | 14.0 ms (7.3) |
+| ste | 30.3 | 30.2 | 1.9 ms | 13.3 ms (7.4) |
+| bil | 30.3 | 30.2 | 2.4 ms | 14.5 ms (8.0) |
+| bil with sound | 30.4 | 29.0 | 3.4 ms | 20.8 ms (12.9) |
+| bil at 50 % clock | 30.3 | 21 to 25 | 4.9 ms | 15 to 20 ms |
+
+Before the fixes below bil drew 15 frames per second. A sampling profile through Azahar's GDB stub
+found the time in the port, not the game: the car lamps scanned delta images for every car in the
+pool every frame (now cached, cars off screen skipped), the CPU surface was refilled and scanned every
+frame (now only after a frame drew on it), and SDL's gamepad reads take a lock per call, a system call
+each on the 3DS (left as is: about 1 to 2 % on hardware by the profile's estimate). Logic runs at the
+original's 30.3 steps per second throughout. The second core is not used.
+
 ## Next steps
 
 - Sound: test on hardware or with a dumped `dspfirm.cdc` (SDL3's 3DS audio uses NDSP). A day.
-- Speed: measure frames per second on New and Old 3DS clocks; the vertex batch and texture uploads
-  are the first suspects. One to three days.
-- Memory: measure the linear heap with the big cities (tiles in two variants plus sprites).
+- Real Old 3DS timings: Azahar's are optimistic for memory bound code (no cache model). If the
+  hardware is short, the next candidates are the per-vertex lighting at night and SDL's pad reads.
 - The menus' button glyphs and prompts for the 3DS layout; the bottom screen for the map or the HUD.
 - The game folder from the `.3dsx`'s own folder rather than a fixed `sdmc:/3ds/gta2`.
 - Real hardware: a 3DS or New 3DS with custom firmware.
