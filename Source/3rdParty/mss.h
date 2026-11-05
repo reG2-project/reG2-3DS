@@ -763,7 +763,7 @@ typedef struct _AILSOUNDINFO {
 
 #ifdef IS_WIN32
 
-#ifdef BUILD_MSS
+#if defined(BUILD_MSS) && (defined(_M_IX86) || defined(__i386__))
 
   #define MSSLockedIncrement(var) _asm { lock inc [var] }
   #define MSSLockedDecrement(var) _asm { lock dec [var] }
