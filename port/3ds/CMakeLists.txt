@@ -1,0 +1,58 @@
+cmake_minimum_required(VERSION 3.20)
+project(gta2_3ds C CXX)
+
+# Nintendo 3DS build: the Linux port's sources (game, port/src, compat, the gbh_* layer) with the citro3d
+# renderer of this folder in place of the OpenGL one. See port/docs/3ds.md.
+#   cmake -S port/3ds -B build_3ds -G Ninja -DCMAKE_TOOLCHAIN_FILE=$PWD/port/3ds/toolchain-3ds-clang.cmake -DSDL3_DIR=<prefix>/lib/cmake/SDL3
+
+set(PORT ${CMAKE_CURRENT_LIST_DIR}/..)
+set(ROOT ${PORT}/..)
+
+# The game sources are the VC6 build's gta2_lib_src list, as in port/CMakeLists.txt.
+file(READ ${ROOT}/CMakeLists.txt top)
+string(REGEX MATCH "set\\(gta2_lib_src\n([^)]*)\\)" _ "${top}")
+string(REGEX MATCHALL "Source/[^\n ]+\\.cpp" lib_src "${CMAKE_MATCH_1}")
+list(REMOVE_ITEM lib_src Source/ImGuiDebug.cpp)
+list(TRANSFORM lib_src PREPEND ${ROOT}/)
+
+# Everything the Linux build takes from port/, except the OpenGL renderer and the first-start setup.
+file(GLOB port_src ${PORT}/src/*.cpp ${PORT}/compat/src/*.cpp ${PORT}/renderer/*.cpp)
+list(FILTER port_src EXCLUDE REGEX "/renderer/(gl_[a-z_]+|sdl_gl_context)\\.cpp$")
+file(GLOB ctr_src ${CMAKE_CURRENT_LIST_DIR}/*.cpp)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+add_compile_options(
+    -fms-extensions -fshort-wchar -fsigned-char
+    -fno-strict-aliasing -fwrapv -ftrivial-auto-var-init=zero -fno-delete-null-pointer-checks -w -Wno-address-of-temporary -Wno-c++11-narrowing)
+add_compile_definitions(_CRT_SECURE_NO_WARNINGS _CRT_NON_CONFORMING_SWPRINTFS GTA2_PORT GTA2_PORT_SDL __NT__)
+
+find_package(SDL3 REQUIRED CONFIG)
+
+# The vertex shader, assembled by picasso and linked in as render_shbin[] .. render_shbin_end[].
+set(shbin ${CMAKE_CURRENT_BINARY_DIR}/render.shbin)
+add_custom_command(OUTPUT ${shbin}.o
+    COMMAND ${DEVKITPRO}/tools/bin/picasso -o ${shbin} ${CMAKE_CURRENT_LIST_DIR}/render.v.pica
+    COMMAND sh -c "${DEVKITPRO}/tools/bin/bin2s -a 4 ${shbin} | ${DEVKITARM}/bin/arm-none-eabi-as -o ${shbin}.o"
+    DEPENDS ${CMAKE_CURRENT_LIST_DIR}/render.v.pica VERBATIM)
+
+add_executable(gta2 ${lib_src} ${ROOT}/test.cpp ${ROOT}/StdAfx.cpp ${ROOT}/Source/3rdParty/bink.cpp
+    ${port_src} ${ctr_src} ${shbin}.o)
+set_target_properties(gta2 PROPERTIES SUFFIX .elf)
+set_source_files_properties(${PORT}/compat/src/miles.cpp ${PORT}/compat/src/miles3d.cpp PROPERTIES COMPILE_DEFINITIONS BUILD_MSS)
+set_source_files_properties(${ROOT}/Source/3rdParty/bink.cpp PROPERTIES COMPILE_DEFINITIONS BUILD_BINK)
+target_compile_options(gta2 PRIVATE -include ${PORT}/compat/prelude.hpp
+    -fno-builtin-wcslen -fno-builtin-wcscpy -fno-builtin-wcscmp -fno-builtin-wcsncmp -fno-builtin-wcschr
+    -fno-builtin-wmemcpy -fno-builtin-wmemset -fno-builtin-wmemcmp)
+target_include_directories(gta2 PRIVATE ${PORT}/compat/include ${PORT}/include ${ROOT}/Source ${ROOT})
+target_link_libraries(gta2 PRIVATE SDL3::SDL3-static citro3d ctru m)
+
+set(smdh ${CMAKE_CURRENT_BINARY_DIR}/gta2.smdh)
+add_custom_command(OUTPUT ${smdh}
+    COMMAND ${DEVKITPRO}/tools/bin/smdhtool --create "GTA2" "Grand Theft Auto 2 (gta2_re port)" "gta2_re" ${CTR_ROOT}/default_icon.png ${smdh}
+    VERBATIM)
+add_custom_command(OUTPUT gta2.3dsx
+    COMMAND ${DEVKITPRO}/tools/bin/3dsxtool $<TARGET_FILE:gta2> gta2.3dsx --smdh=${smdh}
+    DEPENDS gta2 ${smdh} VERBATIM)
+add_custom_target(gta2_3dsx ALL DEPENDS gta2.3dsx)
