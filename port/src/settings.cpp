@@ -583,6 +583,9 @@ bool Available(Id id)
         case kHeadlights:
         case kLightEffects:
             return P::Has(P::kRendererOptions);
+        case kControls:
+        case kAimCamera:
+            return P::Has(P::kTwinStick);
         default:
             return true;
     }
@@ -693,7 +696,7 @@ bool TwinStick()
 #if defined(GTA2_PORT_SDL)
     if (sTwinStick < 0)
     {
-        sTwinStick = Screen(kControls) != 0;
+        sTwinStick = Available(kControls) && Screen(kControls) != 0;
     }
     return sTwinStick != 0;
 #else

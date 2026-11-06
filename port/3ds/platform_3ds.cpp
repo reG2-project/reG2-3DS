@@ -299,9 +299,17 @@ bool port_PrepareGameFolder(bool)
 
 namespace PortPlatform
 {
-bool Has(Feature)
+bool Has(Feature feature)
 {
-    // Two fixed screens, the citro3d renderer's classic look and the console's own buttons.
-    return false;
+    // Two fixed screens, the citro3d renderer's classic look and the console's own buttons; the New 3DS's
+    // C-stick aims.
+    static int sNew3ds = -1;
+    if (sNew3ds < 0)
+    {
+        bool isNew = false;
+        APT_CheckNew3DS(&isNew);
+        sNew3ds = isNew;
+    }
+    return feature == kTwinStick && sNew3ds;
 }
 } // namespace PortPlatform

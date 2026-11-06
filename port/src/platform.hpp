@@ -13,6 +13,7 @@ enum Feature
     kRendererOptions, // the OpenGL renderer's GRAPHICS page and its added lights
     k3dSound, // positional sound (OpenAL Soft) to turn on or off
     kRebinding, // keys, mouse and pad inputs bound in the menu
+    kTwinStick, // a second stick to aim with
 };
 
 bool Has(Feature feature);
