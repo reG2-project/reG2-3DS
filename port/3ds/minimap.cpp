@@ -40,7 +40,8 @@ struct SpriteRect
 };
 
 RTexture* sMap;
-RTexture* sTint;
+RTexture* sEdges;
+RTexture* sFill;
 RTexture* sAtlas;
 RTexture* sSprites;
 // At half size, as the bottom screen draws the HUD, but the pips at full size to be seen on the map.
@@ -50,7 +51,11 @@ SpriteRect sPips[MinimapGame::kPipCount];
 SpriteRect sSmallPips[MinimapGame::kPipCount];
 u32 sCity;
 bool sMapOk;
-u32 sTintSig;
+// Each block's gang, 1 + its pool slot (MinimapGame::ReadOwners), in the textures' tiled order for BuildFill.
+std::vector<u8> sOwners;
+u32 sEdgeSig;
+s32 sFillGang;
+u32 sFillRgba;
 u32 sNone; // the ground where no block has a lid, also around the city
 MinimapGame::View sView;
 
@@ -101,54 +106,65 @@ u32 Rgba4(u32 rgba)
     return (rgba & 0xF0F0F0F0u) | ((rgba >> 4) & 0x0F0F0F0Fu);
 }
 
-// The tint over the gangs' territories (RGBA4, a texel per block): every territory's edge in its gang's colour with
-// a shade outside it, and a light tint over the one the player is in.
-void BuildTint(C3DRenderer& renderer)
+// Every territory's edge in its gang's colour with a shade outside it (RGBA4, a texel per block), from the
+// gangs in sView.arrows.
+void BuildEdges(C3DRenderer& renderer)
 {
     std::vector<u8> owners(kMapSize * kMapSize);
+    const u8* pOwners = &owners[0];
     MinimapGame::ReadOwners(sView.arrows, &owners[0]);
+    sOwners.resize(kMapSize * kMapSize);
     u32 colours[MinimapGame::kMaxGangs + 1] = {0};
     for (s32 i = 0; i < MinimapGame::kMaxGangs; i++)
     {
         colours[i + 1] = MinimapGame::ArrowColour(sView.arrows[i]) & 0xFFFFFFu;
     }
     std::vector<u32> texels(kMapSize * kMapSize);
-    const auto owner = [&owners](s32 x, s32 y) { return x < 0 || y < 0 || x >= kMapSize || y >= kMapSize ? 0 : owners[y * kMapSize + x]; };
+    const auto owner = [pOwners](s32 x, s32 y) { return x < 0 || y < 0 || x >= kMapSize || y >= kMapSize ? 0 : pOwners[y * kMapSize + x]; };
     for (s32 y = 0; y < kMapSize; y++)
     {
         for (s32 x = 0; x < kMapSize; x++)
         {
-            const u8 o = owners[y * kMapSize + x];
+            const u8 o = pOwners[y * kMapSize + x];
             const u8 l = owner(x - 1, y), r = owner(x + 1, y), t = owner(x, y - 1), b = owner(x, y + 1);
             u32 c = 0;
-            if (o)
+            if (o && (l != o || r != o || t != o || b != o))
             {
-                // The edge dashed, a block in the colour and a block shaded, to tell it from a road of that colour.
-                const bool edge = l != o || r != o || t != o || b != o;
-                if (edge)
-                {
-                    c = (x + y) & 1 ? 0x66000000u : colours[o] | 0xEE000000u;
-                }
-                else if (o == sView.gang)
-                {
-                    c = colours[o] | 0x44000000u;
-                }
+                // Dashed, a block in the colour and a block shaded, to tell it from a road of that colour.
+                c = (x + y) & 1 ? 0x66000000u : colours[o] | 0xEE000000u;
             }
-            else if (l || r || t || b)
+            else if (!o && (l || r || t || b))
             {
-                // A shade along the outside of an edge, so that it shows in any colour over any ground.
+                // A shade along the outside, so that the edge shows in any colour over any ground.
                 c = 0x66000000u;
             }
             texels[y * kMapSize + x] = Rgba4(c);
+            sOwners[TiledIndex(x, y, kMapSize)] = o;
         }
     }
-    renderer.UploadTexture(sTint, kMapSize, kMapSize, &texels[0], RMIP_NONE, RTX_KNOWN | RTX_4444);
+    renderer.UploadTexture(sEdges, kMapSize, kMapSize, &texels[0], RMIP_NONE, RTX_KNOWN | RTX_4444);
 }
 
-// What the tint shows: the gangs and the one the player is in.
-u32 TintSignature()
+// The light tint over the territory the player is in (A8, drawn in the gang's colour).
+void BuildFill(C3DRenderer& renderer)
 {
-    u32 h = (u32)sView.gang;
+    u8* pAlpha = static_cast<u8*>(renderer.LockTiled(sFill, kMapSize, true));
+    if (!pAlpha || sOwners.empty())
+    {
+        return;
+    }
+    const u8 gang = (u8)sView.gang;
+    for (s32 i = 0; i < kMapSize * kMapSize; i++)
+    {
+        pAlpha[i] = gang && sOwners[i] == gang ? 0x44 : 0;
+    }
+    renderer.UnlockTiled(sFill);
+}
+
+// The gangs the edges show.
+u32 EdgeSignature()
+{
+    u32 h = 1;
     for (s32 i = 0; i < MinimapGame::kMaxGangs; i++)
     {
         h = h * 31 + sView.arrows[i];
@@ -416,28 +432,35 @@ u32 Update(C3DRenderer& renderer)
         if (!sMap)
         {
             sMap = renderer.CreateTexture();
-            sTint = renderer.CreateTexture();
+            sEdges = renderer.CreateTexture();
+            sFill = renderer.CreateTexture();
             sSprites = renderer.CreateTexture();
             BuildAtlas(renderer);
         }
         sCity = city;
         sMapOk = BuildMap(renderer);
         BuildSprites(renderer);
-        sTintSig = TintSignature();
-        BuildTint(renderer);
-        fprintf(stderr, "minimap: built in %.1f ms; map %d KB, tint %d KB, frame %d KB and markers %d KB of linear memory\n",
+        sEdgeSig = 0;
+        fprintf(stderr, "minimap: built in %.1f ms; map %d KB, edges %d KB, fill %d KB, frame %d KB and markers %d KB of linear memory\n",
                 (svcGetSystemTick() - t0) * 1000.0 / SYSCLOCK_ARM11, kMapTexels * kMapTexels * 2 / 1024, kMapSize * kMapSize * 2 / 1024,
-                kAtlasSize * kAtlasSize * 2 / 1024, kSpritesW * kSpritesH * 2 / 1024);
+                kMapSize * kMapSize / 1024, kAtlasSize * kAtlasSize * 2 / 1024, kSpritesW * kSpritesH * 2 / 1024);
     }
     if (!sMapOk)
     {
         return 0;
     }
-    if (TintSignature() != sTintSig)
+    if (EdgeSignature() != sEdgeSig)
     {
-        sTintSig = TintSignature();
-        BuildTint(renderer);
+        sEdgeSig = EdgeSignature();
+        BuildEdges(renderer);
+        sFillGang = -1;
     }
+    if (sView.gang != sFillGang)
+    {
+        sFillGang = sView.gang;
+        BuildFill(renderer);
+    }
+    sFillRgba = sView.gang ? MinimapGame::ArrowColour(sView.arrows[sView.gang - 1]) : 0;
     // 64 headings to the turn are enough for an 11 pixel arrow.
     sView.heading = (sView.heading + 11) / 22 * 22;
     u32 h = 2166136261u;
@@ -446,7 +469,8 @@ u32 Update(C3DRenderer& renderer)
     mix((u32)sView.px4);
     mix((u32)sView.py4);
     mix((u32)sView.heading);
-    mix(sTintSig);
+    mix(sEdgeSig);
+    mix((u32)sView.gang);
     for (s32 i = 0; i < sView.markCount; i++)
     {
         mix((u32)sView.marks[i].x4);
@@ -471,7 +495,19 @@ void Draw(C3DRenderer&, HudTheme::Sink& sink, const HudTheme::Rect& frame)
         const f32 k = 1.0f / span;
         q = MakeQuad((f32)x0, (f32)y0, (f32)x1, (f32)y1, (x0 - left) * k, (y0 - top) * k, (x1 - left) * k, (y1 - top) * k, 0xFFFFFFFFu);
         sink.DrawQuads(&q, 1, sMap, C3DRenderer::kStateNearest);
-        sink.DrawQuads(&q, 1, sTint, RS_BLEND_ALPHA | C3DRenderer::kStateNearest);
+        if (sView.gang)
+        {
+            for (s32 i = 0; i < 4; i++)
+            {
+                q.rgba[i] = sFillRgba;
+            }
+            sink.DrawQuads(&q, 1, sFill, RS_BLEND_ALPHA | C3DRenderer::kStateNearest);
+            for (s32 i = 0; i < 4; i++)
+            {
+                q.rgba[i] = 0xFFFFFFFFu;
+            }
+        }
+        sink.DrawQuads(&q, 1, sEdges, RS_BLEND_ALPHA | C3DRenderer::kStateNearest);
     }
     // The tube's shadow on the map, from the top left.
     HudTheme::Quad shade[2];
@@ -489,12 +525,15 @@ void Draw(C3DRenderer&, HudTheme::Sink& sink, const HudTheme::Rect& frame)
 void Shutdown(C3DRenderer& renderer)
 {
     renderer.FreeTexture(sMap);
-    renderer.FreeTexture(sTint);
+    renderer.FreeTexture(sEdges);
+    renderer.FreeTexture(sFill);
     renderer.FreeTexture(sAtlas);
     renderer.FreeTexture(sSprites);
-    sMap = sTint = sAtlas = sSprites = 0;
+    sMap = sEdges = sFill = sAtlas = sSprites = 0;
     sCity = 0;
     sMapOk = false;
-    sTintSig = 0;
+    sEdgeSig = 0;
+    sFillGang = 0;
+    std::vector<u8>().swap(sOwners);
 }
 } // namespace Minimap
