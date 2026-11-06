@@ -13,8 +13,13 @@ enum Feature
     kRendererOptions, // the OpenGL renderer's GRAPHICS page and its added lights
     k3dSound, // positional sound (OpenAL Soft) to turn on or off
     kRebinding, // keys, mouse and pad inputs bound in the menu
+    kKeyboard,
     kTwinStick, // a second stick to aim with
 };
 
 bool Has(Feature feature);
+
+// A pad button's name as printed on the pad, by pad binding code 0 to 11 (compat/src/pad.cpp: SDL's south,
+// east, west and north buttons, the shoulders, back, start, the stick presses, the triggers).
+const wchar_t* PadButtonName(int code);
 } // namespace PortPlatform

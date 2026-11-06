@@ -77,7 +77,7 @@ const wchar_t* const kControlNames[kNumControls] = {L"FORWARD", L"BACKWARD", L"L
                                                     L"ENTER OR EXIT", L"JUMP OR BRAKE", L"PREVIOUS WEAPON",
                                                     L"NEXT WEAPON", L"SPECIAL 1", L"SPECIAL 2", L"SPECIAL 3"};
 // Pad binding codes (compat/src/pad.cpp): buttons 0 to 11, then the stick and d-pad directions.
-const wchar_t* const kPadButtonNames[12] = {L"A", L"B", L"X", L"Y", L"LB", L"RB", L"BACK", L"START", L"L3", L"R3", L"LT", L"RT"};
+const s32 kPadA = 0;
 const s32 kPadB = 1;
 const s32 kPadBack = 6;
 const s32 kPadLeft = 224;
@@ -288,7 +288,7 @@ void PadName(s32 code, wchar_t* pOut)
     }
     else
     {
-        wcscpy(pOut, code >= 0 && code < 12 ? kPadButtonNames[code] : L"-");
+        wcscpy(pOut, PortPlatform::PadButtonName(code));
     }
 }
 
@@ -763,12 +763,14 @@ void DrawHints()
         const wchar_t* mButton;
         const wchar_t* mLabel;
     };
-    const Hint kNavigate[] = {{L"ENTER", L"A", L"SELECT"}, {L"ESC", L"B", L"BACK"}};
+    const Hint kNavigate[] = {{L"ENTER", PortPlatform::PadButtonName(kPadA), L"SELECT"},
+                              {L"ESC", PortPlatform::PadButtonName(kPadB), L"BACK"}};
     const bool pad = PadMode();
     // Capture: B cancels on the keyboard columns, Back on the pad column (B can be bound there); Delete
     // clears a second key or a pad input.
     const bool padColumn = sColumn == kPadColumn;
-    const Hint kCapture[] = {{pad && padColumn ? L"BACK" : L"ESC", pad && !padColumn ? L"B" : NULL, L"CANCEL"},
+    const Hint kCapture[] = {{pad && padColumn ? PortPlatform::PadButtonName(kPadBack) : L"ESC",
+                              pad && !padColumn ? PortPlatform::PadButtonName(kPadB) : NULL, L"CANCEL"},
                              {L"DEL", NULL, L"CLEAR"}};
     const bool capturing = sCapturing >= 0;
     const Hint* pHints = capturing ? kCapture : kNavigate;

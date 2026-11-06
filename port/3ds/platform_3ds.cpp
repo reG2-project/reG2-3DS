@@ -312,4 +312,11 @@ bool Has(Feature feature)
     }
     return feature == kTwinStick && sNew3ds;
 }
+
+const wchar_t* PadButtonName(int code)
+{
+    // The console's labels at SDL's positions: B is the bottom button, A the right one. No stick presses.
+    static const wchar_t* const kNames[12] = {L"B", L"A", L"Y", L"X", L"L", L"R", L"SELECT", L"START", L"-", L"-", L"ZL", L"ZR"};
+    return code >= 0 && code < 12 ? kNames[code] : L"-";
+}
 } // namespace PortPlatform

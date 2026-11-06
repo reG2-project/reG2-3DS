@@ -366,7 +366,7 @@ void port_OpenGamepad()
 
 bool port_PadMode()
 {
-    return sMode == kPadMode;
+    return sMode == kPadMode || !PortPlatform::Has(PortPlatform::kKeyboard);
 }
 
 bool port_MouseMode()
