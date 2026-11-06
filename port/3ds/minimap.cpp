@@ -190,6 +190,7 @@ RVertex Vertex(f32 x, f32 y, u32 rgba, f32 u = 0.0f, f32 v = 0.0f)
 // The player's arrow at (x, y), turned by the heading (Ang16, 1440 to the turn).
 void DrawArrow(HudTheme::Sink& sink, f32 x, f32 y, s32 heading)
 {
+    // A ped at heading a moves by (sin a, cos a) (Char_B4's PolarToCartesian), so 0 faces down the map.
     const f32 a = heading * (6.2831853f / 1440.0f);
     const f32 c = cosf(a), s = sinf(a);
     const f32 hw = kArrowW * 0.5f, hh = kArrowH * 0.5f, k = 1.0f / kAtlasSize;
@@ -198,8 +199,8 @@ void DrawArrow(HudTheme::Sink& sink, f32 x, f32 y, s32 heading)
     RVertex v[4];
     for (s32 i = 0; i < 4; i++)
     {
-        // Screen y runs down: a positive angle turns the arrow anticlockwise on the screen, as the game turns its sprites.
-        v[i] = Vertex(x + xs[i] * c + ys[i] * s, y - xs[i] * s + ys[i] * c, 0xFFFFFFFFu, (kArrowX + us[i]) * k, vs[i] * k);
+        // The atlas arrow points up, (0, -1), and lands on (s, c).
+        v[i] = Vertex(x - xs[i] * c - ys[i] * s, y + xs[i] * s - ys[i] * c, 0xFFFFFFFFu, (kArrowX + us[i]) * k, vs[i] * k);
     }
     const RVertex tris[6] = {v[0], v[1], v[2], v[0], v[2], v[3]};
     sink.DrawTriangles(tris, 6, sAtlas, RS_BLEND_ALPHA);
