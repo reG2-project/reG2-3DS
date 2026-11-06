@@ -436,6 +436,8 @@ struct C3DRenderer::Impl : HudTheme::Sink
     u32 mFrame;
     // Textures the GPU may still read: freed once the next frame has begun (C3D_FrameBegin waits for the GPU).
     std::vector<C3D_Tex> mPendingFree;
+    // Textures with storage and their bytes in linear memory; allocations that did not fit.
+    u32 mTexCount, mTexBytes, mAllocFails;
     RTexture* mWhite;
     RTexture* mSurface;
     std::vector<u32> mLevel; // UploadTexture's next mip level being made
@@ -454,7 +456,42 @@ struct C3DRenderer::Impl : HudTheme::Sink
     void DrawTriangles(const RVertex* pVerts, s32 count, RTexture* pTex, u32 state) override;
     void ApplyState(RTexture* pTex, u32 state, const ScreenRect& scissor);
     bool Allocate(RTexture* pTex, s32 tw, s32 th, GPU_TEXCOLOR fmt, s32 levels, bool clear);
+    void Release(RTexture* pTex);
 };
+
+static u32 TexBytes(const RTexture* pTex)
+{
+    u32 total = 0;
+    for (s32 l = 0; l <= pTex->mLevels; l++)
+    {
+        total += pTex->mTex.size >> (2 * l);
+    }
+    return total;
+}
+
+// Drops the texture's storage, once the GPU is done with it.
+void C3DRenderer::Impl::Release(RTexture* pTex)
+{
+    if (!pTex->mValid)
+    {
+        return;
+    }
+    if (mBoundTex == &pTex->mTex)
+    {
+        mBoundTex = 0;
+    }
+    mTexCount--;
+    mTexBytes -= TexBytes(pTex);
+    if (pTex->mUsedFrame == mFrame)
+    {
+        mPendingFree.push_back(pTex->mTex);
+    }
+    else
+    {
+        C3D_TexDelete(&pTex->mTex);
+    }
+    pTex->mValid = false;
+}
 
 // Storage for new texels: kept when the GPU is done with it and it has the size and format, else replaced.
 bool C3DRenderer::Impl::Allocate(RTexture* pTex, s32 tw, s32 th, GPU_TEXCOLOR fmt, s32 levels, bool clear)
@@ -467,15 +504,7 @@ bool C3DRenderer::Impl::Allocate(RTexture* pTex, s32 tw, s32 th, GPU_TEXCOLOR fm
         {
             return true;
         }
-        if (inFlight)
-        {
-            mPendingFree.push_back(pTex->mTex);
-        }
-        else
-        {
-            C3D_TexDelete(&pTex->mTex);
-        }
-        pTex->mValid = false;
+        Release(pTex);
     }
     if (mBoundTex == &pTex->mTex)
     {
@@ -484,6 +513,7 @@ bool C3DRenderer::Impl::Allocate(RTexture* pTex, s32 tw, s32 th, GPU_TEXCOLOR fm
     const C3D_TexInitParams params = {(u16)tw, (u16)th, (u8)levels, fmt, GPU_TEX_2D, false};
     if (!C3D_TexInitWithParams(&pTex->mTex, NULL, params))
     {
+        mAllocFails++;
         if (!mWarnedAlloc)
         {
             fprintf(stderr, "c3d: texture %dx%d (format %d) does not fit in linear memory\n", (int)tw, (int)th, (int)fmt);
@@ -499,6 +529,8 @@ bool C3DRenderer::Impl::Allocate(RTexture* pTex, s32 tw, s32 th, GPU_TEXCOLOR fm
     pTex->mLevels = (u8)levels;
     pTex->mValid = true;
     pTex->mUsedFrame = 0;
+    mTexCount++;
+    mTexBytes += TexBytes(pTex);
     return true;
 }
 
@@ -1182,6 +1214,7 @@ void C3DRenderer::Present(s32, s32)
     const u64 t0 = svcGetSystemTick();
     C3D_FrameEnd(0);
     p->mInFrame = false;
+    Stats3DS_SetTextures(p->mTexCount, p->mTexBytes, 0, p->mAllocFails);
     Stats3DS_Frame(svcGetSystemTick() - t0);
 }
 
@@ -1306,11 +1339,7 @@ void C3DRenderer::FreeTexture(RTexture* pTex)
                 p->mBoundParam = p->mWhite->mTex.param;
             }
         }
-        if (pTex->mValid && pTex->mUsedFrame == p->mFrame)
-        {
-            p->mPendingFree.push_back(pTex->mTex);
-            pTex->mValid = false;
-        }
+        p->Release(pTex);
     }
     if (pTex->mValid)
     {

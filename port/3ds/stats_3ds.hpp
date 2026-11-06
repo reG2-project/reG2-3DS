@@ -9,6 +9,8 @@ void Stats3DS_AddUpload(u64 ticks);
 void Stats3DS_AddFrameBegin(u64 ticks);
 // Ticks the CPU spent on the bottom screen in a frame, and whether it was drawn (else it keeps its last frame).
 void Stats3DS_AddBottom(u64 ticks, bool drawn);
+// The textures with storage and their bytes, and the evictions and allocation failures so far.
+void Stats3DS_SetTextures(u32 count, u32 bytes, u32 evictions, u32 failures);
 // Once per frame, with the ticks C3D_FrameEnd took (the wait for the GPU and the screen).
 void Stats3DS_Frame(u64 frameEndTicks);
 // Whether the main thread's sleeps count in Stats3DS_WaitTicks (two tick reads each).

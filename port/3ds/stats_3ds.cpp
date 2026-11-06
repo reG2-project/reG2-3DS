@@ -21,6 +21,7 @@ size_t sPeakHeap;
 u32 sPeakLinear;
 u32 sLinearTotal;
 u64 sWaitTicks;
+u32 sTexCount, sTexBytes, sEvictions, sAllocFails;
 bool sCountSleeps;
 
 double Ms(u64 ticks)
@@ -61,6 +62,14 @@ void Stats3DS_AddBottom(u64 ticks, bool drawn)
     sBottomDrawn += drawn ? 1 : 0;
 }
 
+void Stats3DS_SetTextures(u32 count, u32 bytes, u32 evictions, u32 failures)
+{
+    sTexCount = count;
+    sTexBytes = bytes;
+    sEvictions = evictions;
+    sAllocFails = failures;
+}
+
 void Stats3DS_Frame(u64 frameEndTicks)
 {
     sWaitTicks += frameEndTicks;
@@ -91,9 +100,9 @@ void Stats3DS_Frame(u64 frameEndTicks)
     if (sLastTick)
     {
         const double n = sInterval;
-        fprintf(stderr, "3ds: %.1f ms per frame, frame begin %.2f ms, end %.2f ms, uploads %.1f per frame %.2f ms, bottom %.3f ms (max %.3f, drawn %lu of %lu); heap %u KB (peak %u KB, arena %u KB), linear %lu KB (peak %lu KB)\n",
+        fprintf(stderr, "3ds: %.1f ms per frame, frame begin %.2f ms, end %.2f ms, uploads %.1f per frame %.2f ms, bottom %.3f ms (max %.3f, drawn %lu of %lu); heap %u KB (peak %u KB, arena %u KB), linear %lu KB (peak %lu KB, free %lu KB); textures %lu, %lu KB, evicted %lu, failed %lu\n",
                 Ms(now - sLastTick) / n, Ms(sFrameBeginTicks) / n, Ms(sFrameEndTicks) / n, sUploads / n, Ms(sUploadTicks) / n, Ms(sBottomTicks) / n, Ms(sBottomMaxTicks), sBottomDrawn, sInterval, mi.uordblks / 1024,
-                (u32)(sPeakHeap / 1024), mi.arena / 1024, linearUsed / 1024, sPeakLinear / 1024);
+                (u32)(sPeakHeap / 1024), mi.arena / 1024, linearUsed / 1024, sPeakLinear / 1024, (u32)linearSpaceFree() / 1024, sTexCount, sTexBytes / 1024, sEvictions, sAllocFails);
     }
     sLastTick = now;
     sFrameEndTicks = 0;
