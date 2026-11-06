@@ -1,15 +1,41 @@
 // Game state the platform layer asks about (declared in compat/src/port_platform.hpp).
+#include "Car.hpp"
 #include "Frontend.hpp"
 #include "Game.hpp"
+#include "Ped.hpp"
 #include "Player.hpp"
 #include "Camera.hpp"
 #include "pause_menu.hpp"
 #include "hud_screen.hpp"
 #include "settings.hpp"
+#include "sprite.hpp"
 
 bool port_GameRunning()
 {
     return gGame_0x40 && !gFrontend;
+}
+
+void port_TestCar(int model, float dx, float dy)
+{
+    Player* pPlayer = port_GameRunning() ? gGame_0x40->mLocalPlayer : NULL;
+    Ped* pPed = pPlayer ? pPlayer->mPlayerPed : NULL;
+    if (!pPed || !pPed->mGameObject || pPed->get_car())
+    {
+        return;
+    }
+    const Sprite* pSprite = pPed->GetSprite();
+    Car* pCar = gCarManager_6C->SpawnCarAt(pSprite->mXy.x + Fix16(dx), pSprite->mXy.y + Fix16(dy), pSprite->mZpos, Ang16(0),
+                                           model, Fix16(1));
+    if (!pCar)
+    {
+        return;
+    }
+    // As the ENTER OR EXIT control does next to a car.
+    pPed->SetObjective2(objectives_enum::no_obj_0);
+    pPed->SetObjective(objectives_enum::enter_car_as_driver_35);
+    pPed->SetTargetObjectiveCar(pCar);
+    pPed->set_enter_car_as_passenger(0);
+    pPed->set_target_car_door(0);
 }
 
 bool port_FrontendActive()

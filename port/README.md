@@ -251,6 +251,7 @@ clean Debian, Ubuntu or Arch Linux container with the libraries it needs.
 |---|---|
 | `GTA2_INPUT=<frame>:<key>[:<frames held>],...` | key presses at given frames (SDL key names: `Return`, `Up`, `Left Ctrl`, `Alt+Return`), a virtual gamepad (`pad.a`, `pad.dpup`, `pad.lefty-`, `pad.rightx=0.5` for part of an axis; `pad2.` a second one, the first then idle), or the mouse (`mouse.<x>x<y>` moves it to that window position, `mouse.left`, `mouse.right`, `mouse.wheelup`, `mouse.wheeldown`) |
 | `GTA2_EXIT_AT=<frame>` | quit at that frame |
+| `GTA2_TEST_CAR=<frame>:<model>[:<dx>:<dy>]` | a car of that model (54 the tank) that far from the player in blocks (1.5, 0 by default) at that frame, who then gets in |
 | `GTA2_CURSOR_BMP=<file>` | the mouse cursor's image written to that BMP |
 | `GTA2GL_CAPTURE=<dir>,<frame>,<a>-<b>,...` | write those frames as BMP (the first frame drawn at each); `GTA2GL_CAPTURE_FLIPS=1` counts presented frames instead |
 | `GTA2_LOOP_STATS=1` | logic steps and frames per second on stderr, every 5 seconds |

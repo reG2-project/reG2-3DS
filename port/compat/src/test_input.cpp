@@ -64,12 +64,20 @@ std::vector<KeyEvent>& Events()
 }
 
 unsigned sExitAt;
+unsigned sCarAt;
+int sCarModel;
+float sCarDx = 1.5f;
+float sCarDy;
 
 void Load()
 {
     if (const char* exitAt = getenv("GTA2_EXIT_AT"))
     {
         sExitAt = (unsigned)atoi(exitAt);
+    }
+    if (const char* car = getenv("GTA2_TEST_CAR"))
+    {
+        sscanf(car, "%u:%d:%f:%f", &sCarAt, &sCarModel, &sCarDx, &sCarDy);
     }
     const char* spec = getenv("GTA2_INPUT");
     if (!spec)
@@ -292,6 +300,12 @@ void port_InjectTestInput(unsigned frame)
         SDL_PushEvent(&e);
         SDL_Log("test input: frame %u %s %s", frame, SDL_GetScancodeName(it->mScancode), it->mDown ? "down" : "up");
         it = Events().erase(it);
+    }
+    if (sCarAt && frame >= sCarAt && port_GameRunning())
+    {
+        sCarAt = 0;
+        port_TestCar(sCarModel, sCarDx, sCarDy);
+        SDL_Log("test input: frame %u car %d", frame, sCarModel);
     }
     if (sExitAt && frame >= sExitAt)
     {
