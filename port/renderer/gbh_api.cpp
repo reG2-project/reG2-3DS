@@ -53,6 +53,9 @@ struct TexData
     std::vector<u32> mPixels;
 };
 
+// What every texel of a 16-bit TGA image is, as gbh_LoadImage converts it: opaque, 5-6-5 bits by replication.
+const u32 kImageTexels = RTX_KNOWN | RTX_OPAQUE | RTX_BINARY | RTX_565;
+
 struct ImageEntry
 {
     s32 mLoaded;
@@ -242,7 +245,7 @@ RTexture* Resolve(STexture* pTexture, int variant)
         const s32 h = pTexture->field_10_height;
         if (pData->mImage)
         {
-            gRenderer->UploadTexture(pData->mTex[variant], w, h, &pData->mPixels[0], RMIP_NONE);
+            gRenderer->UploadTexture(pData->mTex[variant], w, h, &pData->mPixels[0], RMIP_NONE, kImageTexels);
         }
         else if (pTexture->field_14_original_pixel_data_ptr && pTexture->field_18_pPaltData && w > 0 && h > 0)
         {
