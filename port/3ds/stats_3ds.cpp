@@ -20,6 +20,8 @@ u64 sLastTick;
 size_t sPeakHeap;
 u32 sPeakLinear;
 u32 sLinearTotal;
+u64 sWaitTicks;
+bool sCountSleeps;
 
 double Ms(u64 ticks)
 {
@@ -49,6 +51,7 @@ void Stats3DS_AddUpload(u64 ticks)
 void Stats3DS_AddFrameBegin(u64 ticks)
 {
     sFrameBeginTicks += ticks;
+    sWaitTicks += ticks;
 }
 
 void Stats3DS_AddBottom(u64 ticks, bool drawn)
@@ -60,6 +63,7 @@ void Stats3DS_AddBottom(u64 ticks, bool drawn)
 
 void Stats3DS_Frame(u64 frameEndTicks)
 {
+    sWaitTicks += frameEndTicks;
     if (!sInit)
     {
         Init();
@@ -99,4 +103,28 @@ void Stats3DS_Frame(u64 frameEndTicks)
     sBottomTicks = 0;
     sBottomMaxTicks = 0;
     sBottomDrawn = 0;
+}
+
+void Stats3DS_CountSleeps(bool on)
+{
+    sCountSleeps = on;
+}
+
+u64 Stats3DS_WaitTicks()
+{
+    return sWaitTicks;
+}
+
+// Linked in place of svcSleepThread (--wrap). libctru's threads have a Thread, the main thread none.
+extern "C" void __real_svcSleepThread(s64 ns);
+extern "C" void __wrap_svcSleepThread(s64 ns)
+{
+    if (!sCountSleeps || threadGetCurrent())
+    {
+        __real_svcSleepThread(ns);
+        return;
+    }
+    const u64 t0 = svcGetSystemTick();
+    __real_svcSleepThread(ns);
+    sWaitTicks += svcGetSystemTick() - t0;
 }

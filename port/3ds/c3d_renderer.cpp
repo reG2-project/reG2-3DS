@@ -1,5 +1,6 @@
 #include "c3d_renderer.hpp"
 #include "c3d_context.hpp"
+#include "fps_overlay.hpp"
 #include "stats_3ds.hpp"
 #include "../src/hud_screen.hpp"
 #include "hud_theme.hpp"
@@ -448,6 +449,7 @@ struct C3DRenderer::Impl : HudTheme::Sink
     f32 ScrollOffset();
     u32 BottomSignature(f32 scroll, u32 minimap) const;
     void DrawHud();
+    void DrawOverlay();
     void DrawQuads(const HudTheme::Quad* pQuads, s32 count, RTexture* pTex, u32 state) override;
     void DrawTriangles(const RVertex* pVerts, s32 count, RTexture* pTex, u32 state) override;
     void ApplyState(RTexture* pTex, u32 state, const ScreenRect& scissor);
@@ -775,6 +777,39 @@ void C3DRenderer::Impl::DrawHud()
     Stats3DS_AddBottom(svcGetSystemTick() - t0, true);
 }
 
+// The FPS overlay over the top screen's corner, texel for pixel.
+void C3DRenderer::Impl::DrawOverlay()
+{
+    s32 w, h;
+    RTexture* pTex = FpsOverlay::Update(*mOwner, &w, &h);
+    if (!pTex || !pTex->mValid)
+    {
+        return;
+    }
+    const f32 x0 = mOriginX + FpsOverlay::kX / mScale, y0 = mOriginY + FpsOverlay::kY / mScale;
+    const f32 x1 = x0 + w / mScale, y1 = y0 + h / mScale;
+    const f32 xs[4] = {x0, x1, x1, x0};
+    const f32 ys[4] = {y0, y0, y1, y1};
+    const f32 us[4] = {0.0f, 1.0f, 1.0f, 0.0f};
+    const f32 vs[4] = {0.0f, 0.0f, 1.0f, 1.0f};
+    static const s32 kCorners[6] = {0, 1, 2, 0, 2, 3};
+    RVertex v[6];
+    memset(v, 0, sizeof(v));
+    for (s32 k = 0; k < 6; k++)
+    {
+        const s32 c = kCorners[k];
+        v[k].x = xs[c];
+        v[k].y = ys[c];
+        v[k].rhw = 1.0f;
+        v[k].rgba = 0xFFFFFFFFu;
+        v[k].u = us[c];
+        v[k].v = vs[c];
+    }
+    const ScreenRect screen = {0, 0, kScreenW, kScreenH};
+    Append(v, 6, pTex, RS_BLEND_ALPHA | C3DRenderer::kStateNearest, 0.0f, screen, 0);
+    Flush();
+}
+
 // The HUD theme's draws, under the HUD on the bottom screen.
 void C3DRenderer::Impl::DrawQuads(const HudTheme::Quad* pQuads, s32 count, RTexture* pTex, u32 state)
 {
@@ -980,6 +1015,7 @@ void C3DRenderer::Shutdown()
     }
     HudTheme::Shutdown(*this);
     Minimap::Shutdown(*this);
+    FpsOverlay::Shutdown(*this);
     FreeTexture(p->mSurface);
     p->mSurface = 0;
     FreeTexture(p->mWhite);
@@ -1136,6 +1172,7 @@ void C3DRenderer::Present(s32, s32)
     mImpl->Flush();
     if (p->mFrameDrew)
     {
+        p->DrawOverlay();
         p->DrawHud();
     }
     if (p->mVertCount > 0)

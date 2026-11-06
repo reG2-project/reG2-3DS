@@ -174,7 +174,9 @@ the bottom screen until START (`--wrap=SDL_ShowSimpleMessageBox`) rather than th
 The port's log is `gta2_log.txt` there (stderr and SDL's log).
 `gta2_env.txt` there sets environment variables, one `KEY=VALUE` per line: `GTA2_3DS_STATS=150` logs
 memory and renderer times every 150 frames, `GTA2_LOOP_STATS=1` steps, frames and their times,
-`GTA2_AUDIO_DRIVER=dummy` runs the sound without the DSP, `GTA2_3DS_MINIMAP=wide` or `off` sets the
+`GTA2_3DS_FPS=1` shows frames and logic steps per second, the main thread's CPU time per frame
+(without its waits for the GPU and its sleeps) and the heap and linear memory in use in the top screen's corner,
+over the last second and refreshed 4 times per second, `GTA2_AUDIO_DRIVER=dummy` runs the sound without the DSP, `GTA2_3DS_MINIMAP=wide` or `off` sets the
 minimap's place (see Renderer). To boot into a city, the registry's `Debug` keys
 `skip_frontend`, `mapname`, `stylename` and `scriptname` (see `Source/debug.cpp`).
 
