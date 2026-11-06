@@ -233,13 +233,14 @@ RTexture* Resolve(STexture* pTexture, int variant)
     if (!pData->mTex[variant])
     {
         pData->mTex[variant] = gRenderer->CreateTexture();
+        gRenderer->SetEvictable(pData->mTex[variant]);
     }
     if (pData->mEpoch != gTextureEpoch)
     {
         pData->mEpoch = gTextureEpoch;
         pData->mDirty[kOpaque] = pData->mDirty[kAlpha] = true;
     }
-    if (pData->mDirty[variant])
+    if (pData->mDirty[variant] || gRenderer->Evicted(pData->mTex[variant]))
     {
         const s32 w = pTexture->field_E_width;
         const s32 h = pTexture->field_10_height;
