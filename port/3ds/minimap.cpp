@@ -101,8 +101,8 @@ u32 Rgba4(u32 rgba)
     return (rgba & 0xF0F0F0F0u) | ((rgba >> 4) & 0x0F0F0F0Fu);
 }
 
-// The tint over the gangs' territories (RGBA4, a texel per block): every territory's edge in its gang's colour,
-// and lighter over the one the player is in.
+// The tint over the gangs' territories (RGBA4, a texel per block): every territory's edge in its gang's colour with
+// a shade outside it, and a light tint over the one the player is in.
 void BuildTint(C3DRenderer& renderer)
 {
     std::vector<u8> owners(kMapSize * kMapSize);
@@ -119,13 +119,27 @@ void BuildTint(C3DRenderer& renderer)
         for (s32 x = 0; x < kMapSize; x++)
         {
             const u8 o = owners[y * kMapSize + x];
-            u32 a = 0;
+            const u8 l = owner(x - 1, y), r = owner(x + 1, y), t = owner(x, y - 1), b = owner(x, y + 1);
+            u32 c = 0;
             if (o)
             {
-                const bool edge = owner(x - 1, y) != o || owner(x + 1, y) != o || owner(x, y - 1) != o || owner(x, y + 1) != o;
-                a = edge ? 0xAA : o == sView.gang ? 0x44 : 0;
+                // The edge dashed, a block in the colour and a block shaded, to tell it from a road of that colour.
+                const bool edge = l != o || r != o || t != o || b != o;
+                if (edge)
+                {
+                    c = (x + y) & 1 ? 0x66000000u : colours[o] | 0xEE000000u;
+                }
+                else if (o == sView.gang)
+                {
+                    c = colours[o] | 0x44000000u;
+                }
             }
-            texels[y * kMapSize + x] = a ? Rgba4(colours[o] | (a << 24)) : 0;
+            else if (l || r || t || b)
+            {
+                // A shade along the outside of an edge, so that it shows in any colour over any ground.
+                c = 0x66000000u;
+            }
+            texels[y * kMapSize + x] = Rgba4(c);
         }
     }
     renderer.UploadTexture(sTint, kMapSize, kMapSize, &texels[0], RMIP_NONE, RTX_KNOWN | RTX_4444);
