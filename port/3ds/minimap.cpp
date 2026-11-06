@@ -335,8 +335,8 @@ void SpriteTurned(RVertex* pOut, f32 x, f32 y, const SpriteRect& r, f32 ux, f32 
     memcpy(pOut, tris, sizeof(tris));
 }
 
-// Inside the map: a mission phone is its pip, the info phone the gang's icon. Outside: a phone is the game's own
-// arrow towards it on the map's edge, with its pip.
+// Inside the map: a mission phone is its pip, the info phone and a gang's territory the gang's icon. Outside: a phone
+// is the game's own arrow towards it on the map's edge, with its pip; a territory, the icon on the edge.
 void DrawMarks(HudTheme::Sink& sink, s32 hx0, s32 hy0, s32 hx1, s32 hy1, s32 cx, s32 cy)
 {
     HudTheme::Quad quads[kMaxMarks];
@@ -352,11 +352,20 @@ void DrawMarks(HudTheme::Sink& sink, s32 hx0, s32 hy0, s32 hx1, s32 hy1, s32 cx,
         const bool mission = m.kind == MinimapGame::kMissionPhone;
         if (x < x0 || x > x1 || y < y0 || y > y1)
         {
-            // Along the ray from the player, onto the inner edge, the arrow's tip on the map's edge.
+            // Along the ray from the player, onto the inner edge.
             const f32 dx = (f32)(x - cx), dy = (f32)(y - cy), len = sqrtf(dx * dx + dy * dy);
             const f32 tx = dx ? ((dx > 0 ? x1 : x0) - cx) / dx : 1e9f, ty = dy ? ((dy > 0 ? y1 : y0) - cy) / dy : 1e9f;
-            const f32 t = tx < ty ? tx : ty, ux = dx / len, uy = dy / len, back = arrow.h * 0.5f - kEdgeMargin;
-            const f32 ax = cx + dx * t - ux * back, ay = cy + dy * t - uy * back;
+            const f32 t = tx < ty ? tx : ty, ex = cx + dx * t, ey = cy + dy * t, ux = dx / len, uy = dy / len;
+            if (m.kind == MinimapGame::kTerritory)
+            {
+                if (icon.w)
+                {
+                    quads[nq++] = SpriteQuad((s32)floorf(ex + 0.5f), (s32)floorf(ey + 0.5f), icon);
+                }
+                continue;
+            }
+            // The arrow's tip on the map's edge.
+            const f32 back = arrow.h * 0.5f - kEdgeMargin, ax = ex - ux * back, ay = ey - uy * back;
             if (arrow.w)
             {
                 SpriteTurned(tris + nt, ax, ay, arrow, ux, uy);

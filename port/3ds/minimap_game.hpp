@@ -20,6 +20,7 @@ enum MarkKind
 {
     kMissionPhone,
     kInfoPhone,
+    kTerritory, // a gang's nearest block, while the player is in no gang's territory
 };
 
 struct Mark
