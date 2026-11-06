@@ -186,8 +186,8 @@ void FindPhones(View* pView, Player* pPlayer, const Gang* pGang)
     }
 }
 
-// Each gang's nearest block to the player (its middle): the nearest point of each of its zones,
-// kept if no earlier zone of another gang owns it.
+// Each gang's nearest block to the player's block (its middle): the nearest point of each of its zones, kept if
+// no earlier zone of another gang owns it. Kept while the player stays on a block.
 void FindTerritories(View* pView)
 {
     const gmp_zone_list* pZones = gMap_0x370->mpZones;
@@ -195,35 +195,58 @@ void FindTerritories(View* pView)
     {
         return;
     }
-    for (s32 slot = 0; slot < kMaxGangs; slot++)
+    static const void* sZones;
+    static s32 sX = -1, sY = -1;
+    static u8 sArrows[kMaxGangs];
+    static Mark sMarks[kMaxGangs];
+    static s32 sCount;
+    const s32 px = pView->px4 >> 2, py = pView->py4 >> 2;
+    if (pZones != sZones || px != sX || py != sY || memcmp(pView->arrows, sArrows, sizeof(sArrows)))
     {
-        const Gang* pGang = &gGangPool_CA8->mGangList[slot];
-        if (!pView->arrows[slot])
+        sZones = pZones;
+        sX = px;
+        sY = py;
+        memcpy(sArrows, pView->arrows, sizeof(sArrows));
+        sCount = 0;
+        for (s32 slot = 0; slot < kMaxGangs; slot++)
         {
-            continue;
-        }
-        s32 best = -1, bx = 0, by = 0;
-        for (s32 i = 0; i < pZones->mNumZones; i++)
-        {
-            const gmp_map_zone* pZone = pZones->mZoneArray[i];
-            if (pZone->mZoneType != Gang_14 || gGangPool_CA8->FindGangByName(pZone->mName) != pGang)
+            const Gang* pGang = &gGangPool_CA8->mGangList[slot];
+            if (!pView->arrows[slot])
             {
                 continue;
             }
-            const s32 x = pView->px4 / 4 < pZone->mX ? pZone->mX : pView->px4 / 4 >= pZone->mX + pZone->mW ? pZone->mX + pZone->mW - 1 : pView->px4 / 4;
-            const s32 y = pView->py4 / 4 < pZone->mY ? pZone->mY : pView->py4 / 4 >= pZone->mY + pZone->mH ? pZone->mY + pZone->mH - 1 : pView->py4 / 4;
-            const s32 dx = x * 4 + 2 - pView->px4, dy = y * 4 + 2 - pView->py4, d = dx * dx + dy * dy;
-            if ((best < 0 || d < best) && GangAt(x, y) == pGang)
+            s32 best = -1, bx = 0, by = 0;
+            for (s32 i = 0; i < pZones->mNumZones; i++)
             {
-                best = d;
-                bx = x;
-                by = y;
+                const gmp_map_zone* pZone = pZones->mZoneArray[i];
+                if (pZone->mZoneType != Gang_14 || gGangPool_CA8->FindGangByName(pZone->mName) != pGang)
+                {
+                    continue;
+                }
+                const s32 x = px < pZone->mX ? pZone->mX : px >= pZone->mX + pZone->mW ? pZone->mX + pZone->mW - 1 : px;
+                const s32 y = py < pZone->mY ? pZone->mY : py >= pZone->mY + pZone->mH ? pZone->mY + pZone->mH - 1 : py;
+                const s32 d = (x - px) * (x - px) + (y - py) * (y - py);
+                if ((best < 0 || d < best) && GangAt(x, y) == pGang)
+                {
+                    best = d;
+                    bx = x;
+                    by = y;
+                }
+            }
+            if (best >= 0)
+            {
+                Mark& m = sMarks[sCount++];
+                m.x4 = bx * 4 + 2;
+                m.y4 = by * 4 + 2;
+                m.kind = kTerritory;
+                m.arrow = pGang->mArrowColour;
+                m.pip = 0;
             }
         }
-        if (best >= 0)
-        {
-            AddMark(pView, bx * 4 + 2, by * 4 + 2, kTerritory, pGang->mArrowColour);
-        }
+    }
+    for (s32 i = 0; i < sCount; i++)
+    {
+        AddMark(pView, sMarks[i].x4, sMarks[i].y4, kTerritory, sMarks[i].arrow);
     }
 }
 } // namespace
