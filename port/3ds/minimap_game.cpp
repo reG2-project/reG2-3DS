@@ -119,15 +119,17 @@ const Gang* GangAt(s32 x, s32 y)
     return 0;
 }
 
-// The gang's colour: the bright half of the arrow that points to its phones (user sprite `arrow`, as
-// Hud_Arrow::DrawArrow draws it); 0 for a gang without an arrow colour, which is not a real gang.
-u32 GangColour(const Gang* pGang)
+// A gang the respect meters show (GangPool::FirstGang), with an arrow colour of the HUD's.
+bool IsShown(const Gang& gang)
 {
-    if (!pGang || !pGang->mArrowColour)
-    {
-        return 0;
-    }
-    const u16 sprite = gGtx_0x106C->GetSpriteTrueIndex(sprite_types_enum::user_6, (s16)pGang->mArrowColour);
+    return gang.mUsed && gang.HasKillRespectChange() && gang.mArrowColour >= 1 && gang.mArrowColour <= 7;
+}
+
+// The bright half of the arrow that points to a gang's phones (user sprite `arrow`, as Hud_Arrow::DrawArrow
+// draws it): the colour the game gives the gang.
+u32 ScanArrowColour(s32 arrow)
+{
+    const u16 sprite = gGtx_0x106C->GetSpriteTrueIndex(sprite_types_enum::user_6, (s16)arrow);
     const sprite_index* pIndex = gGtx_0x106C->get_sprite_index(sprite);
     const u32* pPal = reinterpret_cast<const u32*>(
         gGtx_0x106C->GetPalData(gGtx_0x106C->get_phys_pal(gGtx_0x106C->GetTruePalette(palette_types_enum::sprites_2, sprite))));
@@ -186,7 +188,7 @@ void AddMark(View* pView, Fix16 x, Fix16 y, u32 rgba, MarkKind kind)
 
 // The gang's live phones, under the game's phone arrow rules (Hud_Arrow::CheckVisibility): in its territory, not
 // on a mission or in an arrow blocker zone, and a mission phone only with the respect it asks for.
-void FindPhones(View* pView, Player* pPlayer, const Gang* pGang)
+void FindPhones(View* pView, Player* pPlayer, const Gang* pGang, u32 rgba)
 {
     if (!pGang || pPlayer->get_arrow_blocker_zone() || !gScriptManager || gScriptManager->IsOnMission() || !gHud_2B00 ||
         !gHud_2B00->mArrows.ShowGangArrows())
@@ -195,7 +197,7 @@ void FindPhones(View* pView, Player* pPlayer, const Gang* pGang)
     }
     if (pGang->mInfoPhoneX.mValue || pGang->mInfoPhoneY.mValue)
     {
-        AddMark(pView, pGang->mInfoPhoneX, pGang->mInfoPhoneY, pView->gangRgba, kInfoPhone);
+        AddMark(pView, pGang->mInfoPhoneX, pGang->mInfoPhoneY, rgba, kInfoPhone);
     }
     const s8 respect = pGang->GetRespectForPlayer(pPlayer->get_idx());
     for (u32 i = 0; i < GTA2_COUNTOF(gScriptManager->mPhoneIds); i++)
@@ -238,23 +240,18 @@ bool ReadView(View* pView)
     pView->py4 = Quarter(y);
     const Ped* pPed = pPlayer->GetActivePed();
     pView->heading = pPed ? pPed->GetRotation().rValue : 0;
-    const Gang* pGang = pPlayer->get_gang_curr_location();
-    // The colour of the last gang, kept: a sprite scan per frame is wasted time.
-    static const Gang* sColourGang;
-    static const void* sColourStyle;
-    static u8 sColourArrow;
-    static u32 sColour;
-    const u8 arrow = pGang ? pGang->mArrowColour : 0;
-    if (pGang != sColourGang || gGtx_0x106C->mTiles != sColourStyle || arrow != sColourArrow)
+    for (s32 i = 0; i < kMaxGangs; i++)
     {
-        sColourGang = pGang;
-        sColourStyle = gGtx_0x106C->mTiles;
-        sColourArrow = arrow;
-        sColour = GangColour(pGang);
+        const Gang& gang = gGangPool_CA8->mGangList[i];
+        pView->arrows[i] = IsShown(gang) ? gang.mArrowColour : 0;
     }
-    pView->gangRgba = sColour;
-    pView->gang = pView->gangRgba ? pGang : 0;
-    FindPhones(pView, pPlayer, static_cast<const Gang*>(pView->gang));
+    const Gang* pGang = pPlayer->get_gang_curr_location();
+    const s32 slot = pGang ? (s32)(pGang - gGangPool_CA8->mGangList) : -1;
+    pView->gang = slot >= 0 && slot < kMaxGangs && pView->arrows[slot] ? slot + 1 : 0;
+    if (pView->gang)
+    {
+        FindPhones(pView, pPlayer, pGang, ArrowColour(pGang->mArrowColour));
+    }
     return true;
 }
 
@@ -299,11 +296,11 @@ void ReadGround(u16* pColours, u8* pHeights)
     }
 }
 
-void ReadTerritory(const void* pGang, u8* pInside)
+void ReadOwners(const u8* pArrows, u8* pOwners)
 {
-    memset(pInside, 0, kMapSize * kMapSize);
+    memset(pOwners, 0, kMapSize * kMapSize);
     const gmp_zone_list* pZones = gMap_0x370->mpZones;
-    if (!pGang || !gMap_0x370->mpZoneData || !pZones)
+    if (!gMap_0x370->mpZoneData || !pZones)
     {
         return;
     }
@@ -315,11 +312,34 @@ void ReadTerritory(const void* pGang, u8* pInside)
         {
             continue;
         }
-        const u8 v = gGangPool_CA8->FindGangByName(pZone->mName) == pGang;
+        const Gang* pGang = gGangPool_CA8->FindGangByName(pZone->mName);
+        const s32 slot = pGang ? (s32)(pGang - gGangPool_CA8->mGangList) : 0;
+        const u8 v = pGang && pArrows[slot] ? (u8)(slot + 1) : 0;
         for (s32 y = pZone->mY; y < pZone->mY + pZone->mH && y < kMapSize; y++)
         {
-            memset(pInside + y * kMapSize + pZone->mX, v, (pZone->mX + pZone->mW < kMapSize ? pZone->mW : kMapSize - pZone->mX));
+            memset(pOwners + y * kMapSize + pZone->mX, v, (pZone->mX + pZone->mW < kMapSize ? pZone->mW : kMapSize - pZone->mX));
         }
     }
+}
+
+u32 ArrowColour(s32 arrow)
+{
+    // Kept per style: a sprite scan per frame is wasted time.
+    static const void* sStyle;
+    static u32 sColours[8];
+    if (gGtx_0x106C->mTiles != sStyle)
+    {
+        sStyle = gGtx_0x106C->mTiles;
+        memset(sColours, 0, sizeof(sColours));
+    }
+    if (arrow < 1 || arrow > 7)
+    {
+        return 0;
+    }
+    if (!sColours[arrow])
+    {
+        sColours[arrow] = ScanArrowColour(arrow);
+    }
+    return sColours[arrow];
 }
 } // namespace MinimapGame
