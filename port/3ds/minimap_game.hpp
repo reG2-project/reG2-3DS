@@ -43,8 +43,9 @@ struct View
 
 // False without a player in a city.
 bool ReadView(View* pView);
-// Each block's top as a colour (RGB565, by block kind with a little of its lid's colour) and its height.
-void ReadGround(u16* pColours, u8* pHeights);
+// Each block's top as a colour (RGB565, its lid tile's, lighter when taller) and its height; returns the colour
+// given where no block has a lid.
+u16 ReadGround(u16* pColours, u8* pHeights);
 // Each block's gang, 1 + its pool slot when `arrows` keeps it, else 0; kMapSize x kMapSize.
 void ReadOwners(const u8* pArrows, u8* pOwners);
 // The colour of gang arrow `arrow` (RGBA), 0 for none.

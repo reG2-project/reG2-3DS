@@ -51,6 +51,7 @@ SpriteRect sSmallPips[MinimapGame::kPipCount];
 u32 sCity;
 bool sMapOk;
 u32 sTintSig;
+u32 sNone; // the ground where no block has a lid, also around the city
 MinimapGame::View sView;
 
 u32 Rgba(u32 r, u32 g, u32 b, u32 a = 255)
@@ -64,7 +65,8 @@ bool BuildMap(C3DRenderer& renderer)
 {
     std::vector<u8> heights(kMapSize * kMapSize);
     std::vector<u16> colours(kMapSize * kMapSize);
-    MinimapGame::ReadGround(&colours[0], &heights[0]);
+    const u16 none = MinimapGame::ReadGround(&colours[0], &heights[0]);
+    sNone = Rgba(((none >> 11) * 255 + 15) / 31, (((none >> 5) & 0x3F) * 255 + 31) / 63, ((none & 0x1F) * 255 + 15) / 31);
     u16* pTexels = static_cast<u16*>(renderer.LockTiled(sMap, kMapTexels, false));
     if (!pTexels)
     {
@@ -444,7 +446,7 @@ void Draw(C3DRenderer&, HudTheme::Sink& sink, const HudTheme::Rect& frame)
 {
     const s32 hx0 = frame.x0 + kTube, hy0 = frame.y0 + kTube, hx1 = frame.x1 - kTube, hy1 = frame.y1 - kTube;
     const s32 cx = (hx0 + hx1) / 2, cy = (hy0 + hy1) / 2;
-    HudTheme::Quad q = MakeQuad((f32)hx0, (f32)hy0, (f32)hx1, (f32)hy1, 0, 0, 0, 0, Rgba(12, 16, 22));
+    HudTheme::Quad q = MakeQuad((f32)hx0, (f32)hy0, (f32)hx1, (f32)hy1, 0, 0, 0, 0, sNone);
     sink.DrawQuads(&q, 1, 0, RS_NO_TEXTURE);
     // The city's part in the window, at whole pixels so each texel covers 2x2 of them.
     const s32 left = cx - sView.px4, top = cy - sView.py4, span = kMapSize * kPxPerBlock;

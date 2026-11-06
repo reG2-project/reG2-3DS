@@ -69,36 +69,6 @@ const TileInfo& Tile(std::vector<TileInfo>& tiles, u16 tile)
     return t;
 }
 
-// Water, road, pavement, field, building (lighter when taller): light streets between darker blocks, under the
-// HUD's dark panels.
-void KindColour(s32 z, s32 type, bool water, s32* pR, s32* pG, s32* pB)
-{
-    static const u8 kWater[3] = {28, 52, 88}, kRoad[3] = {146, 142, 130}, kPavement[3] = {96, 93, 86};
-    static const u8 kField[3] = {62, 96, 44}, kBuilding[3] = {56, 62, 74};
-    const u8* c = kPavement;
-    s32 lift = 0;
-    if (water || z <= 0)
-    {
-        c = kWater;
-    }
-    else if (type == ROAD)
-    {
-        c = kRoad;
-    }
-    else if (z >= 3)
-    {
-        c = kBuilding;
-        lift = 12 * (z - 3 < 6 ? z - 3 : 6);
-    }
-    else if (type == FIELD)
-    {
-        c = kField;
-    }
-    *pR = c[0] + lift;
-    *pG = c[1] + lift;
-    *pB = c[2] + lift;
-}
-
 // The gang of the first gang zone holding the block, as Map_0x370::GetGangAtCoords finds it (without its
 // iteration state).
 const Gang* GangAt(s32 x, s32 y)
@@ -291,17 +261,19 @@ bool ReadView(View* pView)
     return true;
 }
 
-void ReadGround(u16* pColours, u8* pHeights)
+u16 ReadGround(u16* pColours, u8* pHeights)
 {
     gmp_compressed_map_32* pDmap = gMap_0x370->mpDmap;
     std::vector<TileInfo> tiles(1024);
     memset(&tiles[0], 0, tiles.size() * sizeof(TileInfo));
+    std::vector<u16> lids(kMapSize * kMapSize);
+    u32 wr = 0, wg = 0, wb = 0, wn = 0;
     for (s32 y = 0; y < kMapSize; y++)
     {
         for (s32 x = 0; x < kMapSize; x++)
         {
             const gmp_col_info* pCol = reinterpret_cast<const gmp_col_info*>(&pDmap->mpColumn[*pDmap->get_base(y, x)]);
-            s32 z = 0, type = AIR;
+            s32 z = 0;
             u16 lid = 0;
             for (s32 i = pCol->mHeight - pCol->mOffset - 1; i >= 0; i--)
             {
@@ -310,26 +282,37 @@ void ReadGround(u16* pColours, u8* pHeights)
                 if (t && (i + pCol->mOffset == 0 || !Tile(tiles, t).clear))
                 {
                     z = i + pCol->mOffset;
-                    type = pBlock->mSlopeType & 3;
                     lid = t;
                     break;
                 }
             }
-            s32 r, g, b;
-            KindColour(z, type, lid && gGtx_0x106C->IsWaterTile(lid), &r, &g, &b);
-            if (lid)
+            if (lid && gGtx_0x106C->IsWaterTile(lid))
             {
-                // 15% of the lid's colour, scaled to the kind's brightness: some texture, the same tone.
                 const TileInfo& t = Tile(tiles, lid);
-                const s32 kind = r + g + b, tex = t.r + t.g + t.b > 24 ? t.r + t.g + t.b : 24;
-                r = (r * 85 + t.r * kind * 15 / tex) / 100;
-                g = (g * 85 + t.g * kind * 15 / tex) / 100;
-                b = (b * 85 + t.b * kind * 15 / tex) / 100;
+                wr += t.r;
+                wg += t.g;
+                wb += t.b;
+                wn++;
             }
             pHeights[y * kMapSize + x] = (u8)z;
-            pColours[y * kMapSize + x] = (u16)(((Clamp255(r) >> 3) << 11) | ((Clamp255(g) >> 2) << 5) | (Clamp255(b) >> 3));
+            lids[y * kMapSize + x] = lid;
         }
     }
+    // Where no block has a lid, the city's mean water colour.
+    const u16 none = wn ? (u16)((((wr / wn) >> 3) << 11) | (((wg / wn) >> 2) << 5) | ((wb / wn) >> 3)) : 0;
+    for (s32 i = 0; i < kMapSize * kMapSize; i++)
+    {
+        if (!lids[i])
+        {
+            pColours[i] = none;
+            continue;
+        }
+        // The lid's mean colour, lighter as the block stands taller (as in the minimap study's lid render).
+        const TileInfo& t = Tile(tiles, lids[i]);
+        const s32 h = pHeights[i] - 2, k = 208 + 12 * (h < 0 ? 0 : h > 6 ? 6 : h);
+        pColours[i] = (u16)(((Clamp255(t.r * k >> 8) >> 3) << 11) | ((Clamp255(t.g * k >> 8) >> 2) << 5) | (Clamp255(t.b * k >> 8) >> 3));
+    }
+    return none;
 }
 
 void ReadOwners(const u8* pArrows, u8* pOwners)
