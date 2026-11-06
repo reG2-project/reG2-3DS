@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "port_platform.hpp"
+#include "../../src/platform.hpp"
 
 namespace
 {
@@ -382,9 +383,11 @@ int port_GetPadBinding(int control)
             MigrateBindings();
         }
         sPadRead = true;
+        // Without rebinding, the defaults: stored bindings (a PC registry, an older build) are ignored.
+        const bool rebinding = PortPlatform::Has(PortPlatform::kRebinding);
         for (int i = 0; i < kNumControls; i++)
         {
-            sPad[i] = static_cast<int>(ReadControl("pad_%d", i, static_cast<DWORD>(kDefaultPad[i])));
+            sPad[i] = rebinding ? static_cast<int>(ReadControl("pad_%d", i, static_cast<DWORD>(kDefaultPad[i]))) : kDefaultPad[i];
         }
     }
     return sPad[control];

@@ -6,6 +6,7 @@
 #include "InputRecorder_67F8B0.hpp"
 #include "KeyboardLayout.hpp"
 #include "input.hpp"
+#include "platform.hpp"
 #include "registry.hpp"
 #include "settings.hpp"
 #include <stdio.h>
@@ -122,61 +123,81 @@ struct KeyName
 };
 std::vector<KeyName> sKeyNames;
 
+// The settings the platform has.
 s32 AddSettings(Item* pItems, s32 n, const PortSettings::Id* pIds, s32 count, bool gap)
 {
+    const s32 first = n;
     for (s32 i = 0; i < count; i++)
     {
-        pItems[n++] = Item{kSetting, pIds[i], gap && i == 0};
+        if (PortSettings::Available(pIds[i]))
+        {
+            pItems[n] = Item{kSetting, pIds[i], gap && n == first};
+            n++;
+        }
     }
     return n;
+}
+
+// A page's items without its BACK; none for a page the platform has nothing of.
+s32 PageItems(Page page, Item* pItems)
+{
+    switch (page)
+    {
+        case kScreenPage:
+            return AddSettings(pItems, 0, PortSettings::kScreen, PortSettings::kNumScreen, false);
+        case kViewPage:
+            return AddSettings(pItems, 0, PortSettings::kView, PortSettings::kNumView, false);
+        case kGraphicsPage:
+            return AddSettings(pItems, 0, PortSettings::kGraphics, PortSettings::kNumGraphics, false);
+        default:
+        {
+            s32 n = 0;
+            const bool rebinding = PortPlatform::Has(PortPlatform::kRebinding);
+            for (s32 i = 0; i < kNumControls && rebinding; i++)
+            {
+                pItems[n++] = Item{kBinding, i, false};
+            }
+#if defined(GTA2_PORT_SDL)
+            const PortSettings::Id kStyle[] = {PortSettings::kControls, PortSettings::kAimCamera};
+            n = AddSettings(pItems, n, kStyle, 2, n > 0);
+#endif
+            if (rebinding)
+            {
+                // Under the TWIN STICK settings, or set apart from the bindings.
+                pItems[n] = Item{kDefaultKeys, 0, n == kNumControls};
+                n++;
+            }
+            return n;
+        }
+    }
 }
 
 s32 Items(Page page, Item* pItems)
 {
     const bool inGame = port_GameRunning();
     s32 n = 0;
-    switch (page)
+    if (page == kMainPage)
     {
-        case kMainPage:
-            if (inGame)
+        if (inGame)
+        {
+            pItems[n++] = Item{kResume, 0, false};
+        }
+        Item pageItems[kMaxItems];
+        for (s32 p = kScreenPage; p < kNumPages; p++)
+        {
+            if (PageItems(static_cast<Page>(p), pageItems))
             {
-                pItems[n++] = Item{kResume, 0, false};
+                pItems[n++] = Item{kGoTo, p, false};
             }
-            pItems[n++] = Item{kGoTo, kScreenPage, false};
-            pItems[n++] = Item{kGoTo, kViewPage, false};
-            pItems[n++] = Item{kGoTo, kGraphicsPage, false};
-            pItems[n++] = Item{kGoTo, kControlsPage, false};
-            n = AddSettings(pItems, n, PortSettings::kGeneral, PortSettings::kNumGeneral, true);
-            pItems[n++] = Item{inGame ? kQuit : kBack, 0, true};
-            break;
-        case kScreenPage:
-            n = AddSettings(pItems, n, PortSettings::kScreen, PortSettings::kNumScreen, false);
-            pItems[n++] = Item{kBack, 0, true};
-            break;
-        case kViewPage:
-            n = AddSettings(pItems, n, PortSettings::kView, PortSettings::kNumView, false);
-            pItems[n++] = Item{kBack, 0, true};
-            break;
-        case kGraphicsPage:
-            n = AddSettings(pItems, n, PortSettings::kGraphics, PortSettings::kNumGraphics, false);
-            pItems[n++] = Item{kBack, 0, true};
-            break;
-        default:
-            for (s32 i = 0; i < kNumControls; i++)
-            {
-                pItems[n++] = Item{kBinding, i, false};
-            }
-#if defined(GTA2_PORT_SDL)
-            pItems[n++] = Item{kSetting, PortSettings::kControls, true};
-            pItems[n++] = Item{kSetting, PortSettings::kAimCamera, false};
-#endif
-            // Under the TWIN STICK settings, or set apart from the bindings.
-            const bool gap = n == kNumControls;
-            pItems[n++] = Item{kDefaultKeys, 0, gap};
-            pItems[n++] = Item{kBack, 0, false};
-            break;
+        }
+        n = AddSettings(pItems, n, PortSettings::kGeneral, PortSettings::kNumGeneral, true);
+        pItems[n++] = Item{inGame ? kQuit : kBack, 0, true};
+        return n;
     }
-    return n;
+    n = PageItems(page, pItems);
+    // Set apart, except right under DEFAULT KEYS.
+    pItems[n] = Item{kBack, 0, !n || pItems[n - 1].mKind != kDefaultKeys};
+    return n + 1;
 }
 
 const wchar_t* EnglishName(const Item& item)
@@ -637,7 +658,8 @@ void GetLayout(Layout* pLayout)
     }
     Item* pItems = pLayout->mItems;
     const s32 count = Items(sPage, pItems);
-    const bool controls = sPage == kControlsPage;
+    // The bindings' columns, when the page has them.
+    const bool controls = count && pItems[0].mKind == kBinding;
     const s32 columns = controls ? kColumns : 1;
 
     // The first column at its place, or further right for longer names, each a gap after the longest
