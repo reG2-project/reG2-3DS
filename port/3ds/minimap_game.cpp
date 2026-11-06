@@ -119,15 +119,15 @@ const Gang* GangAt(s32 x, s32 y)
     return 0;
 }
 
-// The gang's colour: the bright half of its respect meter's bar (user sprite 71 + arrow - 1, as
-// Hud_GangRespectBars draws it); 0 for a gang without an arrow colour, which is not a real gang.
+// The gang's colour: the bright half of the arrow that points to its phones (user sprite `arrow`, as
+// Hud_Arrow::DrawArrow draws it); 0 for a gang without an arrow colour, which is not a real gang.
 u32 GangColour(const Gang* pGang)
 {
     if (!pGang || !pGang->mArrowColour)
     {
         return 0;
     }
-    const u16 sprite = gGtx_0x106C->GetSpriteTrueIndex(sprite_types_enum::user_6, (s16)(pGang->mArrowColour - 1 + 71));
+    const u16 sprite = gGtx_0x106C->GetSpriteTrueIndex(sprite_types_enum::user_6, (s16)pGang->mArrowColour);
     const sprite_index* pIndex = gGtx_0x106C->get_sprite_index(sprite);
     const u32* pPal = reinterpret_cast<const u32*>(
         gGtx_0x106C->GetPalData(gGtx_0x106C->get_phys_pal(gGtx_0x106C->GetTruePalette(palette_types_enum::sprites_2, sprite))));

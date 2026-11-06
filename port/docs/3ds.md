@@ -101,7 +101,7 @@ pixels per block. It is meant to be fair, so it shows little:
 
 - the ground by block kind (water, road, pavement, field, buildings lighter when taller), with the
   study's rims and shadows and a little of each lid's colour;
-- the gang territory the player is in, as a tint in the gang's colour (its respect meter's), stronger
+- the gang territory the player is in, as a tint in the gang's colour (its phone arrow's), stronger
   along its edge; the other gangs' territories are not shown;
 - the player's arrow;
 - that gang's phones, under the rules of the game's own phone arrows (`Hud_Arrow::CheckVisibility`):
