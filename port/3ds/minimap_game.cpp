@@ -129,44 +129,34 @@ bool IsShown(const Gang& gang)
 // draws it): the colour the game gives the gang.
 u32 ScanArrowColour(s32 arrow)
 {
-    const u16 sprite = gGtx_0x106C->GetSpriteTrueIndex(sprite_types_enum::user_6, (s16)arrow);
-    const sprite_index* pIndex = gGtx_0x106C->get_sprite_index(sprite);
-    const u32* pPal = reinterpret_cast<const u32*>(
-        gGtx_0x106C->GetPalData(gGtx_0x106C->get_phys_pal(gGtx_0x106C->GetTruePalette(palette_types_enum::sprites_2, sprite))));
-    u32 sum = 0, n = 0;
-    for (s32 pass = 0; pass < 2; pass++)
+    static u32 texels[64 * 64];
+    s32 w, h;
+    if (!ReadUserSprite(arrow, texels, 64 * 64, &w, &h))
     {
-        const u32 mean = n ? sum / n : 0;
-        u32 r = 0, g = 0, b = 0, m = 0;
-        sum = n = 0;
-        for (s32 y = 0; y < pIndex->mHeight; y++)
+        return 0;
+    }
+    u32 sum = 0, n = 0;
+    for (s32 i = 0; i < w * h; i++)
+    {
+        if (texels[i] >> 24)
         {
-            for (s32 x = 0; x < pIndex->mWidth; x++)
-            {
-                const u8 index = pIndex->mpData[y * 256 + x];
-                if (!index)
-                {
-                    continue;
-                }
-                const u32 c = pPal[index * 64];
-                const u32 l = ((c >> 16) & 0xFF) + ((c >> 8) & 0xFF) + (c & 0xFF);
-                sum += l;
-                n++;
-                if (pass && l >= mean)
-                {
-                    r += (c >> 16) & 0xFF;
-                    g += (c >> 8) & 0xFF;
-                    b += c & 0xFF;
-                    m++;
-                }
-            }
-        }
-        if (pass && m)
-        {
-            return Rgba(r / m, g / m, b / m);
+            sum += (texels[i] & 0xFF) + ((texels[i] >> 8) & 0xFF) + ((texels[i] >> 16) & 0xFF);
+            n++;
         }
     }
-    return 0;
+    u32 r = 0, g = 0, b = 0, m = 0;
+    for (s32 i = 0; i < w * h; i++)
+    {
+        const u32 c = texels[i];
+        if ((c >> 24) && ((c & 0xFF) + ((c >> 8) & 0xFF) + ((c >> 16) & 0xFF)) * n >= sum)
+        {
+            r += c & 0xFF;
+            g += (c >> 8) & 0xFF;
+            b += (c >> 16) & 0xFF;
+            m++;
+        }
+    }
+    return m ? Rgba(r / m, g / m, b / m) : 0;
 }
 
 s32 Quarter(Fix16 v)
@@ -174,21 +164,22 @@ s32 Quarter(Fix16 v)
     return (s32)floorf(v.ToFloat() * 4.0f + 0.5f);
 }
 
-void AddMark(View* pView, Fix16 x, Fix16 y, u32 rgba, MarkKind kind)
+void AddMark(View* pView, s32 x4, s32 y4, MarkKind kind, u8 arrow, u8 pip = 0)
 {
     if (pView->markCount < kMaxMarks)
     {
         Mark& m = pView->marks[pView->markCount++];
-        m.x4 = Quarter(x);
-        m.y4 = Quarter(y);
-        m.rgba = rgba;
+        m.x4 = x4;
+        m.y4 = y4;
         m.kind = kind;
+        m.arrow = arrow;
+        m.pip = pip;
     }
 }
 
 // The gang's live phones, under the game's phone arrow rules (Hud_Arrow::CheckVisibility): in its territory, not
 // on a mission or in an arrow blocker zone, and a mission phone only with the respect it asks for.
-void FindPhones(View* pView, Player* pPlayer, const Gang* pGang, u32 rgba)
+void FindPhones(View* pView, Player* pPlayer, const Gang* pGang)
 {
     if (!pGang || pPlayer->get_arrow_blocker_zone() || !gScriptManager || gScriptManager->IsOnMission() || !gHud_2B00 ||
         !gHud_2B00->mArrows.ShowGangArrows())
@@ -197,7 +188,7 @@ void FindPhones(View* pView, Player* pPlayer, const Gang* pGang, u32 rgba)
     }
     if (pGang->mInfoPhoneX.mValue || pGang->mInfoPhoneY.mValue)
     {
-        AddMark(pView, pGang->mInfoPhoneX, pGang->mInfoPhoneY, rgba, kInfoPhone);
+        AddMark(pView, Quarter(pGang->mInfoPhoneX), Quarter(pGang->mInfoPhoneY), kInfoPhone, pGang->mArrowColour);
     }
     const s8 respect = pGang->GetRespectForPlayer(pPlayer->get_idx());
     for (u32 i = 0; i < GTA2_COUNTOF(gScriptManager->mPhoneIds); i++)
@@ -219,9 +210,9 @@ void FindPhones(View* pView, Player* pPlayer, const Gang* pGang, u32 rgba)
         {
             continue;
         }
-        // By phone type: yellow medium, red hard, green easy.
-        static const u32 kPhone[4] = {0, Rgba(244, 210, 40), Rgba(226, 46, 32), Rgba(70, 206, 60)};
-        AddMark(pView, x, y, kPhone[type & 3], kMissionPhone);
+        // The pip by phone type, as Hud_Arrow::DrawArrow picks it: 1 yellow, 3 green, 2 red.
+        const u8 pip = type == 1 ? 0 : type == 3 ? 1 : 2;
+        AddMark(pView, Quarter(x), Quarter(y), kMissionPhone, pGang->mArrowColour, pip);
     }
 }
 } // namespace
@@ -250,7 +241,7 @@ bool ReadView(View* pView)
     pView->gang = slot >= 0 && slot < kMaxGangs && pView->arrows[slot] ? slot + 1 : 0;
     if (pView->gang)
     {
-        FindPhones(pView, pPlayer, pGang, ArrowColour(pGang->mArrowColour));
+        FindPhones(pView, pPlayer, pGang);
     }
     return true;
 }
@@ -341,5 +332,29 @@ u32 ArrowColour(s32 arrow)
         sColours[arrow] = ScanArrowColour(arrow);
     }
     return sColours[arrow];
+}
+bool ReadUserSprite(s32 n, u32* pRgba, s32 maxTexels, s32* pW, s32* pH)
+{
+    const u16 sprite = gGtx_0x106C->GetSpriteTrueIndex(sprite_types_enum::user_6, (s16)n);
+    const sprite_index* pIndex = gGtx_0x106C->get_sprite_index(sprite);
+    if (!pIndex || !pIndex->mpData || pIndex->mWidth * pIndex->mHeight > maxTexels)
+    {
+        return false;
+    }
+    // Sprite pages are 256 bytes wide; palette entries are 64 dwords apart.
+    const u32* pPal = reinterpret_cast<const u32*>(
+        gGtx_0x106C->GetPalData(gGtx_0x106C->get_phys_pal(gGtx_0x106C->GetTruePalette(palette_types_enum::sprites_2, sprite))));
+    *pW = pIndex->mWidth;
+    *pH = pIndex->mHeight;
+    for (s32 y = 0; y < pIndex->mHeight; y++)
+    {
+        for (s32 x = 0; x < pIndex->mWidth; x++)
+        {
+            const u8 index = pIndex->mpData[y * 256 + x];
+            const u32 c = pPal[index * 64];
+            pRgba[y * pIndex->mWidth + x] = index ? Rgba((c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF) : 0;
+        }
+    }
+    return true;
 }
 } // namespace MinimapGame

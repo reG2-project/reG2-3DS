@@ -25,16 +25,29 @@ const s32 kRib = 7;
 const s32 kTabX = 44;
 const s32 kTabW = 15;
 const s32 kTube = 13;
-// The atlas: the frame at (0, 0), the player arrow and the blip right of it.
+// The atlas: the frame at (0, 0), the player arrow right of it.
 const s32 kAtlasSize = 128;
 const s32 kArrowX = 104;
-const s32 kBlipX = 115;
-// Markers stay this far inside the map; further out they become arrows on its edge.
+// The game's sprites for the markers, read from the city's style.
+const s32 kSpritesW = 128;
+const s32 kSpritesH = 64;
+// Markers stay this far inside the map; further out they go on its edge.
 const s32 kEdgeMargin = 5;
+
+struct SpriteRect
+{
+    s16 x, y, w, h;
+};
 
 RTexture* sMap;
 RTexture* sTint;
 RTexture* sAtlas;
+RTexture* sSprites;
+// At half size, as the bottom screen draws the HUD, but the pips at full size to be seen on the map.
+SpriteRect sArrows[MinimapGame::kMaxArrow + 1];
+SpriteRect sIcons[MinimapGame::kMaxArrow + 1];
+SpriteRect sPips[MinimapGame::kPipCount];
+SpriteRect sSmallPips[MinimapGame::kPipCount];
 u32 sCity;
 bool sMapOk;
 u32 sTintSig;
@@ -127,31 +140,102 @@ u32 TintSignature()
     return h;
 }
 
-// The frame, the arrow and a grey blip (to take the marker's colour), alpha cut at half.
+// The frame and the player's arrow, alpha cut at half.
 void BuildAtlas(C3DRenderer& renderer)
 {
     std::vector<u32> atlas(kAtlasSize * kAtlasSize, 0);
-    const auto put = [&atlas](const unsigned int* pSrc, s32 w, s32 h, s32 x0, bool grey) {
+    const auto put = [&atlas](const unsigned int* pSrc, s32 w, s32 h, s32 x0) {
         for (s32 y = 0; y < h; y++)
         {
             for (s32 x = 0; x < w; x++)
             {
-                u32 c = pSrc[y * w + x];
-                if (grey)
-                {
-                    const u32 r = c & 0xFF, g = (c >> 8) & 0xFF, b = (c >> 16) & 0xFF;
-                    const u32 v = r > g ? (r > b ? r : b) : (g > b ? g : b);
-                    c = Rgba(v, v, v, c >> 24);
-                }
+                const u32 c = pSrc[y * w + x];
                 atlas[y * kAtlasSize + x0 + x] = (c >> 24) >= 128 ? c | 0xFF000000u : 0;
             }
         }
     };
-    put(kFrame, kFrameW, kFrameH, 0, false);
-    put(kArrow, kArrowW, kArrowH, kArrowX, false);
-    put(kBlip, kBlipW, kBlipH, kBlipX, true);
+    put(kFrame, kFrameW, kFrameH, 0);
+    put(kArrow, kArrowW, kArrowH, kArrowX);
     sAtlas = renderer.CreateTexture();
     renderer.UploadTexture(sAtlas, kAtlasSize, kAtlasSize, &atlas[0], RMIP_NONE);
+}
+
+// Half size, a texel per 2x2: the mean of the opaque ones, opaque when at least two are.
+void Halve(const u32* pSrc, s32 w, s32 h, u32* pDst, s32* pW, s32* pH)
+{
+    *pW = (w + 1) / 2;
+    *pH = (h + 1) / 2;
+    for (s32 y = 0; y < *pH; y++)
+    {
+        for (s32 x = 0; x < *pW; x++)
+        {
+            u32 r = 0, g = 0, b = 0, n = 0;
+            for (s32 i = 0; i < 4; i++)
+            {
+                const s32 sx = x * 2 + (i & 1), sy = y * 2 + (i >> 1);
+                const u32 c = sx < w && sy < h ? pSrc[sy * w + sx] : 0;
+                if (c >> 24)
+                {
+                    r += c & 0xFF;
+                    g += (c >> 8) & 0xFF;
+                    b += (c >> 16) & 0xFF;
+                    n++;
+                }
+            }
+            pDst[y * *pW + x] = n >= 2 ? Rgba(r / n, g / n, b / n) : 0;
+        }
+    }
+}
+
+// The markers' sprites from the city's style, packed in rows a texel apart.
+void BuildSprites(C3DRenderer& renderer)
+{
+    std::vector<u32> sheet(kSpritesW * kSpritesH, 0);
+    static u32 full[64 * 64], half[32 * 32];
+    s32 px = 0, py = 0, row = 0;
+    const auto add = [&](s32 n, bool halve, SpriteRect* pRect) {
+        s32 w, h;
+        pRect->w = 0;
+        if (!MinimapGame::ReadUserSprite(n, full, 64 * 64, &w, &h))
+        {
+            return;
+        }
+        const u32* pSrc = full;
+        if (halve)
+        {
+            Halve(full, w, h, half, &w, &h);
+            pSrc = half;
+        }
+        if (px + w > kSpritesW)
+        {
+            px = 0;
+            py += row + 1;
+            row = 0;
+        }
+        if (w > kSpritesW || py + h > kSpritesH)
+        {
+            return;
+        }
+        for (s32 y = 0; y < h; y++)
+        {
+            memcpy(&sheet[(py + y) * kSpritesW + px], pSrc + y * w, w * sizeof(u32));
+        }
+        const SpriteRect r = {(s16)px, (s16)py, (s16)w, (s16)h};
+        *pRect = r;
+        px += w + 1;
+        row = h > row ? h : row;
+    };
+    for (s32 a = 1; a <= MinimapGame::kMaxArrow; a++)
+    {
+        add(a, true, &sArrows[a]);
+        add(MinimapGame::kIconSprite + a, true, &sIcons[a]);
+    }
+    for (s32 i = 0; i < MinimapGame::kPipCount; i++)
+    {
+        add(MinimapGame::kPipSprite + i, false, &sPips[i]);
+        add(MinimapGame::kPipSprite + i, true, &sSmallPips[i]);
+    }
+    renderer.UploadTexture(sSprites, kSpritesW, kSpritesH, &sheet[0], RMIP_NONE);
 }
 
 HudTheme::Quad MakeQuad(f32 x0, f32 y0, f32 x1, f32 y1, f32 u0, f32 v0, f32 u1, f32 v1, u32 rgba)
@@ -227,58 +311,70 @@ void DrawArrow(HudTheme::Sink& sink, f32 x, f32 y, s32 heading)
     sink.DrawTriangles(tris, 6, sAtlas, RS_BLEND_ALPHA);
 }
 
-// An arrow on the map's edge at (x, y), pointing along (dx, dy), towards a marker outside the map.
-void EdgeArrow(RVertex* pOut, f32 x, f32 y, f32 dx, f32 dy, u32 rgba)
+// A sprite of the markers' sheet centred on (x, y), upright.
+HudTheme::Quad SpriteQuad(s32 x, s32 y, const SpriteRect& r)
 {
-    const f32 len = sqrtf(dx * dx + dy * dy);
-    dx /= len;
-    dy /= len;
-    for (s32 pass = 0; pass < 2; pass++)
-    {
-        const f32 k = pass ? 1.0f : 1.6f;
-        const u32 c = pass ? rgba : Rgba(16, 12, 8);
-        const f32 tip = 4.5f * k, back = 2.0f * k, side = 2.5f * k;
-        *pOut++ = Vertex(x + dx * tip, y + dy * tip, c);
-        *pOut++ = Vertex(x - dx * back - dy * side, y - dy * back + dx * side, c);
-        *pOut++ = Vertex(x - dx * back + dy * side, y - dy * back - dx * side, c);
-    }
+    const f32 ku = 1.0f / kSpritesW, kv = 1.0f / kSpritesH;
+    const s32 x0 = x - r.w / 2, y0 = y - r.h / 2;
+    return MakeQuad((f32)x0, (f32)y0, (f32)(x0 + r.w), (f32)(y0 + r.h), r.x * ku, r.y * kv, (r.x + r.w) * ku, (r.y + r.h) * kv,
+                    0xFFFFFFFFu);
 }
 
+// A sprite of the sheet centred on (x, y), turned so that its top points along the unit vector (ux, uy).
+void SpriteTurned(RVertex* pOut, f32 x, f32 y, const SpriteRect& r, f32 ux, f32 uy)
+{
+    const f32 ku = 1.0f / kSpritesW, kv = 1.0f / kSpritesH, hw = r.w * 0.5f, hh = r.h * 0.5f;
+    const f32 xs[4] = {-hw, hw, hw, -hw}, ys[4] = {-hh, -hh, hh, hh};
+    const f32 us[4] = {0, (f32)r.w, (f32)r.w, 0}, vs[4] = {0, 0, (f32)r.h, (f32)r.h};
+    RVertex v[4];
+    for (s32 i = 0; i < 4; i++)
+    {
+        v[i] = Vertex(x - xs[i] * uy - ys[i] * ux, y + xs[i] * ux - ys[i] * uy, 0xFFFFFFFFu, (r.x + us[i]) * ku, (r.y + vs[i]) * kv);
+    }
+    const RVertex tris[6] = {v[0], v[1], v[2], v[0], v[2], v[3]};
+    memcpy(pOut, tris, sizeof(tris));
+}
+
+// Inside the map: a mission phone is its pip, the info phone the gang's icon. Outside: a phone is the game's own
+// arrow towards it on the map's edge, with its pip.
 void DrawMarks(HudTheme::Sink& sink, s32 hx0, s32 hy0, s32 hx1, s32 hy1, s32 cx, s32 cy)
 {
-    HudTheme::Quad quads[kMaxMarks * 3];
-    RVertex tris[kMaxMarks * 6];
+    HudTheme::Quad quads[kMaxMarks];
+    RVertex tris[kMaxMarks * 12];
     s32 nq = 0, nt = 0;
-    HudTheme::Quad blips[kMaxMarks];
-    s32 nb = 0;
     const f32 x0 = (f32)(hx0 + kEdgeMargin), y0 = (f32)(hy0 + kEdgeMargin), x1 = (f32)(hx1 - kEdgeMargin), y1 = (f32)(hy1 - kEdgeMargin);
     for (s32 i = 0; i < sView.markCount; i++)
     {
         const MinimapGame::Mark& m = sView.marks[i];
         const s32 x = cx + m.x4 - sView.px4, y = cy + m.y4 - sView.py4;
+        const SpriteRect& arrow = sArrows[m.arrow <= MinimapGame::kMaxArrow ? m.arrow : 0];
+        const SpriteRect& icon = sIcons[m.arrow <= MinimapGame::kMaxArrow ? m.arrow : 0];
+        const bool mission = m.kind == MinimapGame::kMissionPhone;
         if (x < x0 || x > x1 || y < y0 || y > y1)
         {
-            // Along the ray from the player, onto the inner edge.
-            const f32 dx = (f32)(x - cx), dy = (f32)(y - cy);
+            // Along the ray from the player, onto the inner edge, the arrow's tip on the map's edge.
+            const f32 dx = (f32)(x - cx), dy = (f32)(y - cy), len = sqrtf(dx * dx + dy * dy);
             const f32 tx = dx ? ((dx > 0 ? x1 : x0) - cx) / dx : 1e9f, ty = dy ? ((dy > 0 ? y1 : y0) - cy) / dy : 1e9f;
-            const f32 t = tx < ty ? tx : ty;
-            EdgeArrow(tris + nt, cx + dx * t, cy + dy * t, dx, dy, m.rgba);
-            nt += 6;
+            const f32 t = tx < ty ? tx : ty, ux = dx / len, uy = dy / len, back = arrow.h * 0.5f - kEdgeMargin;
+            const f32 ax = cx + dx * t - ux * back, ay = cy + dy * t - uy * back;
+            if (arrow.w)
+            {
+                SpriteTurned(tris + nt, ax, ay, arrow, ux, uy);
+                nt += 6;
+            }
+            if (mission && sSmallPips[m.pip].w)
+            {
+                SpriteTurned(tris + nt, ax, ay, sSmallPips[m.pip], ux, uy);
+                nt += 6;
+            }
         }
-        else if (m.kind == MinimapGame::kInfoPhone)
+        else if (mission ? sPips[m.pip].w : icon.w)
         {
-            quads[nq++] = MakeQuad((f32)(x - 4), (f32)(y - 4), (f32)(x + 5), (f32)(y + 5), 0, 0, 0, 0, Rgba(16, 12, 8));
-            quads[nq++] = MakeQuad((f32)(x - 3), (f32)(y - 3), (f32)(x + 4), (f32)(y + 4), 0, 0, 0, 0, Rgba(240, 236, 220));
-            quads[nq++] = MakeQuad((f32)(x - 2), (f32)(y - 2), (f32)(x + 3), (f32)(y + 3), 0, 0, 0, 0, m.rgba);
-        }
-        else
-        {
-            blips[nb++] = AtlasQuad(x - kBlipW / 2, y - kBlipH / 2, kBlipX, 0, kBlipW, kBlipH, m.rgba);
+            quads[nq++] = SpriteQuad(x, y, mission ? sPips[m.pip] : icon);
         }
     }
-    sink.DrawQuads(quads, nq, 0, RS_NO_TEXTURE | RS_BLEND_ALPHA);
-    sink.DrawQuads(blips, nb, sAtlas, RS_BLEND_ALPHA);
-    sink.DrawTriangles(tris, nt, 0, RS_NO_TEXTURE | RS_BLEND_ALPHA);
+    sink.DrawTriangles(tris, nt, sSprites, RS_BLEND_ALPHA);
+    sink.DrawQuads(quads, nq, sSprites, RS_BLEND_ALPHA | C3DRenderer::kStateNearest);
 }
 } // namespace
 
@@ -296,15 +392,17 @@ u32 Update(C3DRenderer& renderer)
         {
             sMap = renderer.CreateTexture();
             sTint = renderer.CreateTexture();
+            sSprites = renderer.CreateTexture();
             BuildAtlas(renderer);
         }
         sCity = city;
         sMapOk = BuildMap(renderer);
+        BuildSprites(renderer);
         sTintSig = TintSignature();
         BuildTint(renderer);
-        fprintf(stderr, "minimap: built in %.1f ms; map %d KB, tint %d KB, frame and markers %d KB of linear memory\n",
+        fprintf(stderr, "minimap: built in %.1f ms; map %d KB, tint %d KB, frame %d KB and markers %d KB of linear memory\n",
                 (svcGetSystemTick() - t0) * 1000.0 / SYSCLOCK_ARM11, kMapTexels * kMapTexels * 2 / 1024, kMapSize * kMapSize * 2 / 1024,
-                kAtlasSize * kAtlasSize * 2 / 1024);
+                kAtlasSize * kAtlasSize * 2 / 1024, kSpritesW * kSpritesH * 2 / 1024);
     }
     if (!sMapOk)
     {
@@ -328,7 +426,7 @@ u32 Update(C3DRenderer& renderer)
     {
         mix((u32)sView.marks[i].x4);
         mix((u32)sView.marks[i].y4);
-        mix(sView.marks[i].rgba ^ sView.marks[i].kind);
+        mix((u32)sView.marks[i].kind | (sView.marks[i].arrow << 8) | (sView.marks[i].pip << 16));
     }
     return h ? h : 1;
 }
@@ -368,7 +466,8 @@ void Shutdown(C3DRenderer& renderer)
     renderer.FreeTexture(sMap);
     renderer.FreeTexture(sTint);
     renderer.FreeTexture(sAtlas);
-    sMap = sTint = sAtlas = 0;
+    renderer.FreeTexture(sSprites);
+    sMap = sTint = sAtlas = sSprites = 0;
     sCity = 0;
     sMapOk = false;
     sTintSig = 0;

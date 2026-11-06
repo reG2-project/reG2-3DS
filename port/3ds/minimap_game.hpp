@@ -9,6 +9,12 @@ namespace MinimapGame
 const s32 kMapSize = 256;
 const s32 kMaxMarks = 40;
 const s32 kMaxGangs = 10; // GangPool's slots
+// The HUD's user sprites: a gang's phone arrow is sprite `arrow` (1 to 7) with a phone's pip, kPipSprite + pip, in
+// its middle (Hud_Arrow::DrawArrow); its respect meter icon is kIconSprite + arrow (Hud_GangRespectBars).
+const s32 kMaxArrow = 7;
+const s32 kPipSprite = 8;
+const s32 kPipCount = 3;
+const s32 kIconSprite = 63;
 
 enum MarkKind
 {
@@ -19,8 +25,9 @@ enum MarkKind
 struct Mark
 {
     s32 x4, y4; // quarter blocks
-    u32 rgba;
     MarkKind kind;
+    u8 arrow; // the gang's arrow colour
+    u8 pip;   // a mission phone's pip: 0 yellow (medium), 1 green (easy), 2 red (hard)
 };
 
 struct View
@@ -41,4 +48,6 @@ void ReadGround(u16* pColours, u8* pHeights);
 void ReadOwners(const u8* pArrows, u8* pOwners);
 // The colour of gang arrow `arrow` (RGBA), 0 for none.
 u32 ArrowColour(s32 arrow);
+// The style's user sprite `n` as RGBA, rows of *pW texels; false when it is missing or over maxTexels.
+bool ReadUserSprite(s32 n, u32* pRgba, s32 maxTexels, s32* pW, s32* pH);
 } // namespace MinimapGame
