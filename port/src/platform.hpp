@@ -25,4 +25,8 @@ bool Has(Feature feature);
 // A pad button's name as printed on the pad, by pad binding code 0 to 11 (compat/src/pad.cpp: SDL's south,
 // east, west and north buttons, the shoulders, back, start, the stick presses, the triggers).
 const wchar_t* PadButtonName(int code);
+
+// The pad binding codes that select and go back in menus.
+int MenuSelectButton();
+int MenuBackButton();
 } // namespace PortPlatform

@@ -558,8 +558,8 @@ void port_AddPadMenuKeys(BYTE* pKeys)
         {CodeDown(kPadDown), DIK_DOWN},
         {CodeDown(kPadLeft), DIK_LEFT},
         {CodeDown(kPadRight), DIK_RIGHT},
-        {Button(SDL_GAMEPAD_BUTTON_SOUTH) || Button(SDL_GAMEPAD_BUTTON_START), DIK_RETURN},
-        {Button(SDL_GAMEPAD_BUTTON_EAST) || Button(SDL_GAMEPAD_BUTTON_BACK), DIK_ESCAPE},
+        {Button(kButtons[PortPlatform::MenuSelectButton()]) || Button(SDL_GAMEPAD_BUTTON_START), DIK_RETURN},
+        {Button(kButtons[PortPlatform::MenuBackButton()]) || Button(SDL_GAMEPAD_BUTTON_BACK), DIK_ESCAPE},
         {Button(SDL_GAMEPAD_BUTTON_WEST), DIK_DELETE},
     };
     for (const auto& k : keys)
@@ -691,8 +691,8 @@ void port_UpdatePad()
     }
 
     const bool start = Button(SDL_GAMEPAD_BUTTON_START);
-    const bool a = Button(SDL_GAMEPAD_BUTTON_SOUTH);
-    const bool b = Button(SDL_GAMEPAD_BUTTON_EAST);
+    const bool a = Button(kButtons[PortPlatform::MenuSelectButton()]);
+    const bool b = Button(kButtons[PortPlatform::MenuBackButton()]);
     const bool select = Button(SDL_GAMEPAD_BUTTON_BACK);
     static bool sPrevStart;
     static bool sPrevA;

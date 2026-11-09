@@ -322,4 +322,15 @@ const wchar_t* PadButtonName(int code)
     static const wchar_t* const kNames[12] = {L"B", L"A", L"Y", L"X", L"L", L"R", L"SELECT", L"START", L"-", L"-", L"ZL", L"ZR"};
     return code >= 0 && code < 12 ? kNames[code] : L"-";
 }
+
+// As the console's own menus: A, the right button, selects and B goes back.
+int MenuSelectButton()
+{
+    return 1;
+}
+
+int MenuBackButton()
+{
+    return 0;
+}
 } // namespace PortPlatform

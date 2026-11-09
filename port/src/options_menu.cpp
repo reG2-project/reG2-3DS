@@ -253,13 +253,13 @@ void PadKeyHint(u8 hint, wchar_t* pText)
     switch (hint)
     {
         case 0: // ESC
-            wcscpy(pText, PortPlatform::PadButtonName(1));
+            wcscpy(pText, PortPlatform::PadButtonName(PortPlatform::MenuBackButton()));
             break;
         case 1: // DEL
             wcscpy(pText, PortPlatform::PadButtonName(2));
             break;
         case 2: // ENTER
-            wcscpy(pText, PortPlatform::PadButtonName(0));
+            wcscpy(pText, PortPlatform::PadButtonName(PortPlatform::MenuSelectButton()));
             break;
         case 3: // BACKSPACE
             wcscpy(pText, L"LEFT");
