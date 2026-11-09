@@ -18,9 +18,8 @@ set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
 file(GLOB gcc_dirs LIST_DIRECTORIES true ${DEVKITARM}/arm-none-eabi/include/c++/*)
 list(GET gcc_dirs 0 cxx_inc)
 
-# devkitARM's ABI (3DS.cmake): ARM11 MPCore, VFPv2, hard float, software thread pointer. Unaligned loads and
-# stores as devkitARM's GCC makes them (clang's bare metal default is byte by byte).
-set(arch "--target=armv6k-none-eabihf -mcpu=mpcore -mfpu=vfpv2 -mfloat-abi=hard -mtp=soft -munaligned-access")
+# devkitARM's ABI (3DS.cmake): ARM11 MPCore, VFPv2, hard float, software thread pointer.
+set(arch "--target=armv6k-none-eabihf -mcpu=mpcore -mfpu=vfpv2 -mfloat-abi=hard -mtp=soft")
 set(inc "--sysroot=${DEVKITARM}/arm-none-eabi -nostdinc++ -isystem ${cxx_inc} -isystem ${cxx_inc}/arm-none-eabi/armv6k/fpu -isystem ${CTR_ROOT}/include")
 set(CMAKE_C_FLAGS_INIT "${arch} -isystem ${CTR_ROOT}/include -D__3DS__ -ffunction-sections -flto")
 set(CMAKE_CXX_FLAGS_INIT "${arch} ${inc} -D__3DS__ -ffunction-sections -flto")
