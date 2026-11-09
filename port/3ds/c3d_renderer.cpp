@@ -38,15 +38,18 @@ struct RTexture
 
 namespace
 {
-// What the vertex shader loads (v0 position and rhw, v1 colour bytes, v2 uv).
+// What the vertex shader loads (v0 position and rhw, v1 colour bytes, v2 uv, v3 world position and shade).
 struct C3DVertex
 {
     f32 x, y, rhw;
     u32 rgba;
     f32 u, v;
+    f32 wx, wy, wz, shade; // shade < 0: unlit
 };
 
 const s32 kMaxVerts = 65536;
+// The most lights the vertex shader takes (render.v.pica's lights[]).
+const s32 kMaxShaderLights = 44;
 // The top screen's target, landscape: the game's 800x480 at half size.
 const s32 kScreenW = 400;
 const s32 kScreenH = 240;
@@ -388,6 +391,11 @@ struct C3DRenderer::Impl : HudTheme::Sink
     DVLB_s* mDvlb;
     shaderProgram_s mProgram;
     s32 mUniProjection;
+    s32 mUniAmbient, mUniLights, mUniLightLoop, mUniAnyLights;
+    // The batch has vertices lit in the shader.
+    bool mBatchLit;
+    // Subtracted from the world positions for the shader, whose floats keep 16 mantissa bits: near the lights.
+    f32 mLightOriginX, mLightOriginY;
     C3D_Mtx mProjection;
     // Logical to screen: screen = (logical - origin) * scale.
     f32 mOriginX, mOriginY, mScale;
@@ -463,6 +471,7 @@ struct C3DRenderer::Impl : HudTheme::Sink
     void BeginFrame();
     void Append(const RVertex* pVerts, s32 count, RTexture* pTex, u32 state, f32 offset, const ScreenRect& scissor, const HudRule* pRule);
     void Flush();
+    void SetLights(const RLight* pLights, s32 count, const f32* pAmbient, f32 unlitAmbient);
     f32 ScrollOffset();
     u32 BottomSignature(f32 scroll, u32 minimap) const;
     void DrawHud();
@@ -663,9 +672,10 @@ void C3DRenderer::Impl::BeginFrame()
     AttrInfo_AddLoader(pAttr, 0, GPU_FLOAT, 3);
     AttrInfo_AddLoader(pAttr, 1, GPU_UNSIGNED_BYTE, 4);
     AttrInfo_AddLoader(pAttr, 2, GPU_FLOAT, 2);
+    AttrInfo_AddLoader(pAttr, 3, GPU_FLOAT, 4);
     C3D_BufInfo* pBuf = C3D_GetBufInfo();
     BufInfo_Init(pBuf);
-    BufInfo_Add(pBuf, mVerts, sizeof(C3DVertex), 3, 0x210);
+    BufInfo_Add(pBuf, mVerts, sizeof(C3DVertex), 4, 0x3210);
     C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, mUniProjection, &mProjection);
     C3D_DepthTest(false, GPU_ALWAYS, GPU_WRITE_COLOR);
     C3D_CullFace(GPU_CULL_NONE);
@@ -737,6 +747,16 @@ void C3DRenderer::Impl::Append(const RVertex* pVerts, s32 count, RTexture* pTex,
         pDst[i].rgba = s.rgba;
         pDst[i].u = s.u * su;
         pDst[i].v = 1.0f - s.v * sv;
+        pDst[i].wx = s.wx - mLightOriginX;
+        pDst[i].wy = s.wy - mLightOriginY;
+        pDst[i].wz = s.wz;
+        pDst[i].shade = -1.0f;
+        if (s.lit != 0.0f)
+        {
+            pDst[i].rgba = s.unlit;
+            pDst[i].shade = s.shade;
+            mBatchLit = true;
+        }
     }
     if (pRule)
     {
@@ -755,9 +775,41 @@ void C3DRenderer::Impl::Append(const RVertex* pVerts, s32 count, RTexture* pTex,
     mVertCount += count;
 }
 
+// render.v.pica's uniforms; ambient[0] + c * ambient[1] is gbh_api.cpp's Ambient with its rounding.
+void C3DRenderer::Impl::SetLights(const RLight* pLights, s32 count, const f32* pAmbient, f32 unlitAmbient)
+{
+    if (mBatchLit)
+    {
+        Flush();
+    }
+    const f32 round = unlitAmbient > 0.0f ? 0.5f : 0.0f;
+    const f32 k = unlitAmbient / 255.0f;
+    const f32 a = 1.0f - unlitAmbient;
+    C3D_FVUnifSet(GPU_VERTEX_SHADER, mUniAmbient, pAmbient[0] * a + round, pAmbient[1] * a + round, pAmbient[2] * a + round, 0.0f);
+    C3D_FVUnifSet(GPU_VERTEX_SHADER, mUniAmbient + 1, pAmbient[0] * k, pAmbient[1] * k, pAmbient[2] * k, 0.0f);
+    count = count < kMaxShaderLights ? count : kMaxShaderLights;
+    C3D_BoolUnifSet(GPU_VERTEX_SHADER, mUniAnyLights, count > 0);
+    if (count > 0)
+    {
+        mLightOriginX = floorf(pLights[0].x);
+        mLightOriginY = floorf(pLights[0].y);
+        C3D_IVUnifSet(GPU_VERTEX_SHADER, mUniLightLoop, count - 1, 0, 2, 0);
+        C3D_FVec* pDst = C3D_FVUnifWritePtr(GPU_VERTEX_SHADER, mUniLights, 2 * count);
+        for (s32 i = 0; i < count; i++)
+        {
+            const RLight& l = pLights[i];
+            const f32 r = l.radius > 0.0f ? 1.0f / l.radius : 0.0f;
+            // 2.5: 1 / gbh_api.cpp's kCeilingFade.
+            pDst[2 * i] = FVec4_New(l.x - mLightOriginX, l.y - mLightOriginY, l.z, l.radius);
+            pDst[2 * i + 1] = FVec4_New(l.r * r, l.g * r, l.b * r, l.ceiling * 2.5f);
+        }
+    }
+}
+
 void C3DRenderer::Impl::Flush()
 {
     const s32 n = mVertCount - mBatchStart;
+    mBatchLit = false;
     if (n <= 0)
     {
         return;
@@ -1116,6 +1168,10 @@ bool C3DRenderer::Init(Loader, const char** ppError)
     shaderProgramInit(&p->mProgram);
     shaderProgramSetVsh(&p->mProgram, &p->mDvlb->DVLE[0]);
     p->mUniProjection = shaderInstanceGetUniformLocation(p->mProgram.vertexShader, "projection");
+    p->mUniAmbient = shaderInstanceGetUniformLocation(p->mProgram.vertexShader, "ambient");
+    p->mUniLights = shaderInstanceGetUniformLocation(p->mProgram.vertexShader, "lights");
+    p->mUniLightLoop = shaderInstanceGetUniformLocation(p->mProgram.vertexShader, "lightLoop");
+    p->mUniAnyLights = shaderInstanceGetUniformLocation(p->mProgram.vertexShader, "anyLights");
     p->mNeedClear = true;
     p->mFrame = 1;
     const char* pBudget = getenv("GTA2_3DS_TEXTURE_BUDGET");
@@ -1505,6 +1561,19 @@ void C3DRenderer::DrawTriangles(const RVertex* pVerts, s32 count, RTexture* pTex
     // There, a 1:1 quad samples its first level: on the texel corners, that is the exact average.
     const u32 noMip = !pRule && OneToOne(pVerts, count, pTex) ? kStateNoMip : 0;
     p->Append(pVerts, count, pTex, (state & kBatchStateMask) | noMip, exact ? 0.0f : kPixelOffset, pRule ? pRule->slot : p->mClip, pRule);
+}
+
+void C3DRenderer::SetLights(const RLight* pLights, s32 count, const f32* pAmbient, f32 unlitAmbient)
+{
+    if (mImpl)
+    {
+        mImpl->SetLights(pLights, count, pAmbient, unlitAmbient);
+    }
+}
+
+s32 C3DRenderer::MaxShaderLights() const
+{
+    return kMaxShaderLights;
 }
 
 void C3DRenderer::SetClipRect(f32 left, f32 top, f32 right, f32 bottom)

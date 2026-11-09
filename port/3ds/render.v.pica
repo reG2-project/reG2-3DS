@@ -1,10 +1,19 @@
 ; C3DRenderer's vertex shader: logical pixels in, clip position (p * w, w) out with w = 1 / rhw,
 ; so the rasteriser interpolates colour and texture coordinates with perspective.
+; Vertices with a shade are lit by the lights as gbh_api.cpp's LightVertex (point lights only).
 
 .fvec projection[4]
+; Per channel, the ambient light on colour byte c is ambient[0] + c * ambient[1].
+.fvec ambient[2]
+; Per light: (x, y, z, radius), (r, g, b over the radius, ceiling / kCeilingFade).
+.fvec lights[88]
+; The lights: count - 1, first index 0, step 2; anyLights false when there are none.
+.ivec lightLoop
+.bool anyLights
 
 .constf consts(0.0, 1.0, 0.00392156862, 0.0000001)
-.constf depth(-0.5, 0.0, 0.0, 0.0)
+; the depth, 255, 1 / kCeilingFade (gbh_api.cpp), smoothstep's -2
+.constf more(-0.5, 255.0, 2.5, -2.0)
 .alias zeros consts.xxxx
 .alias ones consts.yyyy
 .alias inv255 consts.zzzz
@@ -14,10 +23,11 @@
 .out outclr color
 .out outtc0 texcoord0
 
-; v0 = (x, y, rhw), v1 = r, g, b, a bytes, v2 = (u, v)
+; v0 = (x, y, rhw), v1 = r, g, b, a bytes, v2 = (u, v), v3 = world (x, y, z) and shade 0..1, or -1 unlit
 .alias inpos v0
 .alias inclr v1
 .alias intex v2
+.alias inworld v3
 
 .proc main
     mov r0, zeros
@@ -26,14 +36,55 @@
 
     dp4 r1.x, projection[0], r0
     dp4 r1.y, projection[1], r0
-    mov r1.z, depth.x
+    mov r1.z, more.x
     mov r1.w, ones
 
     max r2, tiny, inpos.zzzz
     rcp r2, r2.x
     mul outpos, r1, r2.xxxx
-
-    mul outclr, inv255, inclr
     mov outtc0, intex
+
+    cmp zeros, le, le, inworld.wwww
+    ifc cmp.x
+        mov r7, inworld
+        mul r8, more.zzzz, r7.zzzz
+        mov r9, ones
+        mov r5, zeros
+        ifu anyLights
+            for lightLoop
+                ; radius - distance, at least 0
+                add r0, -lights[aL], r7
+                dp3 r1, r0, r0
+                max r1, tiny, r1
+                rsq r2, r1
+                mul r1, r1, r2
+                add r1, lights[aL], -r1
+                max r1, zeros, r1
+                ; times 1 - smoothstep(t), t = (z - ceiling) / kCeilingFade clamped: t * t * (1 + 2 * (1 - t))
+                add r3, -lights[aL+1].wwww, r8
+                max r3, zeros, r3
+                min r3, ones, r3
+                add r4, ones, -r3
+                mad r4, r4, -more.wwww, r9
+                mul r4, r4, r3
+                mul r4, r4, r3
+                mad r4, -r4, r1.wwww, r1.wwww
+                mul r6, lights[aL+1], r4
+                add r5, r5, r6
+            .end
+        .end
+        ; min(255, floor(shade * c * light + ambient)), alpha as given
+        mul r0, r7.wwww, inclr
+        mul r0, r0, r5
+        add r0, ambient[0], r0
+        mul r1, ambient[1], inclr
+        add r0, r0, r1
+        flr r0, r0
+        min r0, more.yyyy, r0
+        mov r0.w, inclr.w
+        mul outclr, inv255, r0
+    .else
+        mul outclr, inv255, inclr
+    .end
     end
 .end

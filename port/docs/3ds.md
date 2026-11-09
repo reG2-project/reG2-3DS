@@ -67,8 +67,21 @@ Each is small and makes sense on `port/m0` too:
 `C3DRenderer` implements `GLRenderer`'s interface with citro3d, the classic look only (no per-pixel
 lighting, shadows or bloom). The game's lights and the port's LIGHT EFFECTS (`port/src/lights.cpp`: fires,
 explosions, muzzle flashes and the like, point lights as the original's) light the vertices, at the blocks'
-corners, in the gbh_* layer. The port's beams (headlights, brake lights) are left out there: at the corners
-they would flicker on and off, and headlights lit as point lights looked poor. The game's vertices are in logical pixels with 1/w; the vertex shader
+corners. The port's beams (headlights, brake lights) are left out there: at the corners
+they would flicker on and off, and headlights lit as point lights looked poor. The vertex shader
+(`render.v.pica`) does the lighting: the frame's first 44 lights are its uniforms (two of the PICA200's 96
+vectors each), set once per change, and the gbh_* layer hands it each lit vertex's world position, unlit colour
+and shade (`IRenderer::MaxShaderLights`). It sums them as `LightVertex` does (falloff, ceiling fade, ambient and
+its rounding, floor and clamp); the CPU only tests a lit primitive against the lights past the 44th, and lights
+one in their reach itself, as it does every primitive while a beam is on. The shader's floats keep 16
+mantissa bits (positions are taken relative to the first light) and its distance comes from `rsq` rather than
+the original's 12-bit square root table: in Azahar, which computes in 32-bit floats, a frozen night frame
+differs from the CPU's lighting in 10 to 62 of its 96000 pixels, by one level. Each lit vertex runs
+28 + 17 per light instructions (unlit ones 2 more than before): with the console's night drive (180 lit
+primitives of 6 vertices, 44 lights) about 0.8 million per frame, some 0.8 ms of the four vertex units at one
+instruction per clock, against the 4.5 ms of GPU time it measured per frame (Azahar does not time the GPU). The lights the CPU tests a
+primitive against come from a 16x16 grid of the map cells they reach, built once per change. The game's
+vertices are in logical pixels with 1/w; the vertex shader
 outputs `(x*w, y*w, z*w, w)` so the PICA200 interpolates textures with perspective. Textures arrive
 as RGBA8 from the gbh_* layer and are stored in the smallest exact PICA format (RGB565, RGBA4,
 RGB5A1, else RGBA8), padded to a power of two. The gbh_* layer tells the format from each palette
@@ -263,7 +276,7 @@ the cars and the peds, the sprite collisions). Per frame: the input reading, the
 sleeps, the draw (sprite sort, map, HUD, the gbh_* primitives with their lighting and their citro3d part, the
 batches' submission), the bottom screen, `C3D_FrameEnd`, texture conversion and uploads, the wait for the screens'
 refresh and the wait for the GPU apart, and citro3d's own GPU and CPU times. Counts: primitives, draw calls,
-vertices, texture binds, lights and the lights tried per lit vertex, tiles, sprites, cars, peds, and whether the
+vertices, texture binds, lights and the lights tried per vertex lit on the CPU, tiles, sprites, cars, peds, and whether the
 player drives. Each part gives its average, its most in one step or frame, its time without the parts under it,
 and its calls. The timers' own cost, measured at the start, is taken out of the times and logged; one primitive
 in `GTA2_3DS_PROF_SAMPLE` (default 4) is timed, with what it runs, and counted for that many. Without the
@@ -437,8 +450,11 @@ found the time in the port, not the game: the car lamps scanned delta images for
 pool every frame (now cached, cars off screen skipped), the CPU surface was refilled and scanned every
 frame (now only after a frame drew on it, and not at all in game, where nothing writes it), and SDL's
 gamepad reads take a lock per call, a system call each on the 3DS (now a button or axis is read
-again only after a gamepad event for it, and the pad bindings once from the registry). Night lighting tests each primitive's
-vertices against the lights in its reach only. Logic runs at the original's 30.3 steps per second
+again only after a gamepad event for it, and the pad bindings once from the registry). Night lighting
+took 7.5 ms per frame on an Old 3DS driving (11 ms in the worst blocks; 48 lights, 180 lit primitives, each
+tested against every light, then its vertices against the 7 or so in reach): in Azahar, binning the lights in
+a grid took the tests from 4400 to 470 per frame and the lighting from 1.75 to 1.21 ms, the vertex shader
+the rest of it to 0.2 ms (the draw 5.8 to 4.4 ms per frame). Logic runs at the original's 30.3 steps per second
 throughout. A second profile (walking and driving, day and night) put the main thread's CPU time at
 12 to 14 ms per frame in Azahar: about 3 ms logic, 5 to 7 ms drawing, 3 to 4 ms input polling.
 The input time went to the pad reads: SDL's event pump runs about three times a frame (the game's
