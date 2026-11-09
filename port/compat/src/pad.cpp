@@ -331,21 +331,23 @@ bool StickArrow(int control)
     return (control < 2 ? vertical : side) && (control & 1 ? v > 0.0f : v < 0.0f);
 }
 
-// twin: port_TwinStick(), 0 for CLASSIC.
-bool ConsoleDown(int control, bool car, int twin, bool roofGun)
+// twin: port_TwinStick(), 0 for CLASSIC. dpad: CLASSIC D-PAD, where the d-pad moves, steers and the circle pad
+// takes the weapons, the roof gun and, on foot, SPECIAL 3.
+bool ConsoleDown(int control, bool car, int twin, bool roofGun, bool dpad)
 {
     const Sint16 x = Axis(SDL_GAMEPAD_AXIS_LEFTX);
     const bool r = Button(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
+    const bool l = Button(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER);
     switch (control)
     {
         case 0:
-            return (car && r) || (twin == 0 && StickArrow(0));
+            return (car && r) || (twin == 0 && (dpad ? !car && Button(SDL_GAMEPAD_BUTTON_DPAD_UP) : StickArrow(0)));
         case 1:
-            return (car && Button(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)) || (twin == 0 && StickArrow(1));
+            return (car && l) || (twin == 0 && (dpad ? !car && Button(SDL_GAMEPAD_BUTTON_DPAD_DOWN) : StickArrow(1)));
         case 2:
-            return car ? x < -kStickDeadZone : StickArrow(2);
+            return dpad ? Button(SDL_GAMEPAD_BUTTON_DPAD_LEFT) : (car ? x < -kStickDeadZone : StickArrow(2));
         case 3:
-            return car ? x > kStickDeadZone : StickArrow(3);
+            return dpad ? Button(SDL_GAMEPAD_BUTTON_DPAD_RIGHT) : (car ? x > kStickDeadZone : StickArrow(3));
         case 4:
             return (car ? Button(SDL_GAMEPAD_BUTTON_DPAD_DOWN) : r) || CodeDown(11);
         case 5:
@@ -354,13 +356,18 @@ bool ConsoleDown(int control, bool car, int twin, bool roofGun)
             return Button(SDL_GAMEPAD_BUTTON_SOUTH);
         case 7:
         case 8:
+            if (dpad)
+            {
+                // On foot L gives the next weapon too, the index finger's quick change.
+                return (!roofGun && StickArrow(control == 7 ? 2 : 3)) || (control == 8 && !car && l);
+            }
             return !roofGun && Button(control == 7 ? SDL_GAMEPAD_BUTTON_DPAD_LEFT : SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
         case 9:
             return Button(SDL_GAMEPAD_BUTTON_WEST);
         case 10:
             return Button(SDL_GAMEPAD_BUTTON_NORTH);
         default:
-            return Button(SDL_GAMEPAD_BUTTON_DPAD_UP);
+            return dpad && !car ? StickArrow(0) : Button(SDL_GAMEPAD_BUTTON_DPAD_UP);
     }
 }
 } // namespace
@@ -384,9 +391,12 @@ bool port_HoldFacing()
 
 int port_TurretInput()
 {
-    return Console() && port_DrivingRoofGun()
-        ? Button(SDL_GAMEPAD_BUTTON_DPAD_LEFT) - Button(SDL_GAMEPAD_BUTTON_DPAD_RIGHT)
-        : 0;
+    if (!Console() || !port_DrivingRoofGun())
+    {
+        return 0;
+    }
+    return port_DpadControls() ? StickArrow(2) - StickArrow(3)
+                               : Button(SDL_GAMEPAD_BUTTON_DPAD_LEFT) - Button(SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
 }
 
 void port_PadVehicleInput(float* pForward, float* pBackward, float* pSteer)
@@ -723,10 +733,11 @@ void port_UpdatePad()
     const bool lt = LtLooks();
     // TWIN STICK in a vehicle with a roof gun: RB fires, so the thumb stays on the aiming stick.
     const bool console = Console();
+    const bool dpad = console && port_DpadControls();
     const bool rbFires = !console && twin == 2 && port_TwinStickAims() && port_GetPadBinding(8) == 5;
     const auto key = [](int control) { return sKeyDown[KeyFor(control)] || AltDown(control); };
     const Sint16 x = Axis(SDL_GAMEPAD_AXIS_LEFTX);
-    const bool steerFull = key(2) || key(3) || (!console && (Button(SDL_GAMEPAD_BUTTON_DPAD_LEFT) || Button(SDL_GAMEPAD_BUTTON_DPAD_RIGHT)));
+    const bool steerFull = dpad || key(2) || key(3) || (!console && (Button(SDL_GAMEPAD_BUTTON_DPAD_LEFT) || Button(SDL_GAMEPAD_BUTTON_DPAD_RIGHT)));
     const float steer = CarAnalog(steerFull, x < 0 ? static_cast<Sint16>(-(x + 1)) : x, kStickDeadZone);
     // The console's R and L are buttons: all the way.
     sCarForward = CarAnalog(console || !car || key(0) || Button(SDL_GAMEPAD_BUTTON_DPAD_UP), Axis(SDL_GAMEPAD_AXIS_RIGHT_TRIGGER), kTriggerDeadZone);
@@ -741,7 +752,7 @@ void port_UpdatePad()
         const bool pad = (car ? CarPadDown(i, code, l3Free) : CodeDown(code) && !(twin == 1 && (code == 11 || (code == 10 && lt)))) &&
             !(rbFires && code == 5);
         const bool down = !move &&
-            (console ? ConsoleDown(i, port_Driving(), twin, port_DrivingRoofGun())
+            (console ? ConsoleDown(i, port_Driving(), twin, port_DrivingRoofGun(), dpad)
                      : pad || AltDown(i) || (twin == 1 && i == 4 && CodeDown(11)) || (rbFires && i == 4 && CodeDown(5)));
         Press(i, inGame && !quitShown && !sGameBlocked && down);
     }

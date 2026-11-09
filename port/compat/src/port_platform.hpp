@@ -99,6 +99,8 @@ bool port_FrontendActive();
 bool port_MenuUsesMouse(); // the frontend or the pause menu
 // TWIN STICK and the local player with the controls on: 1 on foot, 2 in a vehicle, else 0.
 int port_TwinStick();
+// CONTROLS CLASSIC D-PAD (the console controls).
+bool port_DpadControls();
 // TWIN STICK aims: on foot, or in a vehicle with a roof gun.
 bool port_TwinStickAims();
 // The local player with the controls on, in a vehicle, in either CONTROLS style.

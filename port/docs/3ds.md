@@ -241,8 +241,20 @@ the same buttons on foot and in a vehicle; SDL's 3DS mapping gives the buttons b
 | ZR, ZL (New 3DS) | attack, nothing | attack, nothing |
 | C-stick (New 3DS) | MODERN: aims (TWIN STICK's aim) | MODERN: turns the roof gun |
 
-CONTROLS (pause menu or OPTIONS) chooses MODERN, the default, or CLASSIC, the original's tank movement; the
-choice is `port_console_controls` in the registry, apart from the PC's `port_controls`. MODERN is TWIN STICK
+CLASSIC D-PAD moves on the d-pad instead, and the circle pad takes what the d-pad did:
+
+| Button | On foot | In a vehicle |
+|---|---|---|
+| D-pad | up, down forward, back; left, right turn; diagonals both | left, right steer; up special 3, down attack |
+| Circle pad left, right | previous, next weapon | the roof gun's turn, else the weapons |
+| Circle pad up | special 3 | |
+| L | next weapon | brake, reverse |
+
+The other buttons are as above (R attack or accelerate, B, A, Y, X, START, SELECT, ZR).
+
+CONTROLS (pause menu or OPTIONS) chooses MODERN, the default, CLASSIC, the original's tank movement, or
+CLASSIC D-PAD, the same on the d-pad; the choice is `port_console_controls` in the registry (1, 0 and 2),
+apart from the PC's `port_controls`. MODERN is TWIN STICK
 (`port/src/twin_stick.cpp`): without an aim the player turns to the way he walks; while R, ZR or L is held his
 facing stays the one he had at the press (`port_HoldFacing`), and the C-stick's aim comes first. Shots go
 where he faces, without the original's lock on a ped near the line of fire (CLASSIC keeps it). CLASSIC reads
@@ -252,8 +264,9 @@ turns (a threshold on each axis misses the diagonals of a round gate). On foot, 
 pad pushed less than 0.55 of its range walks at the peds' walk speed, with their walk (`PortTwinStick::WalkSpeed`
 in `Char::UpdateWalking`), so the player can turn on the spot; further, he runs. The dead zone is 0.25, and the
 circle pad gives about 0.96 at the end of its travel, diagonals too (Azahar: 154 of the 160 that SDL's 3DS
-driver takes as full, 109 on each axis on a diagonal), so a run is reached a little past half way. Only the circle pad moves, in either style, so that the
-d-pad keeps the weapons. The original's SPECIAL 1 with left or right still turns a roof gun. In the menus B
+driver takes as full, 109 on each axis on a diagonal), so a run is reached a little past half way (not in CLASSIC D-PAD, where the d-pad runs). In MODERN and
+CLASSIC only the circle pad moves, so that the d-pad keeps the weapons; L on foot in CLASSIC D-PAD gives the
+next weapon without leaving the d-pad or R. The original's SPECIAL 1 with left or right still turns a roof gun. In the menus B
 or START selects and A or SELECT goes back; the hints name the buttons as the console prints them
 (`PortPlatform::PadButtonName`).
 

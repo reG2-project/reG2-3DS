@@ -102,6 +102,8 @@ bool CameraFollows();
 
 // CONTROLS: TWIN STICK (MODERN with the console controls) moves and aims apart on foot (twin_stick.hpp).
 bool TwinStick();
+// CONTROLS CLASSIC D-PAD, with the console controls: CLASSIC on the d-pad (compat/src/pad.cpp).
+bool DpadControls();
 // AIM CAMERA: with TWIN STICK, the view looks ahead toward the aim.
 bool AimCamera();
 

@@ -186,7 +186,7 @@ void PedControls(Player* pPlayer, Ped* pPed)
     {
         sHolding = false;
         // CLASSIC: the stick's forward arrow walks too.
-        spSlowWalker = pPed && Slow(mx, my) ? pPed->mGameObject : NULL;
+        spSlowWalker = pPed && !PortSettings::DpadControls() && Slow(mx, my) ? pPed->mGameObject : NULL;
         return;
     }
     Char* pChar = pPed->mGameObject;
@@ -383,6 +383,11 @@ bool port_DrivingRoofGun()
 bool port_TwinStickAims()
 {
     return PortTwinStick::AimFrom() != NULL;
+}
+
+bool port_DpadControls()
+{
+    return PortSettings::DpadControls();
 }
 
 int port_TwinStick()

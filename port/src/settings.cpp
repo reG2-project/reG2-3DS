@@ -165,6 +165,7 @@ const Translation kTranslations[] = {
     {L"AIM CAMERA", NULL, {L"CAMERA DE VISEE", L"ZIELKAMERA", L"CAMERA DI MIRA", L"CÁMARA DE MIRA"}},
     {L"TWIN STICK", NULL, {L"DOUBLE STICK", L"TWIN-STICK", L"DOPPIO STICK", L"DOBLE STICK"}},
     {L"MODERN", NULL, {L"MODERNE", L"MODERN", L"MODERNO", L"MODERNO"}},
+    {L"CLASSIC D-PAD", NULL, {L"CLASSIQUE CROIX", L"KLASSISCH D-PAD", L"CLASSICO CROCE", L"CLÁSICO CRUCETA"}},
     {L"DEFAULT KEYS", NULL, {L"CONTROLES PAR DEFAUT", L"STANDARDSTEUERUNG", L"COMANDI PREDEFINITI", L"CONTROLES PREDETERMINADOS"}},
     {L"KEYBOARD", NULL, {L"CLAVIER", L"TASTATUR", L"TASTIERA", L"TECLADO"}},
     {L"GAMEPAD", NULL, {L"MANETTE", L"GAMEPAD", L"GAMEPAD", L"MANDO"}},
@@ -296,7 +297,7 @@ const char* ScreenName(Id id)
         case kClock:
             return "day_clock";
         case kControls:
-            // CLASSIC or MODERN there, MODERN by default, not a PC registry's CLASSIC or TWIN STICK.
+            // CLASSIC, MODERN or CLASSIC D-PAD there, MODERN by default, not a PC registry's CLASSIC or TWIN STICK.
             return PortPlatform::Has(PortPlatform::kConsoleControls) ? "port_console_controls" : "port_controls";
         case kAimCamera:
             return "port_aim_camera";
@@ -390,7 +391,7 @@ s32 sCameraTilt = -1;
 const s32 kMaxCameraTilt = 15;
 s32 sCameraTurnSpeed = -1;
 s32 sCameraFollows = -1;
-s32 sTwinStick = -1;
+s32 sControls = -1;
 const s32 kMaxCameraTurnSpeed = 10;
 const s32 kMinDayLength = 3;
 const s32 kMaxDayLength = 60;
@@ -646,7 +647,8 @@ Id Requirement(Id id)
 bool Enabled(Id id)
 {
     const Id requirement = Requirement(id);
-    return requirement == kCount || (requirement == kLighting ? DayNightCycle() : Screen(requirement) != 0);
+    return requirement == kCount ||
+        (requirement == kLighting ? DayNightCycle() : (requirement == kControls ? TwinStick() : Screen(requirement) != 0));
 }
 
 bool DayNightCycle()
@@ -709,17 +711,28 @@ bool CameraFollows()
     return sCameraFollows != 0;
 }
 
-bool TwinStick()
+// 0 CLASSIC, 1 TWIN STICK or MODERN, 2 CLASSIC D-PAD (the console controls only).
+s32 Controls()
 {
 #if defined(GTA2_PORT_SDL)
-    if (sTwinStick < 0)
+    if (sControls < 0)
     {
-        sTwinStick = Available(kControls) && Screen(kControls) != 0;
+        sControls = Available(kControls) ? Clamp(Screen(kControls), 0, PortPlatform::Has(PortPlatform::kConsoleControls) ? 2 : 1) : 0;
     }
-    return sTwinStick != 0;
+    return sControls;
 #else
-    return false;
+    return 0;
 #endif
+}
+
+bool TwinStick()
+{
+    return Controls() == 1;
+}
+
+bool DpadControls()
+{
+    return Controls() == 2;
 }
 bool AimCamera()
 {
@@ -890,7 +903,8 @@ void Value(Id id, wchar_t* pOut)
             wcscpy(pOut, Translate(CameraFollows() ? L"FOLLOW" : L"STREETS"));
             break;
         case kControls:
-            wcscpy(pOut, Translate(!TwinStick() ? L"CLASSIC" : (PortPlatform::Has(PortPlatform::kConsoleControls) ? L"MODERN" : L"TWIN STICK")));
+            wcscpy(pOut, Translate(DpadControls() ? L"CLASSIC D-PAD"
+                                                  : (!TwinStick() ? L"CLASSIC" : (PortPlatform::Has(PortPlatform::kConsoleControls) ? L"MODERN" : L"TWIN STICK"))));
             break;
         case kBloom:
             if (Screen(id))
@@ -1137,9 +1151,19 @@ void Change(Id id, s32 delta)
             gRegistry.Set_Screen_Setting(ScreenName(id), sCameraFollows);
             break;
         case kControls:
-            sTwinStick = !TwinStick();
-            gRegistry.Set_Screen_Setting(ScreenName(id), sTwinStick);
+        {
+            // In the menu's order: MODERN, CLASSIC, then CLASSIC D-PAD on the console.
+            const s32 order[] = {1, 0, 2};
+            const s32 count = PortPlatform::Has(PortPlatform::kConsoleControls) ? 3 : 2;
+            s32 i = 0;
+            while (order[i] != Controls())
+            {
+                i++;
+            }
+            sControls = order[Wrap(i + delta, count)];
+            gRegistry.Set_Screen_Setting(ScreenName(id), sControls);
             break;
+        }
         case kLighting:
             gRegistry.Set_Screen_Setting(ScreenName(id), Wrap(Clamp(Screen(id), 0, kNumLightings - 1) + delta, kNumLightings));
             Init_FrameRateLightingAndExplodingScores();
