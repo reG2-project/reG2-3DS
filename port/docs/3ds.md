@@ -229,6 +229,19 @@ the same in New 3DS mode, which runs the same clock; Azahar leaves out the GPU's
 minimap's place (see Renderer). To boot into a city, the registry's `Debug` keys
 `skip_frontend`, `mapname`, `stylename` and `scriptname` (see `Source/debug.cpp`).
 
+`GTA2_3DS_PROF=150` (`port/3ds/prof_3ds.cpp`) logs every 150 frames of a game where the main thread's time goes.
+Per logic step: the step and its parts (`Game::UpdateGame`'s services in order, the sound, one level deeper in
+the cars and the peds, the sprite collisions). Per frame: the input reading, the event pump and the pad, the
+sleeps, the draw (sprite sort, map, HUD, the gbh_* primitives with their lighting and their citro3d part, the
+batches' submission), the bottom screen, `C3D_FrameEnd`, texture conversion and uploads, the wait for the screens'
+refresh and the wait for the GPU apart, and citro3d's own GPU and CPU times. Counts: primitives, draw calls,
+vertices, texture binds, lights and the lights tried per lit vertex, tiles, sprites, cars, peds, and whether the
+player drives. Each part gives its average, its most in one step or frame, its time without the parts under it,
+and its calls. The timers' own cost, measured at the start, is taken out of the times and logged; one primitive
+in `GTA2_3DS_PROF_SAMPLE` (default 4) is timed, with what it runs, and counted for that many. Without the
+variable, a timer costs a test. `python3 port/3ds/prof_summary.py gta2_log.txt` sums a log up in tables,
+walking and driving, day and night apart.
+
 Azahar (2126.2) runs the `.3dsx` without firmware or system files, in Old or New 3DS mode. It passes
 no arguments, so the game folder there is always `sdmc:/3ds/gta2/`. The start
 to the first city frame takes about 15 seconds there.
