@@ -10,7 +10,7 @@ struct RVertex
     f32 rhw;   // 1/w, used for perspective correct interpolation
     u32 rgba;  // bytes in memory: r, g, b, a
     f32 u, v;  // normalised texture coordinates
-    // Per pixel lighting only (lit != 0): world position, colour before lighting, shade 0..1.
+    // Per pixel or shader lighting only (lit != 0): world position, colour before lighting, shade 0..1.
     f32 wx, wy, wz;
     u32 unlit;
     f32 shade;
@@ -113,6 +113,9 @@ class IRenderer
     // Lights for per pixel lighting; ambient red, green and blue in 0..255 units as gbh_SetAmbient stores it,
     // and how far it takes on the unlit colour (gbh_api.cpp's Ambient).
     virtual void SetLights(const RLight* pLights, s32 count, const f32* pAmbient, f32 unlitAmbient) = 0;
+    // A renderer that lights vertices (RVertex lit) in its vertex shader with SetLights' point lights, as gbh_api.cpp's
+    // LightVertex: how many of the first lights it takes, -1 for none.
+    virtual s32 MaxShaderLights() const { return -1; }
 
     // Stats exposed through gbh_GetGlobals.
     virtual u32 GetDrawCallCount() const = 0;

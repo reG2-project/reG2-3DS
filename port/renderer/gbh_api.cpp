@@ -170,6 +170,10 @@ bool gMipmaps;      // option: textures uploaded with mip levels
 u32 gOptionsGeneration = ~0u;
 u32 gTextureEpoch;  // bumped when every texture has to be converted again
 bool gLightsDirty = true;
+// Whether the renderer lights vertices in its shader (IRenderer::MaxShaderLights), with the gLights before
+// gShaderLightsEnd as of the last UploadLights.
+bool gShaderLights;
+u32 gShaderLightsEnd;
 std::vector<u32> gConvertBuffer;
 
 // The original keeps textures in square cache slots of 8..256 texels (0xe107e0), with the last column
@@ -375,6 +379,9 @@ void UploadLights()
 {
     static RLight sLights[256];
     s32 n = 0;
+    bool beams = false;
+    const s32 shaderMax = gRenderer->MaxShaderLights();
+    gShaderLightsEnd = gNumLights;
     for (u32 j = 0; j < gNumLights; j++)
     {
         const LightInternal& l = gLights[j];
@@ -382,14 +389,20 @@ void UploadLights()
         {
             continue;
         }
+        if (n == shaderMax && gShaderLightsEnd == gNumLights)
+        {
+            gShaderLightsEnd = j;
+        }
         RLight& o = sLights[n++];
         o.x = l.mX, o.y = l.mY, o.z = l.mZ;
         o.radius = l.mRadius;
         o.ceiling = l.mCeiling;
         o.r = l.mR * l.mBrightness, o.g = l.mG * l.mBrightness, o.b = l.mB * l.mBrightness;
         o.dx = l.mDx, o.dy = l.mDy, o.width = l.mWidth, o.beam = l.mBeam;
+        beams |= l.mBeam > 0.0f;
     }
     gRenderer->SetLights(sLights, n, gAmbient, 1.0f - gLightScale);
+    gShaderLights = !beams && shaderMax >= 0;
     gLightsDirty = false;
 }
 
@@ -458,7 +471,7 @@ f32 Cap(f32 v)
     return v > kSpotCap ? kSpotCap : v;
 }
 
-// A light is gone this far above its ceiling (also in the shader's LightSum).
+// A light is gone this far above its ceiling (also in gl_renderer.cpp's LightSum and render.v.pica).
 const f32 kCeilingFade = 0.4f;
 
 f32 BelowCeiling(const LightInternal& light, f32 z)
@@ -538,11 +551,16 @@ void BuildLightGrid()
     }
 }
 
-// The lights that can reach a primitive, in their order: those LightVertex skips at every corner are left out.
+// The lights from the first on that can reach a primitive, in their order: those LightVertex skips at every
+// corner are left out.
 u16 gNearLights[256];
 
-u32 NearLights(const Vert* pWorld, s32 count)
+u32 NearLights(const Vert* pWorld, s32 count, u32 first = 0)
 {
+    if (first >= gNumLights)
+    {
+        return 0;
+    }
     f32 x0 = pWorld[0].x, x1 = x0, y0 = pWorld[0].y, y1 = y0, z0 = pWorld[0].z, z1 = z0;
     for (s32 i = 1; i < count; i++)
     {
@@ -576,6 +594,10 @@ u32 NearLights(const Vert* pWorld, s32 count)
         for (u32 bits = mask[w]; bits; bits &= bits - 1)
         {
             const u32 j = w * 32 + (u32)__builtin_ctz(bits);
+            if (j < first)
+            {
+                continue;
+            }
             const LightInternal& light = gLights[j];
             tests++;
             // No corner is nearer on any axis; the margin covers rounding against LightVertex's own distance.
@@ -589,7 +611,6 @@ u32 NearLights(const Vert* pWorld, s32 count)
             gNearLights[n++] = (u16)j;
         }
     }
-    PORT_PROF_COUNT(kLitPrims, 1);
     PORT_PROF_COUNT(kLightTests, tests);
     return n;
 }
@@ -778,16 +799,26 @@ void RenderVertsUnturned(u32 flags, STexture* pTexture, Vert* pVerts, s32 count,
     const bool shadowLit = softShadow && !fullAmbient;
     const bool perPixel = (lit || shadowLit) && gRenderer->Options().mPerPixelLighting;
     u32 unlit[4];
+    bool shaderLit = false;
     if (lit || shadowLit)
     {
         PORT_PROF(kPrimLight);
-        const u32 numNear = lit || (shadowLit && !perPixel) ? NearLights(pVerts + 4, count) : 0;
+        PORT_PROF_COUNT(kLitPrims, 1);
+        if (lit && !perPixel && gLightsDirty && gRenderer->MaxShaderLights() >= 0)
+        {
+            UploadLights();
+        }
+        shaderLit = lit && !perPixel && gShaderLights && NearLights(pVerts + 4, count, gShaderLightsEnd) == 0;
+        const u32 numNear = (lit && !shaderLit) || (shadowLit && !perPixel) ? NearLights(pVerts + 4, count) : 0;
         if (lit)
         {
             for (s32 i = 0; i < count; i++)
             {
                 unlit[i] = pVerts[i].diff;
-                pVerts[i].diff = LightVertex(pVerts[i + 4], shade, pVerts[i].diff, numNear);
+                if (!shaderLit)
+                {
+                    pVerts[i].diff = LightVertex(pVerts[i + 4], shade, pVerts[i].diff, numNear);
+                }
             }
         }
         else if (shadowLit)
@@ -848,7 +879,7 @@ void RenderVertsUnturned(u32 flags, STexture* pTexture, Vert* pVerts, s32 count,
         rv[i].rgba = ArgbToRgba(pVerts[i].diff);
         rv[i].u = pVerts[i].u * scaleU;
         rv[i].v = pVerts[i].v * scaleV;
-        if (perPixel)
+        if (perPixel || shaderLit)
         {
             rv[i].wx = pVerts[i + 4].x;
             rv[i].wy = pVerts[i + 4].y;
