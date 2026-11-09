@@ -1831,7 +1831,10 @@ void C3DRenderer::Impl::DrawGame(const RVertex* pVerts, s32 count, RTexture* pTe
         pTex = 0;
         state |= RS_NO_TEXTURE;
     }
-    BeginFrame();
+    if (!mInFrame)
+    {
+        BeginFrame();
+    }
     const HudRule* pRule = mHudGroup ? PickRule(*mHudGroup, pVerts, count, fan) : 0;
     // On the top screen, no offset puts the pixel centres where the game's 2x2 pixel blocks meet: on the texel
     // corners of its 1:1 quads, where bilinear filtering averages the 4 texels.
