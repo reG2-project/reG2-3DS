@@ -385,8 +385,7 @@ bool port_TwinStickInput(float* pMoveX, float* pMoveY, float* pAimX, float* pAim
 
 bool port_HoldFacing()
 {
-    return Console() && port_TwinStick() == 1 &&
-        (Button(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER) || Button(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER) || CodeDown(11));
+    return Console() && port_TwinStick() == 1 && Button(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER);
 }
 
 int port_TurretInput()
