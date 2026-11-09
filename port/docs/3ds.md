@@ -386,14 +386,23 @@ Before the fixes below bil drew 15 frames per second. A sampling profile through
 found the time in the port, not the game: the car lamps scanned delta images for every car in the
 pool every frame (now cached, cars off screen skipped), the CPU surface was refilled and scanned every
 frame (now only after a frame drew on it, and not at all in game, where nothing writes it), and SDL's
-gamepad reads take a lock per call, a system call each on the 3DS (now each button and axis is read
-once per update, and the pad bindings once from the registry). Night lighting tests each primitive's
+gamepad reads take a lock per call, a system call each on the 3DS (now a button or axis is read
+again only after a gamepad event for it, and the pad bindings once from the registry). Night lighting tests each primitive's
 vertices against the lights in its reach only. Logic runs at the original's 30.3 steps per second
 throughout. A second profile (walking and driving, day and night) put the main thread's CPU time at
 12 to 14 ms per frame in Azahar: about 3 ms logic, 5 to 7 ms drawing, 3 to 4 ms input polling.
+The input time went to the pad reads: SDL's event pump runs about three times a frame (the game's
+message loop polls before each step, each frame drawn and each wait), and every SDL gamepad read looks
+the pad and its joystick up in SDL's object table, whose lock costs three `svcArbitrateAddress` calls
+(22 us each in Azahar, 70 us a read). Now a button or axis is read again only after a gamepad event for
+it (an axis also at each pump until its first event: SDL takes its first value without one), and the
+key bindings only while a key is held. In ste, in a car then walking (`GTA2_3DS_FPS`'s CPU time): 61
+SDL reads a frame became 9, `svcArbitrateAddress` calls 187 became 42, input polling 4.0 ms became 0.75
+and the main thread 11.4 ms became 7.9. Most of it is Azahar's system call cost: on hardware perhaps
+0.35 to 0.7 ms a frame.
 Texture uploads went from up to six passes per texture to one per level, 2.5 to 3 times faster
 in Azahar (a 64x64 sprite 2.3 to 0.84 ms, a 128x128 one 9.2 to 3.1 ms; upload time in a frame of a
-long drive at most 7 to 10 ms instead of 19 to 29). Remaining leads: one pad update per frame, fewer draw calls (about 100 per frame) with a tile atlas. The system core runs the sound (see Sound).
+long drive at most 7 to 10 ms instead of 19 to 29). Remaining leads: fewer draw calls (about 100 per frame) with a tile atlas. The system core runs the sound (see Sound).
 
 On the 3DS any per-frame file access is expensive: each path component of an `fopen`, `access` or
 `stat` is a request to the FS service (tens of milliseconds in Azahar). The pause menu and the
@@ -429,5 +438,5 @@ that draws it against 0.59 to 0.66.
   screen at 1:1.
 - Sound on hardware: OpenDSP's DSP load and sleep, the Old 3DS's audio thread on the system core.
 - Real Old 3DS timings: Azahar's are optimistic for memory bound code (no cache model). If the
-  hardware is short, the next candidates are the per-vertex lighting at night and SDL's pad reads.
+  hardware is short, the next candidates are the per-vertex lighting at night and the draw calls.
 - Real hardware: a 3DS or New 3DS with custom firmware.
