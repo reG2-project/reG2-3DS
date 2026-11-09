@@ -473,6 +473,71 @@ f32 Ambient(s32 i, u32 channel)
     return gAmbient[i] - (1.0f - gLightScale) * (255 - channel) * (gAmbient[i] / 255.0f);
 }
 
+// The active lights binned by the map cells they can reach, so that NearLights tests those near a primitive only:
+// cells of an equal size over the lights' reach, those beyond it clamped to the edge cells.
+const s32 kGridCells = 16;
+struct LightGrid
+{
+    f32 mX0, mY0, mCellsPerBlock;
+    u32 mWords; // words of each cell's light mask in use
+    u32 mMask[kGridCells * kGridCells][256 / 32];
+} gGrid;
+bool gGridDirty = true;
+
+// A light's reach on each axis, a little past its radius: the grid keeps every light NearLights' test lets through.
+f32 GridReach(const LightInternal& light)
+{
+    return light.mRadius * 1.001f + 0.001f;
+}
+
+s32 GridCell(f32 v, f32 v0)
+{
+    const f32 c = (v - v0) * gGrid.mCellsPerBlock;
+    return !(c >= 0.0f) ? 0 : (c >= kGridCells - 1 ? kGridCells - 1 : (s32)c);
+}
+
+void BuildLightGrid()
+{
+    gGridDirty = false;
+    gGrid.mWords = (gNumLights + 31) / 32;
+    f32 x0 = 1e30f, x1 = -1e30f, y0 = 1e30f, y1 = -1e30f;
+    for (u32 j = 0; j < gNumLights; j++)
+    {
+        const LightInternal& l = gLights[j];
+        const f32 r = GridReach(l);
+        x0 = l.mX - r < x0 ? l.mX - r : x0;
+        x1 = l.mX + r > x1 ? l.mX + r : x1;
+        y0 = l.mY - r < y0 ? l.mY - r : y0;
+        y1 = l.mY + r > y1 ? l.mY + r : y1;
+    }
+    const f32 extent = x1 - x0 > y1 - y0 ? x1 - x0 : y1 - y0;
+    gGrid.mX0 = x0;
+    gGrid.mY0 = y0;
+    gGrid.mCellsPerBlock = extent > 0.0f ? kGridCells / extent : 0.0f;
+    for (s32 c = 0; c < kGridCells * kGridCells; c++)
+    {
+        memset(gGrid.mMask[c], 0, gGrid.mWords * sizeof(u32));
+    }
+    for (u32 j = 0; j < gNumLights; j++)
+    {
+        const LightInternal& l = gLights[j];
+        if ((l.mFlags & 0x30000) != 0x10000)
+        {
+            continue;
+        }
+        const f32 r = GridReach(l);
+        const s32 cx0 = GridCell(l.mX - r, gGrid.mX0), cx1 = GridCell(l.mX + r, gGrid.mX0);
+        const s32 cy0 = GridCell(l.mY - r, gGrid.mY0), cy1 = GridCell(l.mY + r, gGrid.mY0);
+        for (s32 cy = cy0; cy <= cy1; cy++)
+        {
+            for (s32 cx = cx0; cx <= cx1; cx++)
+            {
+                gGrid.mMask[cy * kGridCells + cx][j / 32] |= 1u << (j % 32);
+            }
+        }
+    }
+}
+
 // The lights that can reach a primitive, in their order: those LightVertex skips at every corner are left out.
 u16 gNearLights[256];
 
@@ -488,26 +553,44 @@ u32 NearLights(const Vert* pWorld, s32 count)
         z0 = pWorld[i].z < z0 ? pWorld[i].z : z0;
         z1 = pWorld[i].z > z1 ? pWorld[i].z : z1;
     }
-    PORT_PROF_COUNT(kLitPrims, 1);
-    PORT_PROF_COUNT(kLightTests, gNumLights);
-    u32 n = 0;
-    for (u32 j = 0; j < gNumLights; j++)
+    if (gGridDirty)
     {
-        const LightInternal& light = gLights[j];
-        if ((light.mFlags & 0x30000) != 0x10000)
-        {
-            continue;
-        }
-        // No corner is nearer on any axis; the margin covers rounding against LightVertex's own distance.
-        const f32 dx = light.mX < x0 ? x0 - light.mX : (light.mX > x1 ? light.mX - x1 : 0.0f);
-        const f32 dy = light.mY < y0 ? y0 - light.mY : (light.mY > y1 ? light.mY - y1 : 0.0f);
-        const f32 dz = light.mZ < z0 ? z0 - light.mZ : (light.mZ > z1 ? light.mZ - z1 : 0.0f);
-        if (dx * dx + dy * dy + dz * dz > light.mRadiusSquared * 1.001f)
-        {
-            continue;
-        }
-        gNearLights[n++] = (u16)j;
+        BuildLightGrid();
     }
+    u32 mask[256 / 32] = {};
+    const s32 cx0 = GridCell(x0, gGrid.mX0), cx1 = GridCell(x1, gGrid.mX0);
+    const s32 cy0 = GridCell(y0, gGrid.mY0), cy1 = GridCell(y1, gGrid.mY0);
+    for (s32 cy = cy0; cy <= cy1; cy++)
+    {
+        for (s32 cx = cx0; cx <= cx1; cx++)
+        {
+            for (u32 w = 0; w < gGrid.mWords; w++)
+            {
+                mask[w] |= gGrid.mMask[cy * kGridCells + cx][w];
+            }
+        }
+    }
+    u32 n = 0, tests = 0;
+    for (u32 w = 0; w < gGrid.mWords; w++)
+    {
+        for (u32 bits = mask[w]; bits; bits &= bits - 1)
+        {
+            const u32 j = w * 32 + (u32)__builtin_ctz(bits);
+            const LightInternal& light = gLights[j];
+            tests++;
+            // No corner is nearer on any axis; the margin covers rounding against LightVertex's own distance.
+            const f32 dx = light.mX < x0 ? x0 - light.mX : (light.mX > x1 ? light.mX - x1 : 0.0f);
+            const f32 dy = light.mY < y0 ? y0 - light.mY : (light.mY > y1 ? light.mY - y1 : 0.0f);
+            const f32 dz = light.mZ < z0 ? z0 - light.mZ : (light.mZ > z1 ? light.mZ - z1 : 0.0f);
+            if (dx * dx + dy * dy + dz * dz > light.mRadiusSquared * 1.001f)
+            {
+                continue;
+            }
+            gNearLights[n++] = (u16)j;
+        }
+    }
+    PORT_PROF_COUNT(kLitPrims, 1);
+    PORT_PROF_COUNT(kLightTests, tests);
     return n;
 }
 
@@ -1172,6 +1255,7 @@ GBH_EXPORT void GTA2_CC gbh_FreeTexture(STexture* pTexture)
 GBH_EXPORT void GTA2_CC gbh_ResetLights()
 {
     gNumLights = 0;
+    gGridDirty = true;
     gLightsDirty = true;
 }
 
@@ -1184,6 +1268,7 @@ GBH_EXPORT s32 GTA2_CC gbh_AddLight(SLight* pLight)
         return 0;
     }
     const u32 idx = gNumLights++;
+    gGridDirty = true;
     gLightsDirty = true;
     LightInternal& l = gLights[idx];
     const f32 k = 1.0f / 255.0f;
@@ -1216,6 +1301,7 @@ void port_LampLight(f32 dx, f32 dy, f32 width)
             // Lit at the blocks' corners only, a beam would flicker on and off them: left out.
             gNumLights--;
             gLightAdded = false;
+            gGridDirty = true;
         }
         else if (width > 0.0f)
         {
