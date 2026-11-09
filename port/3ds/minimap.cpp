@@ -50,6 +50,7 @@ SpriteRect sArrows[MinimapGame::kMaxArrow + 1];
 SpriteRect sIcons[MinimapGame::kMaxArrow + 1];
 SpriteRect sPips[MinimapGame::kPipCount];
 SpriteRect sSmallPips[MinimapGame::kPipCount];
+SpriteRect sCross;
 u32 sCity;
 bool sMapOk;
 // Each block's gang, 1 + its pool slot (MinimapGame::ReadOwners), in the textures' tiled order for BuildFill.
@@ -220,25 +221,98 @@ void Halve(const u32* pSrc, s32 w, s32 h, u32* pDst, s32* pW, s32* pH)
     }
 }
 
+// The save point's icon: the pause font's '+' cut into a Latin cross, its arms one texel shorter than the stem
+// is wide and its foot twice as long, with a shade around it. At most 32x32.
+bool BuildCross(u32* pDst, s32* pW, s32* pH)
+{
+    static u32 glyph[64 * 64];
+    s32 w, h;
+    if (!MinimapGame::ReadPauseFontGlyph('+', glyph, 64 * 64, &w, &h))
+    {
+        return false;
+    }
+    const auto opaque = [&](s32 x, s32 y) { return (glyph[y * w + x] >> 24) != 0; };
+    // The '+' in the glyph: its bounds, the stem's columns at its top and the bar's rows at its left.
+    s32 x0 = w, x1 = -1, y0 = h, y1 = -1;
+    for (s32 y = 0; y < h; y++)
+    {
+        for (s32 x = 0; x < w; x++)
+        {
+            if (opaque(x, y))
+            {
+                x0 = x < x0 ? x : x0;
+                x1 = x > x1 ? x : x1;
+                y0 = y < y0 ? y : y0;
+                y1 = y;
+            }
+        }
+    }
+    s32 sx = x0, sw = 0, by = y0, bh = 0;
+    while (sx <= x1 && !opaque(sx, y0))
+    {
+        sx++;
+    }
+    while (sx + sw <= x1 && opaque(sx + sw, y0))
+    {
+        sw++;
+    }
+    while (by <= y1 && !opaque(x0, by))
+    {
+        by++;
+    }
+    while (by + bh <= y1 && opaque(x0, by + bh))
+    {
+        bh++;
+    }
+    const s32 arm = sw - 1;
+    if (sw < 2 || sw > 8 || bh > 8 || sx - arm < x0 || sx + sw + arm - 1 > x1)
+    {
+        return false;
+    }
+    // The cross's columns and rows in the glyph; the right arm keeps the glyph's end column.
+    s32 cols[32], rows[32], nc = 0, nr = 0;
+    for (s32 x = sx - arm; x < sx + sw + arm - 1; x++)
+    {
+        cols[nc++] = x;
+    }
+    cols[nc++] = x1;
+    for (s32 y = y0; y < y0 + arm; y++)
+    {
+        rows[nr++] = y;
+    }
+    for (s32 y = by; y < by + bh; y++)
+    {
+        rows[nr++] = y;
+    }
+    for (s32 i = 0; i <= 2 * arm; i++)
+    {
+        rows[nr++] = by + bh + i < y1 ? by + bh + i : y1;
+    }
+    const auto at = [&](s32 x, s32 y) { return x < 0 || y < 0 || x >= nc || y >= nr ? 0u : glyph[rows[y] * w + cols[x]]; };
+    *pW = nc + 2;
+    *pH = nr + 2;
+    for (s32 y = 0; y < *pH; y++)
+    {
+        for (s32 x = 0; x < *pW; x++)
+        {
+            u32 c = at(x - 1, y - 1);
+            for (s32 i = 0; i < 9 && !(c >> 24); i++)
+            {
+                c = (at(x - 2 + i % 3, y - 2 + i / 3) >> 24) ? Rgba(0, 0, 0, 150) : 0;
+            }
+            pDst[y * *pW + x] = c;
+        }
+    }
+    return true;
+}
+
 // The markers' sprites from the city's style, packed in rows a texel apart.
 void BuildSprites(C3DRenderer& renderer)
 {
     std::vector<u32> sheet(kSpritesW * kSpritesH, 0);
     static u32 full[64 * 64], half[32 * 32];
     s32 px = 0, py = 0, row = 0;
-    const auto add = [&](s32 n, bool halve, SpriteRect* pRect) {
-        s32 w, h;
-        pRect->w = 0;
-        if (!MinimapGame::ReadUserSprite(n, full, 64 * 64, &w, &h))
-        {
-            return;
-        }
-        const u32* pSrc = full;
-        if (halve)
-        {
-            Halve(full, w, h, half, &w, &h);
-            pSrc = half;
-        }
+    const auto place = [&](const u32* pSrc, s32 w, s32 h, SpriteRect* pRect) {
         if (px + w > kSpritesW)
         {
             px = 0;
@@ -258,6 +332,19 @@ void BuildSprites(C3DRenderer& renderer)
         px += w + 1;
         row = h > row ? h : row;
     };
+    const auto add = [&](s32 n, bool halve, SpriteRect* pRect) {
+        s32 w, h;
+        pRect->w = 0;
+        if (!MinimapGame::ReadUserSprite(n, full, 64 * 64, &w, &h))
+        {
+            return;
+        }
+        if (halve)
+        {
+            Halve(full, w, h, half, &w, &h);
+        }
+        place(halve ? half : full, w, h, pRect);
+    };
     for (s32 a = 1; a <= MinimapGame::kMaxArrow; a++)
     {
         add(a, true, &sArrows[a]);
@@ -267,6 +354,12 @@ void BuildSprites(C3DRenderer& renderer)
     {
         add(MinimapGame::kPipSprite + i, false, &sPips[i]);
         add(MinimapGame::kPipSprite + i, true, &sSmallPips[i]);
+    }
+    s32 w, h;
+    sCross.w = 0;
+    if (BuildCross(half, &w, &h))
+    {
+        place(half, w, h, &sCross);
     }
     renderer.UploadTexture(sSprites, kSpritesW, kSpritesH, &sheet[0], RMIP_NONE);
 }
@@ -368,8 +461,9 @@ void SpriteTurned(RVertex* pOut, f32 x, f32 y, const SpriteRect& r, f32 ux, f32 
     memcpy(pOut, tris, sizeof(tris));
 }
 
-// Inside the map: a mission phone is its pip, the info phone and a gang's territory the gang's icon. Outside: a phone
-// is the game's own arrow towards it on the map's edge, with its pip; a territory, the icon on the edge.
+// Inside the map: a mission phone is its pip, the info phone and a gang's territory the gang's icon, a save point the
+// cross. Outside: a phone is the game's own arrow towards it on the map's edge, with its pip; a territory or a save
+// point, its icon on the edge.
 void DrawMarks(HudTheme::Sink& sink, s32 hx0, s32 hy0, s32 hx1, s32 hy1, s32 cx, s32 cy)
 {
     HudTheme::Quad quads[kMaxMarks];
@@ -381,7 +475,7 @@ void DrawMarks(HudTheme::Sink& sink, s32 hx0, s32 hy0, s32 hx1, s32 hy1, s32 cx,
         const MinimapGame::Mark& m = sView.marks[i];
         const s32 x = cx + m.x4 - sView.px4, y = cy + m.y4 - sView.py4;
         const SpriteRect& arrow = sArrows[m.arrow <= MinimapGame::kMaxArrow ? m.arrow : 0];
-        const SpriteRect& icon = sIcons[m.arrow <= MinimapGame::kMaxArrow ? m.arrow : 0];
+        const SpriteRect& icon = m.kind == MinimapGame::kSavePoint ? sCross : sIcons[m.arrow <= MinimapGame::kMaxArrow ? m.arrow : 0];
         const bool mission = m.kind == MinimapGame::kMissionPhone;
         if (x < x0 || x > x1 || y < y0 || y > y1)
         {
@@ -389,7 +483,7 @@ void DrawMarks(HudTheme::Sink& sink, s32 hx0, s32 hy0, s32 hx1, s32 hy1, s32 cx,
             const f32 dx = (f32)(x - cx), dy = (f32)(y - cy), len = sqrtf(dx * dx + dy * dy);
             const f32 tx = dx ? ((dx > 0 ? x1 : x0) - cx) / dx : 1e9f, ty = dy ? ((dy > 0 ? y1 : y0) - cy) / dy : 1e9f;
             const f32 t = tx < ty ? tx : ty, ex = cx + dx * t, ey = cy + dy * t, ux = dx / len, uy = dy / len;
-            if (m.kind == MinimapGame::kTerritory)
+            if (m.kind == MinimapGame::kTerritory || m.kind == MinimapGame::kSavePoint)
             {
                 if (icon.w)
                 {
@@ -444,7 +538,7 @@ u32 Update(C3DRenderer& renderer)
         sEdgeSig = 0;
         fprintf(stderr, "minimap: built in %.1f ms; map %d KB, edges %d KB, fill %d KB, frame %d KB and markers %d KB of linear memory\n",
                 (svcGetSystemTick() - t0) * 1000.0 / SYSCLOCK_ARM11, kMapTexels * kMapTexels * 2 / 1024, kMapSize * kMapSize * 2 / 1024,
-                kMapSize * kMapSize / 1024, kAtlasSize * kAtlasSize * 2 / 1024, kSpritesW * kSpritesH * 2 / 1024);
+                kMapSize * kMapSize / 1024, kAtlasSize * kAtlasSize * 2 / 1024, kSpritesW * kSpritesH * 4 / 1024);
     }
     if (!sMapOk)
     {
