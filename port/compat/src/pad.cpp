@@ -749,7 +749,9 @@ void port_UpdatePad()
     const bool console = Console();
     const bool dpad = console && port_DpadControls();
     const bool rbFires = !console && twin == 2 && port_TwinStickAims() && port_GetPadBinding(8) == 5;
-    const auto key = [](int control) { return sKeyDown[KeyFor(control)] || AltDown(control); };
+    // The key bindings are registry reads: looked up only while a key is held.
+    const bool anyKey = memchr(sKeyDown, true, sizeof(sKeyDown)) != NULL;
+    const auto key = [anyKey](int control) { return (anyKey && sKeyDown[KeyFor(control)]) || AltDown(control); };
     const Sint16 x = Axis(SDL_GAMEPAD_AXIS_LEFTX);
     const bool steerFull = dpad || key(2) || key(3) || (!console && (Button(SDL_GAMEPAD_BUTTON_DPAD_LEFT) || Button(SDL_GAMEPAD_BUTTON_DPAD_RIGHT)));
     const float steer = CarAnalog(steerFull, x < 0 ? static_cast<Sint16>(-(x + 1)) : x, kStickDeadZone);
