@@ -25,9 +25,10 @@ const s32 kRib = 7;
 const s32 kTabX = 44;
 const s32 kTabW = 15;
 const s32 kTube = 13;
-// The atlas: the frame at (0, 0), the player arrow right of it.
+// The atlas: the frame at (0, 0), the player arrow right of it. The arrow is drawn filtered, so a clear column
+// between them keeps the frame's edge out of the arrow's.
 const s32 kAtlasSize = 128;
-const s32 kArrowX = 104;
+const s32 kArrowX = kFrameW + 1;
 // The game's sprites for the markers, read from the city's style.
 const s32 kSpritesW = 128;
 const s32 kSpritesH = 64;
