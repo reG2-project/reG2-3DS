@@ -50,7 +50,11 @@ Each is small and makes sense on `port/m0` too:
 
 - clang compiles (`--target=armv6k-none-eabihf`), as on Linux: the game needs its MSVC extensions.
   devkitARM's GCC links, with newlib, libstdc++ and libctru. The image of `port/3ds/Dockerfile` is the
-  official `devkitpro/devkitarm` with `clang-22` added.
+  official `devkitpro/devkitarm` with `clang-22` and its linker plugin (`llvm-22-linker-tools`) added.
+- ARM code (not Thumb) for the ARM11 MPCore with VFPv2 (`-mcpu=mpcore -mfpu=vfpv2`), -O2
+  (RelWithDebInfo), unaligned loads and stores as devkitARM's GCC makes them (`-munaligned-access`), and
+  full link time optimisation: the objects are LLVM bitcode, which devkitARM's ld compiles through
+  clang's plugin (`LLVMgold.so`). See Old 3DS, Speed.
 - GCC for ARM uses short enums, clang int-sized ones: SDL3 is built with `-fno-short-enums`
   (`build_sdl3.sh`), since the port shares SDL's structs. libctru and citro3d keep short enums; the
   renderer only passes their enums by value.
@@ -386,14 +390,30 @@ Before the fixes below bil drew 15 frames per second. A sampling profile through
 found the time in the port, not the game: the car lamps scanned delta images for every car in the
 pool every frame (now cached, cars off screen skipped), the CPU surface was refilled and scanned every
 frame (now only after a frame drew on it, and not at all in game, where nothing writes it), and SDL's
-gamepad reads take a lock per call, a system call each on the 3DS (now each button and axis is read
-once per update, and the pad bindings once from the registry). Night lighting tests each primitive's
+gamepad reads take a lock per call, a system call each on the 3DS (now a button or axis is read
+again only after a gamepad event for it, and the pad bindings once from the registry). Night lighting tests each primitive's
 vertices against the lights in its reach only. Logic runs at the original's 30.3 steps per second
 throughout. A second profile (walking and driving, day and night) put the main thread's CPU time at
 12 to 14 ms per frame in Azahar: about 3 ms logic, 5 to 7 ms drawing, 3 to 4 ms input polling.
+The input time went to the pad reads: SDL's event pump runs about three times a frame (the game's
+message loop polls before each step, each frame drawn and each wait), and every SDL gamepad read looks
+the pad and its joystick up in SDL's object table, whose lock costs three `svcArbitrateAddress` calls
+(22 us each in Azahar, 70 us a read). Now a button or axis is read again only after a gamepad event for
+it (an axis also at each pump until its first event: SDL takes its first value without one), and the
+key bindings only while a key is held. In ste, in a car then walking (`GTA2_3DS_FPS`'s CPU time): 61
+SDL reads a frame became 9, `svcArbitrateAddress` calls 187 became 42, input polling 4.0 ms became 0.75
+and the main thread 11.4 ms became 7.9. Most of it is Azahar's system call cost: on hardware perhaps
+0.35 to 0.7 ms a frame.
 Texture uploads went from up to six passes per texture to one per level, 2.5 to 3 times faster
 in Azahar (a 64x64 sprite 2.3 to 0.84 ms, a 128x128 one 9.2 to 3.1 ms; upload time in a frame of a
-long drive at most 7 to 10 ms instead of 19 to 29). Remaining leads: one pad update per frame, fewer draw calls (about 100 per frame) with a tile atlas. The system core runs the sound (see Sound).
+long drive at most 7 to 10 ms instead of 19 to 29). Remaining leads: fewer draw calls (about 100 per frame) with a tile atlas. The system core runs the sound (see Sound).
+
+Build options, the same walk, three runs each (main thread CPU per frame, logic step): 7.91 and 3.43 ms
+without them; 7.80 and 3.30 with unaligned access (clang's bare metal default goes byte by byte where it
+cannot prove alignment); 7.33 and 2.90 with full LTO (ThinLTO 7.38 and 2.96); 7.25 and 2.81 with both,
+the build kept. The draw time with its wait for the GPU stays at 12.4 ms, and the `.3dsx` grows from
+2.69 to 2.78 MB with the inlining across files. Azahar has no cache model, so the larger code may cost
+more on hardware than it shows here: the options are worth checking on a console (`GTA2_LOOP_STATS`).
 
 On the 3DS any per-frame file access is expensive: each path component of an `fopen`, `access` or
 `stat` is a request to the FS service (tens of milliseconds in Azahar). The pause menu and the
@@ -429,5 +449,5 @@ that draws it against 0.59 to 0.66.
   screen at 1:1.
 - Sound on hardware: OpenDSP's DSP load and sleep, the Old 3DS's audio thread on the system core.
 - Real Old 3DS timings: Azahar's are optimistic for memory bound code (no cache model). If the
-  hardware is short, the next candidates are the per-vertex lighting at night and SDL's pad reads.
+  hardware is short, the next candidates are the per-vertex lighting at night and the draw calls.
 - Real hardware: a 3DS or New 3DS with custom firmware.
