@@ -586,22 +586,19 @@ u32 NearLights(const Vert* pWorld, s32 count, u32 first = 0)
     {
         for (s32 cx = cx0; cx <= cx1; cx++)
         {
-            for (u32 w = 0; w < gGrid.mWords; w++)
+            for (u32 w = first / 32; w < gGrid.mWords; w++)
             {
+    mask[first / 32] &= ~((1u << (first % 32)) - 1);
                 mask[w] |= gGrid.mMask[cy * kGridCells + cx][w];
             }
         }
     }
     u32 n = 0, tests = 0;
-    for (u32 w = 0; w < gGrid.mWords; w++)
+    for (u32 w = first / 32; w < gGrid.mWords; w++)
     {
         for (u32 bits = mask[w]; bits; bits &= bits - 1)
         {
             const u32 j = w * 32 + (u32)__builtin_ctz(bits);
-            if (j < first)
-            {
-                continue;
-            }
             const LightInternal& light = gLights[j];
             tests++;
             // No corner is nearer on any axis; the margin covers rounding against LightVertex's own distance.
