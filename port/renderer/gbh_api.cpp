@@ -800,10 +800,12 @@ void RenderVertsUnturned(u32 flags, STexture* pTexture, Vert* pVerts, s32 count,
 
     PORT_PROF_SECTION(kPrimResolve);
     RTexture* pTex = pTexture ? Resolve(pTexture, (flags & (FLAG_BLEND_ADD | FLAG_BLEND_ALPHA | FLAG_COLOUR_KEY)) ? kAlpha : kOpaque) : 0;
-    const f32 texW = pTexture && pTexture->field_E_width ? (f32)pTexture->field_E_width : 1.0f;
-    const f32 texH = pTexture && pTexture->field_10_height ? (f32)pTexture->field_10_height : 1.0f;
+    const s32 w = pTexture && pTexture->field_E_width ? pTexture->field_E_width : 1;
+    const s32 h = pTexture && pTexture->field_10_height ? pTexture->field_10_height : 1;
+    const f32 texW = (f32)w;
+    const f32 texH = (f32)h;
     const bool image = pTexture && Data(pTexture) && Data(pTexture)->mImage;
-    const f32 slotScale = image ? 1.0f : 1.0f / (f32)SlotSize((s32)texW, (s32)texH);
+    const f32 slotScale = image ? 1.0f : 1.0f / (f32)SlotSize(w, h);
     const f32 scaleU = image ? 1.0f / texW : slotScale;
     const f32 scaleV = image ? 1.0f / texH : slotScale;
 
