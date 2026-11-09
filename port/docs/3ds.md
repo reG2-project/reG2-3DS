@@ -73,6 +73,10 @@ pass that premultiplies, converts, pads, writes Morton order and averages the ne
 scratch buffer. The CPU surface is composited through an RGB5A1 texture. One frame of vertices lives
 in linear memory; texture frees wait for the GPU.
 
+The game's textures are a cache in linear memory: an 8 MB budget, least recently drawn evicted first and
+converted again on their next draw. Without it, the textures a long session has drawn outgrew the 16 MB
+and showed white. Design and measurements: `3ds_texture_memory.md`.
+
 The top screen is drawn at 400x240: the game's 800x480 scaled by half, with no vertex offset and bilinear
 filtering, so the game's 1:1 quads (menus, text) come out as the exact 2x2 average of their texels.
 Blended textures are premultiplied at upload, so filtered edges take no colour from transparent texels.

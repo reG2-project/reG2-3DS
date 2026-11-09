@@ -96,6 +96,10 @@ class IRenderer
     virtual RTexture* CreateTexture() = 0;
     virtual void UploadTexture(RTexture* pTex, s32 width, s32 height, const u32* pRgba, RMipmaps mipmaps, u32 texels = 0) = 0;
     virtual void FreeTexture(RTexture* pTex) = 0;
+    // A texture the backend may drop when its memory runs short, as its owner can upload it again; Evicted
+    // then tells it to (also after an upload that did not fit, once per frame).
+    virtual void SetEvictable(RTexture*) {}
+    virtual bool Evicted(RTexture*) const { return false; }
 
     virtual void BeginScene() = 0;
     virtual void EndScene() = 0;

@@ -27,6 +27,12 @@ struct RTexture
     bool mPremultiplied; // colours times alpha: blended with ONE, 1 - alpha
     u8 mLevels;          // mip levels after the first
     u32 mVersion;        // counts the uploads, for the bottom screen's signature
+    u32 mBytes;          // linear memory of all its levels
+    bool mEvictable;     // its owner uploads it again when Evicted
+    bool mEvicted;       // storage dropped to make room, or an upload that did not fit (in mFailedFrame)
+    u32 mFailedFrame;
+    RTexture* mLruPrev;
+    RTexture* mLruNext;
 };
 
 namespace
@@ -55,6 +61,9 @@ const u32 kStatePremultiplied = 1u << 31;
 const u32 kStateNoMip = 1u << 30;
 // Batch state only: the texture is A8, drawn in the vertex colour with its alpha.
 const u32 kStateAlphaTexture = 1u << 29;
+// Linear memory for the game's textures, least recently drawn evicted beyond it. The rest of the 16 MB holds
+// the vertices, command buffers, the port's own textures and some headroom. GTA2_3DS_TEXTURE_BUDGET=<KB> sets it.
+const u32 kTextureBudget = 8192 * 1024;
 const u32 kBatchStateMask = RS_ALPHA_TEST | RS_BLEND_ALPHA | RS_BLEND_ADD | RS_FILTER_LINEAR | RS_NO_TEXTURE;
 
 // Morton order of the low 3 bits of x inside an 8x8 tile; y's bits go one place higher.
@@ -436,6 +445,13 @@ struct C3DRenderer::Impl : HudTheme::Sink
     u32 mFrame;
     // Textures the GPU may still read: freed once the next frame has begun (C3D_FrameBegin waits for the GPU).
     std::vector<C3D_Tex> mPendingFree;
+    // Textures with storage and their bytes in linear memory; evictions and allocations that did not fit.
+    u32 mTexCount, mTexBytes, mEvictions, mAllocFails;
+    // Evictable textures with storage, least recently drawn first, their bytes and the budget for them.
+    RTexture* mLruHead;
+    RTexture* mLruTail;
+    u32 mCachedBytes;
+    u32 mBudget;
     RTexture* mWhite;
     RTexture* mSurface;
     std::vector<u32> mLevel; // UploadTexture's next mip level being made
@@ -454,7 +470,76 @@ struct C3DRenderer::Impl : HudTheme::Sink
     void DrawTriangles(const RVertex* pVerts, s32 count, RTexture* pTex, u32 state) override;
     void ApplyState(RTexture* pTex, u32 state, const ScreenRect& scissor);
     bool Allocate(RTexture* pTex, s32 tw, s32 th, GPU_TEXCOLOR fmt, s32 levels, bool clear);
+    void Release(RTexture* pTex);
+    void LruRemove(RTexture* pTex);
+    void LruAppend(RTexture* pTex);
+    bool EvictOne();
 };
+
+void C3DRenderer::Impl::LruRemove(RTexture* pTex)
+{
+    (pTex->mLruPrev ? pTex->mLruPrev->mLruNext : mLruHead) = pTex->mLruNext;
+    (pTex->mLruNext ? pTex->mLruNext->mLruPrev : mLruTail) = pTex->mLruPrev;
+    pTex->mLruPrev = pTex->mLruNext = 0;
+    mCachedBytes -= pTex->mBytes;
+}
+
+void C3DRenderer::Impl::LruAppend(RTexture* pTex)
+{
+    pTex->mLruPrev = mLruTail;
+    pTex->mLruNext = 0;
+    (mLruTail ? mLruTail->mLruNext : mLruHead) = pTex;
+    mLruTail = pTex;
+    mCachedBytes += pTex->mBytes;
+}
+
+// Frees the least recently drawn evictable texture, unless the GPU may still read it.
+bool C3DRenderer::Impl::EvictOne()
+{
+    RTexture* pTex = mLruHead;
+    if (!pTex || pTex->mUsedFrame == mFrame)
+    {
+        return false;
+    }
+    Release(pTex);
+    pTex->mEvicted = true;
+    pTex->mFailedFrame = 0;
+    mEvictions++;
+    return true;
+}
+
+static u32 BitsPerTexel(GPU_TEXCOLOR fmt)
+{
+    return fmt == GPU_RGBA8 ? 32 : fmt == GPU_RGB8 ? 24 : fmt == GPU_A8 || fmt == GPU_L8 || fmt == GPU_LA4 ? 8 : 16;
+}
+
+// Drops the texture's storage, once the GPU is done with it.
+void C3DRenderer::Impl::Release(RTexture* pTex)
+{
+    if (!pTex->mValid)
+    {
+        return;
+    }
+    if (mBoundTex == &pTex->mTex)
+    {
+        mBoundTex = 0;
+    }
+    mTexCount--;
+    mTexBytes -= pTex->mBytes;
+    if (pTex->mEvictable)
+    {
+        LruRemove(pTex);
+    }
+    if (pTex->mUsedFrame == mFrame)
+    {
+        mPendingFree.push_back(pTex->mTex);
+    }
+    else
+    {
+        C3D_TexDelete(&pTex->mTex);
+    }
+    pTex->mValid = false;
+}
 
 // Storage for new texels: kept when the GPU is done with it and it has the size and format, else replaced.
 bool C3DRenderer::Impl::Allocate(RTexture* pTex, s32 tw, s32 th, GPU_TEXCOLOR fmt, s32 levels, bool clear)
@@ -467,23 +552,31 @@ bool C3DRenderer::Impl::Allocate(RTexture* pTex, s32 tw, s32 th, GPU_TEXCOLOR fm
         {
             return true;
         }
-        if (inFlight)
-        {
-            mPendingFree.push_back(pTex->mTex);
-        }
-        else
-        {
-            C3D_TexDelete(&pTex->mTex);
-        }
-        pTex->mValid = false;
+        Release(pTex);
     }
     if (mBoundTex == &pTex->mTex)
     {
         mBoundTex = 0;
     }
     const C3D_TexInitParams params = {(u16)tw, (u16)th, (u8)levels, fmt, GPU_TEX_2D, false};
-    if (!C3D_TexInitWithParams(&pTex->mTex, NULL, params))
+    u32 bytes = 0;
+    for (s32 l = 0; l <= levels; l++)
     {
+        bytes += (u32)(tw >> l) * (u32)(th >> l) * BitsPerTexel(fmt) / 8;
+    }
+    while (pTex->mEvictable && mCachedBytes + bytes > mBudget && EvictOne())
+    {
+    }
+    bool fits;
+    // Should no free block be big enough, older textures go until one is.
+    while (!(fits = C3D_TexInitWithParams(&pTex->mTex, NULL, params)) && EvictOne())
+    {
+    }
+    if (!fits)
+    {
+        mAllocFails++;
+        pTex->mEvicted = true;
+        pTex->mFailedFrame = mFrame;
         if (!mWarnedAlloc)
         {
             fprintf(stderr, "c3d: texture %dx%d (format %d) does not fit in linear memory\n", (int)tw, (int)th, (int)fmt);
@@ -497,8 +590,16 @@ bool C3DRenderer::Impl::Allocate(RTexture* pTex, s32 tw, s32 th, GPU_TEXCOLOR fm
     }
     C3D_TexSetWrap(&pTex->mTex, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
     pTex->mLevels = (u8)levels;
+    pTex->mBytes = bytes;
     pTex->mValid = true;
     pTex->mUsedFrame = 0;
+    pTex->mEvicted = false;
+    mTexCount++;
+    mTexBytes += pTex->mBytes;
+    if (pTex->mEvictable)
+    {
+        LruAppend(pTex);
+    }
     return true;
 }
 
@@ -606,6 +707,11 @@ void C3DRenderer::Impl::Append(const RVertex* pVerts, s32 count, RTexture* pTex,
     const f32 sv = pTex ? pTex->mScaleV : 0.0f;
     if (pTex)
     {
+        if (pTex->mEvictable && pTex->mUsedFrame != mFrame)
+        {
+            LruRemove(pTex);
+            LruAppend(pTex);
+        }
         pTex->mUsedFrame = mFrame;
     }
     C3DVertex* pDst = mVerts + mVertCount;
@@ -990,6 +1096,8 @@ bool C3DRenderer::Init(Loader, const char** ppError)
     p->mUniProjection = shaderInstanceGetUniformLocation(p->mProgram.vertexShader, "projection");
     p->mNeedClear = true;
     p->mFrame = 1;
+    const char* pBudget = getenv("GTA2_3DS_TEXTURE_BUDGET");
+    p->mBudget = pBudget ? (u32)atoi(pBudget) * 1024 : kTextureBudget;
     mImpl = p;
 
     const s32 n = 8;
@@ -1184,6 +1292,7 @@ void C3DRenderer::Present(s32, s32)
     const u64 t0 = svcGetSystemTick();
     C3D_FrameEnd(0);
     p->mInFrame = false;
+    Stats3DS_SetTextures(p->mTexCount, p->mTexBytes, p->mCachedBytes, p->mEvictions, p->mAllocFails);
     Stats3DS_Frame(svcGetSystemTick() - t0);
 }
 
@@ -1252,6 +1361,24 @@ void C3DRenderer::UploadTexture(RTexture* pTex, s32 width, s32 height, const u32
     pTex->mScaleV = (f32)ch / th;
 }
 
+void C3DRenderer::SetEvictable(RTexture* pTex)
+{
+    if (!mImpl || !pTex || pTex->mEvictable)
+    {
+        return;
+    }
+    pTex->mEvictable = true;
+    if (pTex->mValid)
+    {
+        mImpl->LruAppend(pTex);
+    }
+}
+
+bool C3DRenderer::Evicted(RTexture* pTex) const
+{
+    return mImpl && pTex && pTex->mEvicted && pTex->mFailedFrame != mImpl->mFrame;
+}
+
 void* C3DRenderer::LockTiled(RTexture* pTex, s32 size, bool alphaOnly)
 {
     Impl* p = mImpl;
@@ -1308,11 +1435,7 @@ void C3DRenderer::FreeTexture(RTexture* pTex)
                 p->mBoundParam = p->mWhite->mTex.param;
             }
         }
-        if (pTex->mValid && pTex->mUsedFrame == p->mFrame)
-        {
-            p->mPendingFree.push_back(pTex->mTex);
-            pTex->mValid = false;
-        }
+        p->Release(pTex);
     }
     if (pTex->mValid)
     {

@@ -51,6 +51,8 @@ class C3DRenderer : public IRenderer
     RTexture* CreateTexture() override;
     void UploadTexture(RTexture* pTex, s32 width, s32 height, const u32* pRgba, RMipmaps mipmaps, u32 texels = 0) override;
     void FreeTexture(RTexture* pTex) override;
+    void SetEvictable(RTexture* pTex) override;
+    bool Evicted(RTexture* pTex) const override;
     void BeginScene() override;
     void EndScene() override;
     void DrawTriangles(const RVertex* pVerts, s32 count, RTexture* pTex, u32 state) override;
