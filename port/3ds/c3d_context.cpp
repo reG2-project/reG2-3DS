@@ -68,6 +68,10 @@ IGLContext* CreateGLContext(SDL_Window*, const char** ppError)
         *ppError = "C3D_Init failed";
         return 0;
     }
+    // The screens take RGB only. A console's LCD ignores alpha, but Azahar hands it to its window, where a pixel
+    // drawn with alpha 0 (the menus' black panels) shows what is behind.
+    gfxSetScreenFormat(GFX_TOP, GSP_BGR8_OES);
+    gfxSetScreenFormat(GFX_BOTTOM, GSP_BGR8_OES);
     gTarget = C3D_RenderTargetCreate(240, 400, GPU_RB_RGBA8, -1);
     if (!gTarget)
     {

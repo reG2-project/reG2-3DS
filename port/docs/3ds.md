@@ -70,7 +70,9 @@ RGB5A1, else RGBA8), padded to a power of two. The gbh_* layer tells the format 
 entry's bits (`RTexelBits`), and the frontend's TGA images are known to be opaque 5-6-5, so only the
 port's few own textures are scanned; each level is then written in one
 pass that premultiplies, converts, pads, writes Morton order and averages the next level into a
-scratch buffer. The CPU surface is composited through an RGB5A1 texture. One frame of vertices lives
+scratch buffer. The CPU surface is composited through an RGB5A1 texture. The screens' framebuffers are RGB (`GSP_BGR8_OES`, SDL sets RGBA8): an LCD
+ignores alpha, but Azahar hands it on to its window, where pixels drawn with alpha 0 (the menus' black panels,
+the frontend's black) let what is behind show through. One frame of vertices lives
 in linear memory; texture frees wait for the GPU.
 
 The game's textures are a cache in linear memory: an 8 MB budget, least recently drawn evicted first and
