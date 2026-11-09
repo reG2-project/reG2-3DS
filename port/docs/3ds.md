@@ -220,12 +220,31 @@ puts a car of that model (54 the tank) beside the player at that frame, who then
 
 ## Buttons
 
-SDL3's 3DS gamepad mapping and the port's default pad bindings give, by position: B attack, A jump,
-X enter or exit, Y special 1, L and R the weapons, START the pause menu, SELECT back, the d-pad and the
-circle pad move; ZL and ZR (New 3DS) are specials 2 and 3, and brake and accelerate in vehicles. In the
-fire truck, the tank and the gun jeep, Y held with left or right turns the roof gun (the original's
-SPECIAL 1 with a turn). In the menus B or START selects and A or SELECT goes back, and the hints name
-the buttons as the console prints them (`PortPlatform::PadButtonName`).
+The 3DS has a layout of its own (`PortPlatform::kConsoleControls`, `ConsoleDown` in `compat/src/pad.cpp`),
+the same buttons on foot and in a vehicle; SDL's 3DS mapping gives the buttons by position:
+
+| Button | On foot | In a vehicle |
+|---|---|---|
+| Circle pad | MODERN: walk that way (TWIN STICK's move); CLASSIC: the original's arrows | steer; CLASSIC: up and down also accelerate and brake |
+| R | attack; MODERN: held, the player keeps his facing (backs off while firing) | accelerate |
+| L | | brake, reverse |
+| B | jump | handbrake |
+| A | get in | get out |
+| Y, X | specials 1 and 2 | specials 1 (horn, siren) and 2 |
+| D-pad left, right | previous, next weapon | the roof gun's turn (fire truck, tank, gun jeep), else the weapons |
+| D-pad up, down | special 3, nothing | special 3, attack |
+| START, SELECT | pause menu, back in menus | |
+| ZR, ZL (New 3DS) | attack, nothing | attack, nothing |
+| C-stick (New 3DS) | MODERN: aims (TWIN STICK's aim) | MODERN: turns the roof gun |
+
+CONTROLS (pause menu or OPTIONS) chooses MODERN, the default, or CLASSIC, the original's tank movement; the
+choice is `port_console_controls` in the registry, apart from the PC's `port_controls`. MODERN is TWIN STICK
+(`port/src/twin_stick.cpp`): without an aim the player turns to the way he walks; while R or ZR is held his
+facing stays the one he had at the press (`port_HoldFacing`), the original's lock on a ped near the line of
+fire still applies, and the C-stick's aim comes first. Only the circle pad moves, in either style, so that the
+d-pad keeps the weapons. The original's SPECIAL 1 with left or right still turns a roof gun. In the menus B
+or START selects and A or SELECT goes back; the hints name the buttons as the console prints them
+(`PortPlatform::PadButtonName`).
 
 The settings menu leaves out what the 3DS lacks (`PortPlatform::Has` in `port/src/platform.hpp`, answered
 in `platform_3ds.cpp`): the window, display modes and vsync, frame limits above 30, BRIGHTNESS (the
@@ -233,11 +252,7 @@ renderer has no gamma), SAFE AREA, the OpenGL renderer's options, the CHINATOWN 
 tilt, HUD SCALE (the HUD has its own screen), 3D SOUND (no OpenAL Soft) and the bindings: the pad keeps its
 default bindings, stored ones are ignored. VIEW keeps CAMERA ZOOM, GRAPHICS LIGHT EFFECTS, on by default
 and lit per vertex (see Renderer); CAR HEADLIGHTS is off.
-CONTROLS is there on the New 3DS only, told apart at run time (`APT_CheckNew3DS`): TWIN STICK moves with
-the circle pad and aims with the C-stick (SDL's right stick), which also turns a roof gun, and ZR attacks,
-as the PC's right stick and RT; CLASSIC stays the default. The Old 3DS, without a second stick, has
-CLASSIC only. Tested in Azahar with scripted presses: the pause menu's pages, Y with left turning the
-tank's gun, and on the New 3DS TWIN STICK set in the menu and the C-stick turning it.
+AIM CAMERA is there on the New 3DS only, told apart at run time (`APT_CheckNew3DS`), with its C-stick.
 
 ## HOME, sleep and exit
 
