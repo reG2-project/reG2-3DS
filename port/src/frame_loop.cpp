@@ -165,6 +165,7 @@ void Reset()
 
 Action Next(s32 stepMs, bool forceStep, bool noDraw)
 {
+    PORT_PROF(kLoopNext);
     const unsigned long long now = port_NowNs();
     if (!sStarted)
     {
@@ -225,6 +226,7 @@ Action Next(s32 stepMs, bool forceStep, bool noDraw)
 
 void BeforeStep()
 {
+    PORT_PROF(kLoopBeforeStep);
     sStatsT0 = sStats ? port_NowNs() : 0;
     PortInterp::Snapshot();
     PortView::Snapshot();
@@ -232,6 +234,7 @@ void BeforeStep()
 
 void AfterStep()
 {
+    PORT_PROF(kLoopAfterStep);
     sStepsSinceDraw++;
     sStepCount++;
     sStatsSteps++;
@@ -248,6 +251,7 @@ void AfterStep()
 
 void BeginDraw()
 {
+    PORT_PROF(kLoopBeginDraw);
     sStatsT0 = sStats ? port_NowNs() : 0;
     sInDraw = true;
     sDrawSteps = sStepsSinceDraw;
@@ -262,13 +266,16 @@ void BeginDraw()
 
 void EndDraw()
 {
-    port_SetGameFlip(false);
-    PortView::EndDraw();
-    PortInterp::Restore();
-    sStepsSinceDraw = 0;
-    sInDraw = false;
-    sStatsDraws++;
-    sStatsDrawNs += sStats ? port_NowNs() - sStatsT0 : 0;
+    {
+        PORT_PROF(kLoopEndDraw);
+        port_SetGameFlip(false);
+        PortView::EndDraw();
+        PortInterp::Restore();
+        sStepsSinceDraw = 0;
+        sInDraw = false;
+        sStatsDraws++;
+        sStatsDrawNs += sStats ? port_NowNs() - sStatsT0 : 0;
+    }
     PORT_PROF_END_FRAME();
 }
 

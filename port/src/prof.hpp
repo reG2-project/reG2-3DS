@@ -48,6 +48,13 @@ enum Part
     kStepParts,
     // Per drawn frame.
     kFrame = kStepParts,
+    kLoopNext,
+    kLoopBeforeStep,
+    kLoopAfterStep,
+    kLoopBeginDraw,
+    kLoopEndDraw,
+    kLoopFps,
+    kLog,
     kInputs,
     kPump,
     kPumpPad,

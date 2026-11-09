@@ -1498,6 +1498,7 @@ static bool PortRunGameFrame()
     }
     if (gFpsCounter)
     {
+        PORT_PROF(kLoopFps);
         gFpsCounter->UpdateFpsCounters(drew_frame, updated_logic);
     }
     return exit_requested;

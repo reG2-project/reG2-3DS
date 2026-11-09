@@ -19,7 +19,8 @@ const char* const kPartNames[] = {
     "peds.dummies", "transport", "garages", "cars", "cars.car", "cars.car.ai", "cars.car.physics", "cars.traffic",
     "trafficlights", "objects", "scripts", "crews", "ambulance", "police", "particles", "tileanim", "hud", "doors",
     "firetrucks", "scores", "sound", "sound.entities", "sound.queues", "paused", "collide",
-    "frame", "inputs", "pump", "pump.pad", "idle", "draw", "draw.sort", "draw.setup", "draw.map", "draw.scores",
+    "frame", "loop.next", "loop.beforestep", "loop.afterstep", "loop.begindraw", "loop.enddraw", "loop.fps", "log",
+    "inputs", "pump", "pump.pad", "idle", "draw", "draw.sort", "draw.setup", "draw.map", "draw.scores",
     "draw.hud", "draw.end", "prim", "prim.light", "prim.c3d", "flush", "present", "present.bottom", "present.overlay",
     "present.frameend", "tex.convert", "tex.upload", "wait.vsync", "wait.gpu", "gpu", "c3d.cpu", 0};
 const char* const kCountNames[] = {
@@ -325,6 +326,7 @@ void EndFrame()
     Fold(kStepParts, kPartCount, kStepCounts, kCountCount);
     if (++sFrames >= sInterval)
     {
+        Scope log(kLog);
         Print();
     }
 }
