@@ -108,6 +108,26 @@ The game's textures are a cache in linear memory: an 8 MB budget, least recently
 converted again on their next draw. Without it, the textures a long session has drawn outgrew the 16 MB
 and showed white. Design and measurements: `3ds_texture_memory.md`.
 
+A texture is converted on its first draw: the gbh_* layer turns the palette into RGBA (`tex.convert`), the
+renderer makes its levels (premultiplied, converted, in Morton order, each averaged into the next: `tex.upload`).
+A slot's levels go straight to their place in the page, only the border is copied there (the 8x8 level, at an
+odd place, is made apart and copied). The game's textures have their levels made on a worker thread on the
+system core (core 1, of which the application gets 30 %, below the sound's thread there): the main thread
+keeps the allocation (budget, eviction, slots) and queues a copy of the texels. Before `C3D_FrameEnd` it writes
+itself those drawn in the frame that the worker has not done, oldest first while the worker takes the newest.
+A job the worker is in the middle of is stopped and written again by the main thread rather than waited for:
+the system core runs the application in slices, and in Azahar, which holds it to its 30 %, a 64x64 slot took
+the worker 6.5 to 12 ms against 2.4 ms on the main thread, and a 32x32 job could wait 5 ms for its turn. The
+thread that writes texture memory flushes it; storage is released or written again only once the worker has let
+go of it (a stopped job may still write the texels the main thread wrote, the same values). `GTA2_3DS_UPLOAD_WORKER=0`
+keeps every upload on the main thread.
+
+The effects' frames (code object 112: explosions, fire, smoke, sparks, blood; 205 sprites, the same in the three
+styles, 1.3 MB with their mip levels) are listed at the city load and converted at the next scene, on the worker
+in the background, rather than one per frame of the first explosions (`port_PreloadTexture`). The next scene,
+as with skip_frontend the render options reach the renderer only as the frame loop starts, and their change
+converts every texture again. What explosions and collisions convert: `3ds_texture_memory.md`.
+
 The top screen is drawn at 400x240: the game's 800x480 scaled by half, with no vertex offset and bilinear
 filtering, so the game's 1:1 quads (menus, text) come out as the exact 2x2 average of their texels.
 Blended textures are premultiplied at upload, so filtered edges take no colour from transparent texels.
@@ -277,7 +297,8 @@ over the last second and refreshed 4 times per second, `GTA2_UNCAPPED=1` draws a
 keeps its 30.3 steps per second, citro3d does not wait for the screens' refresh) to measure the headroom
 (Azahar, bil: about 185 frames per second walking at noon, 165 driving through traffic, about 100 driving at dusk,
 the same in New 3DS mode, which runs the same clock; Azahar leaves out the GPU's time),
-`GTA2_AUDIO_DRIVER=dummy` runs the sound without the DSP, `GTA2_3DS_MINIMAP=wide` or `off` sets the
+`GTA2_AUDIO_DRIVER=dummy` runs the sound without the DSP, `GTA2_3DS_UPLOAD_WORKER=0` makes the textures' levels on
+the main thread (see Renderer; `GTA2_3DS_STATS` logs the worker's time and the jobs the main thread wrote), `GTA2_3DS_MINIMAP=wide` or `off` sets the
 minimap's place (see Renderer). To boot into a city, the registry's `Debug` keys
 `skip_frontend`, `mapname`, `stylename` and `scriptname` (see `Source/debug.cpp`).
 
@@ -480,6 +501,19 @@ and the main thread 11.4 ms became 7.9. Most of it is Azahar's system call cost:
 Texture uploads went from up to six passes per texture to one per level, 2.5 to 3 times faster
 in Azahar (a 64x64 sprite 2.3 to 0.84 ms, a 128x128 one 9.2 to 3.1 ms; upload time in a frame of a
 long drive at most 7 to 10 ms instead of 19 to 29). Remaining leads: fewer draw calls (about 100 per frame) with a tile atlas. The system core runs the sound (see Sound).
+Uploads in a crash and explosion scenario (Azahar, Old 3DS mode, main thread per frame while driving, the
+first block left out): the tank from `GTA2_TEST_CAR` firing its shells into traffic by day (24 blocks), and a car
+driven into traffic at night (7 blocks). `tex.*` is the average per frame, its worst block's average, and the
+worst frame:
+
+| | tank, by day | car, at night |
+|---|---|---|
+| before | 0.22 ms, 0.93, 5.7 | 0.67 ms, 1.39, 16.5 |
+| slots written in place, effects preloaded, worker off | 0.20 ms, 0.56, 4.9 | 0.56 ms, 1.04, 12.5 |
+| the same with the worker | 0.16 ms, 0.35, 4.9 | 0.46 ms, 0.73, 9.1 |
+
+The worker wrote 72 and 64 % of the jobs (busy at most 5 % of the time); the frames over 42 ms stay at 3 %,
+Azahar's own hitches. Azahar is 4 to 6 times optimistic on the console, so its milliseconds are a guide only.
 
 Build options, the same walk, three runs each (main thread CPU per frame, logic step): 7.91 and 3.43 ms
 without them; 7.80 and 3.30 with unaligned access (clang's bare metal default goes byte by byte where it
