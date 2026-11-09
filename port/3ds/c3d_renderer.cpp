@@ -2,6 +2,7 @@
 #include "c3d_context.hpp"
 #include "fps_overlay.hpp"
 #include "stats_3ds.hpp"
+#include "log_3ds.hpp"
 #include "../src/prof.hpp"
 #include "../src/hud_screen.hpp"
 #include "hud_theme.hpp"
@@ -16,6 +17,13 @@
 // render.v.pica assembled by picasso and embedded by bin2s.
 extern "C" const u8 render_shbin[];
 extern "C" const u8 render_shbin_end[];
+extern "C" const u8 map_cache_shbin[];
+extern "C" const u8 map_cache_shbin_end[];
+
+namespace
+{
+u32 sFreedTextures;
+}
 
 struct AtlasPage;
 
@@ -1756,6 +1764,7 @@ void C3DRenderer::FreeTexture(RTexture* pTex)
     {
         return;
     }
+    sFreedTextures++;
     Impl* p = mImpl;
     if (p)
     {
@@ -1866,4 +1875,179 @@ s32 C3DRenderer::HudScreenWidth() const
 {
     // The brief's panel: the minimap takes the rest of its row.
     return mImpl && mImpl->mBottom ? mImpl->mPanels[HudTheme::kBrief].x1 : 0;
+}
+
+namespace
+{
+// map_cache.v.pica, loaded on the first DrawMeshes: 1 ready, -1 unusable.
+DVLB_s* sMeshDvlb;
+shaderProgram_s sMeshProgram;
+s32 sMeshState;
+s32 sUniMeshLit;
+// DrawMeshes' ticks: the batch before, the switch to the mesh program, the draws, the switch back, and in the
+// draws, C3D_DrawArrays for the first draw (it uploads the program) and for the others.
+uint64_t sMeshTicks[6];
+}
+
+u32 C3DRenderer::MeshFrame()
+{
+    if (!mImpl)
+    {
+        return 0;
+    }
+    mImpl->BeginFrame();
+    return mImpl->mFrame;
+}
+
+bool C3DRenderer::MeshTexture(RTexture* pTex, MeshTexturePlace* pPlace)
+{
+    Impl* p = mImpl;
+    if (!p || !pTex || !pTex->mValid || pTex->mEvicted)
+    {
+        return false;
+    }
+    p->BeginFrame();
+    RTexture* pBind = pTex->mPage ? &pTex->mPage->mTex : pTex;
+    if (pTex->mEvictable && pTex->mUsedFrame != p->mFrame)
+    {
+        p->LruRemove(pTex);
+        p->LruAppend(pTex);
+    }
+    pTex->mUsedFrame = p->mFrame;
+    pBind->mUsedFrame = p->mFrame;
+    pPlace->su = pTex->mScaleU;
+    pPlace->sv = pTex->mScaleV;
+    pPlace->ou = pTex->mOffsetU;
+    pPlace->ov = 1.0f - pTex->mOffsetV;
+    pPlace->bind = pBind;
+    pPlace->premultiplied = pTex->mPremultiplied;
+    pPlace->version = pTex->mVersion;
+    return true;
+}
+
+u32 C3DRenderer::FreedTextures()
+{
+    return sFreedTextures;
+}
+
+bool C3DRenderer::DrawMeshes(const MeshDraw* pDraws, s32 count, bool lit)
+{
+    Impl* p = mImpl;
+    if (!p || count <= 0)
+    {
+        return p != 0;
+    }
+    if (sMeshState == 0)
+    {
+        sMeshState = -1;
+        sMeshDvlb = DVLB_ParseFile((u32*)map_cache_shbin, (u32)(map_cache_shbin_end - map_cache_shbin));
+        if (sMeshDvlb)
+        {
+            shaderProgramInit(&sMeshProgram);
+            shaderProgramSetVsh(&sMeshProgram, &sMeshDvlb->DVLE[0]);
+            shaderInstance_s* pVsh = sMeshProgram.vertexShader;
+            sUniMeshLit = shaderInstanceGetUniformLocation(pVsh, "meshLit");
+            // The lights stay in the registers render.v.pica put them in.
+            const bool same = shaderInstanceGetUniformLocation(pVsh, "projection") == p->mUniProjection &&
+                              shaderInstanceGetUniformLocation(pVsh, "ambient") == p->mUniAmbient &&
+                              shaderInstanceGetUniformLocation(pVsh, "lights") == p->mUniLights &&
+                              shaderInstanceGetUniformLocation(pVsh, "lightLoop") == p->mUniLightLoop &&
+                              shaderInstanceGetUniformLocation(pVsh, "anyLights") == p->mUniAnyLights;
+            sMeshState = same && sUniMeshLit >= 0 ? 1 : -1;
+            if (sMeshState < 0)
+            {
+                Log3DS_Printf("c3d: map_cache.v.pica's uniforms are not where render.v.pica's are\n");
+            }
+        }
+    }
+    if (sMeshState < 0)
+    {
+        return false;
+    }
+    p->BeginFrame();
+    u64 t = svcGetSystemTick();
+    p->Flush();
+    u64 t1 = svcGetSystemTick();
+    sMeshTicks[0] += t1 - t;
+    t = t1;
+    C3D_BindProgram(&sMeshProgram);
+    C3D_AttrInfo* pAttr = C3D_GetAttrInfo();
+    AttrInfo_Init(pAttr);
+    AttrInfo_AddLoader(pAttr, 0, GPU_UNSIGNED_BYTE, 4);
+    AttrInfo_AddLoader(pAttr, 1, GPU_FLOAT, 2);
+    C3D_BoolUnifSet(GPU_VERTEX_SHADER, sUniMeshLit, lit);
+    const C3D_Mtx& m = p->mProjection;
+    const MeshVertex* pBuffer = 0;
+    t1 = svcGetSystemTick();
+    sMeshTicks[1] += t1 - t;
+    t = t1;
+    for (s32 i = 0; i < count; i++)
+    {
+        const MeshDraw& d = pDraws[i];
+        RTexture* pTex = d.pTex && d.pTex->mValid ? d.pTex : 0;
+        u32 state = (d.blend ? RS_BLEND_ALPHA : 0) | RS_FILTER_LINEAR | (pTex ? 0 : RS_NO_TEXTURE);
+        state |= pTex && pTex->mPremultiplied ? kStatePremultiplied : 0;
+        state |= d.noMip ? kStateNoMip : 0;
+        p->ApplyState(state, p->mClip);
+        RTexture* pBind = pTex ? (pTex->mPage ? &pTex->mPage->mTex : pTex) : p->mWhite;
+        if (pTex)
+        {
+            pTex->mUsedFrame = p->mFrame;
+            pBind->mUsedFrame = p->mFrame;
+        }
+        C3D_Tex* pTex3 = &pBind->mTex;
+        C3D_TexSetFilter(pTex3, GPU_LINEAR, GPU_LINEAR);
+        C3D_TexSetFilterMipmap(pTex3, GPU_LINEAR);
+        pTex3->maxLevel = d.noMip ? 0 : pBind->mLevels;
+        C3D_TexBind(0, pTex3);
+        // render.v.pica's clip position (x, y, -0.5, 1) / rhw of the logical pixel, as affine in the local (x, y).
+        const f32 w = 1.0f / (d.rhw > 0.0000001f ? d.rhw : 0.0000001f);
+        const f32 k = w * d.scale;
+        C3D_FVUnifSet(GPU_VERTEX_SHADER, p->mUniProjection, k * m.r[0].x, k * m.r[1].x, 0.0f, 0.0f);
+        C3D_FVUnifSet(GPU_VERTEX_SHADER, p->mUniProjection + 1, k * m.r[0].y, k * m.r[1].y, 0.0f, 0.0f);
+        C3D_FVUnifSet(GPU_VERTEX_SHADER, p->mUniProjection + 2, w * (m.r[0].x * d.x0 + m.r[0].y * d.y0 + m.r[0].w),
+                      w * (m.r[1].x * d.x0 + m.r[1].y * d.y0 + m.r[1].w), -0.5f * w, w);
+        C3D_FVUnifSet(GPU_VERTEX_SHADER, p->mUniProjection + 3, d.wx - p->mLightOriginX, d.wy - p->mLightOriginY, d.wz, 0.0f);
+        if (d.pVerts != pBuffer)
+        {
+            C3D_BufInfo* pBuf = C3D_GetBufInfo();
+            BufInfo_Init(pBuf);
+            BufInfo_Add(pBuf, d.pVerts, sizeof(MeshVertex), 2, 0x10);
+            pBuffer = d.pVerts;
+        }
+        const u64 td = svcGetSystemTick();
+        C3D_DrawArrays(GPU_TRIANGLES, d.first, d.count);
+        sMeshTicks[i == 0 ? 4 : 5] += svcGetSystemTick() - td;
+        mDrawCalls++;
+        mVertices += (u32)d.count;
+        PORT_PROF_COUNT(kDrawCalls, 1);
+        PORT_PROF_COUNT(kVertices, (u32)d.count);
+    }
+    t1 = svcGetSystemTick();
+    sMeshTicks[2] += t1 - t;
+    t = t1;
+    // Back to BeginFrame's program, vertices and projection.
+    C3D_BindProgram(&p->mProgram);
+    AttrInfo_Init(pAttr);
+    AttrInfo_AddLoader(pAttr, 0, GPU_FLOAT, 3);
+    AttrInfo_AddLoader(pAttr, 1, GPU_UNSIGNED_BYTE, 4);
+    AttrInfo_AddLoader(pAttr, 2, GPU_FLOAT, 2);
+    AttrInfo_AddLoader(pAttr, 3, GPU_FLOAT, 4);
+    C3D_BufInfo* pBuf = C3D_GetBufInfo();
+    BufInfo_Init(pBuf);
+    BufInfo_Add(pBuf, p->mVerts, sizeof(C3DVertex), 4, 0x3210);
+    C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, p->mUniProjection, &p->mProjection);
+    p->mStateValid = false;
+    p->mBoundTex = 0;
+    sMeshTicks[3] += svcGetSystemTick() - t;
+    return true;
+}
+
+void C3DRenderer::TakeMeshTicks(uint64_t* pTicks)
+{
+    for (s32 i = 0; i < 6; i++)
+    {
+        pTicks[i] = sMeshTicks[i];
+        sMeshTicks[i] = 0;
+    }
 }

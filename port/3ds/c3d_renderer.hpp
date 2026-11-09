@@ -3,6 +3,7 @@
 #pragma once
 
 #include "../renderer/renderer.hpp"
+#include "map_cache_mesh.hpp"
 #include <vector>
 
 // Texel (x, y) of a texture `width` texels wide in the PICA's layout: 8x8 tiles in rows, Morton order inside.
@@ -70,6 +71,22 @@ class C3DRenderer : public IRenderer
     void* LockTiled(RTexture* pTex, s32 size, bool alphaOnly);
     void UnlockTiled(RTexture* pTex);
     u32 GetVertexCount() const { return mVertices; }
+
+    // Static meshes in linear memory projected by their own vertex shader (map_cache.v.pica).
+    typedef MapCacheMesh::Vertex MeshVertex;
+    typedef MapCacheMesh::Draw MeshDraw;
+    typedef MapCacheMesh::TexturePlace MeshTexturePlace;
+    // Begins the frame if it has not begun; its number.
+    u32 MeshFrame();
+    // False when the texture has no storage. Marks it drawn in this frame, so it is not evicted before the meshes.
+    bool MeshTexture(RTexture* pTex, MeshTexturePlace* pPlace);
+    // Draws in order after what DrawTriangles took so far; lit: the shader lights the vertices. False without the shader.
+    bool DrawMeshes(const MeshDraw* pDraws, s32 count, bool lit);
+    // Counts FreeTexture calls: textures a mesh points at may be gone.
+    static u32 FreedTextures();
+    // DrawMeshes' ticks since the last call: the batch before, the program switch, the draws, the switch back, the
+    // first draw's C3D_DrawArrays and the others'.
+    static void TakeMeshTicks(uint64_t* pTicks);
 
   private:
     struct Impl;
