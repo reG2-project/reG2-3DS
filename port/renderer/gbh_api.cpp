@@ -1178,10 +1178,9 @@ void port_LampLight(f32 dx, f32 dy, f32 width)
         l.mCeiling = l.mZ + 0.5f;
         if (width > 0.0f && gRenderer && !gRenderer->Options().mPerPixelLighting)
         {
-            // Lit at the blocks' corners only, a narrow beam would flicker on and off them: a point light a
-            // third of its range ahead, as the original renderer had to.
-            l.mX += dx * l.mRadius / 3;
-            l.mY += dy * l.mRadius / 3;
+            // Lit at the blocks' corners only, a beam would flicker on and off them: left out.
+            gNumLights--;
+            gLightAdded = false;
         }
         else if (width > 0.0f)
         {

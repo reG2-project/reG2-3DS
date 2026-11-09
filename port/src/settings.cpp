@@ -334,8 +334,8 @@ s32 ScreenDefault(Id id)
     {
         return 12;
     }
-    // Lit per vertex, without the renderer's options (the 3DS), the port's lamps are on by default.
-    if (id == kHeadlights || id == kLightEffects)
+    // Lit per vertex, without the renderer's options (the 3DS), the port's fires and flashes are on by default.
+    if (id == kLightEffects)
     {
         return !Available(kPerPixelLighting);
     }
@@ -585,6 +585,7 @@ bool Available(Id id)
         case kTextureFilter:
         case kAntiAliasing:
         case kShadows:
+        case kHeadlights:
             return P::Has(P::kRendererOptions);
         case kControls:
         case kAimCamera:
