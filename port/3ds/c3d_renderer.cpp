@@ -54,7 +54,10 @@ struct C3DVertex
     f32 wx, wy, wz, shade; // shade < 0: unlit
 };
 
+// Vertices go in fours, each four drawn as the triangles (0, 1, 2) and (0, 2, 3) through a fixed index buffer: a quad
+// is its 4 corners, a triangle its 3 and the last again (an empty second triangle).
 const s32 kMaxVerts = 65536;
+const s32 kMaxIndices = kMaxVerts / 4 * 6;
 // The most lights the vertex shader takes (render.v.pica's lights[]).
 const s32 kMaxShaderLights = 44;
 // The top screen's target, landscape: the game's 800x480 at half size.
@@ -385,7 +388,7 @@ const HudGroupRules kHudGroups[PortHudScreen::kGroupCount] = {
 };
 #undef HUD_RULES
 
-// The corners of DrawFan's triangles.
+// The corners of a quad's two triangles.
 const u8 kFan[6] = {0, 1, 2, 0, 2, 3};
 
 // The rule for the centre of the triangles' vertices (a fan's as drawn).
@@ -448,6 +451,8 @@ struct C3DRenderer::Impl : HudTheme::Sink
     ScreenRect mClip;
 
     C3DVertex* mVerts; // linear memory, refilled every frame
+    u16* mIndices;     // the fixed index buffer, in the same block after mVerts
+    u32 mIndexOffset;  // mIndices from the vertex buffers' base, for GPUREG_INDEXBUFFER_CONFIG
     s32 mVertCount;
     s32 mBatchStart;
     RTexture* mBatchTex;
@@ -874,6 +879,7 @@ void C3DRenderer::Impl::BeginFrame()
     C3D_BufInfo* pBuf = C3D_GetBufInfo();
     BufInfo_Init(pBuf);
     BufInfo_Add(pBuf, mVerts, sizeof(C3DVertex), 4, 0x3210);
+    mIndexOffset = osConvertVirtToPhys(mIndices) - pBuf->base_paddr;
     C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, mUniProjection, &mProjection);
     C3D_DepthTest(false, GPU_ALWAYS, GPU_WRITE_COLOR);
     C3D_CullFace(GPU_CULL_NONE);
@@ -884,11 +890,12 @@ void C3DRenderer::Impl::BeginFrame()
     mBoundTex = 0;
 }
 
-// fan: pVerts is a triangle or a quad (DrawFan), drawn as one or two triangles.
+// fan: pVerts is a triangle or a quad (DrawFan), else a list of triangles.
 void C3DRenderer::Impl::Append(const RVertex* pVerts, s32 count, RTexture* pTex, u32 state, f32 offset, const ScreenRect& scissor, const HudRule* pRule,
                                bool fan)
 {
-    const s32 n = fan ? (count == 4 ? 6 : 3) : count;
+    const bool quad = fan && count == 4;
+    const s32 n = quad ? 4 : count / 3 * 4;
     if (pTex && pTex->mPremultiplied)
     {
         state |= kStatePremultiplied;
@@ -944,9 +951,10 @@ void C3DRenderer::Impl::Append(const RVertex* pVerts, s32 count, RTexture* pTex,
     }
     const f32 lx = mLightOriginX, ly = mLightOriginY;
     C3DVertex* pDst = mVerts + mVertCount;
+    static const u8 kTriangle[4] = {0, 1, 2, 2};
     for (s32 i = 0; i < n; i++)
     {
-        const RVertex& s = pVerts[fan ? kFan[i] : i];
+        const RVertex& s = pVerts[quad ? i : (i >> 2) * 3 + kTriangle[i & 3]];
         // lit != 0.0f, without a float compare: the VFP's flags take a while to reach the ARM core.
         u32 litBits;
         memcpy(&litBits, &s.lit, 4);
@@ -1296,8 +1304,9 @@ void C3DRenderer::Impl::ApplyState(u32 state, const ScreenRect& scissor)
     mStateValid = true;
 }
 
-// A batch's draw. When only its texture differs from the last draw's, that texture's registers and the draw go
-// straight into the command buffer, as citro3d writes them; C3D_DrawArrays would also go through every uniform.
+// A batch's draw: count vertices from the first, in fours. When only its texture differs from the last draw's, that
+// texture's registers and the draw go straight into the command buffer, as citro3d writes them; C3D_DrawElements
+// would also go through every uniform.
 void C3DRenderer::Impl::Draw(RTexture* pTex, u32 state, const ScreenRect& scissor, s32 first, s32 count)
 {
     const bool sameState = mStateValid && state == mAppliedState && !(scissor != mAppliedScissor);
@@ -1327,35 +1336,34 @@ void C3DRenderer::Impl::Draw(RTexture* pTex, u32 state, const ScreenRect& scisso
     PORT_PROF_COUNT(kVertices, (u32)count);
     if (!sameState)
     {
-        C3D_DrawArrays(GPU_TRIANGLES, first, count);
+        C3D_DrawElements(GPU_TRIANGLES, count / 4 * 6, C3D_UNSIGNED_SHORT, mIndices + first / 4 * 6);
         return;
     }
-    // Texture unit 0 as C3Di_SetTex sets it, its cache cleared, then C3D_DrawArrays' commands.
-    u32 cmds[32];
-    u32* p = cmds;
+    // Texture unit 0 as C3Di_SetTex sets it, its cache cleared, then C3D_DrawElements' commands.
     if (rebind)
     {
         const u32 tex[] = {pTex3->border, GPUCMD_HEADER(1, 0xF, GPUREG_TEXUNIT0_BORDER_COLOR) | (4 << 20),
                            pTex3->dim, pTex3->param, pTex3->lodParam, osConvertVirtToPhys(pTex3->data) >> 3,
                            (u32)pTex3->fmt, GPUCMD_HEADER(0, 0xF, GPUREG_TEXUNIT0_TYPE),
                            0x10000, GPUCMD_HEADER(0, 0x4, GPUREG_TEXUNIT_CONFIG)};
-        memcpy(p, tex, sizeof(tex));
-        p += sizeof(tex) / 4;
+        GPUCMD_AddRawCommands(tex, sizeof(tex) / 4);
     }
-    const u32 draw[] = {GPU_TRIANGLES, GPUCMD_HEADER(0, 0x2, GPUREG_PRIMITIVE_CONFIG),
+    const u32 draw[] = {GPU_GEOMETRY_PRIM, GPUCMD_HEADER(0, 0x2, GPUREG_PRIMITIVE_CONFIG),
                         1, GPUCMD_HEADER(0, 0xF, GPUREG_RESTART_PRIMITIVE),
-                        0x80000000, GPUCMD_HEADER(0, 0xF, GPUREG_INDEXBUFFER_CONFIG),
-                        (u32)count, GPUCMD_HEADER(0, 0xF, GPUREG_NUMVERTICES),
-                        (u32)first, GPUCMD_HEADER(0, 0xF, GPUREG_VERTEX_OFFSET),
-                        1, GPUCMD_HEADER(0, 0x1, GPUREG_GEOSTAGE_CONFIG2),
+                        (mIndexOffset + (u32)first / 4 * 12) | (1u << 31), GPUCMD_HEADER(0, 0xF, GPUREG_INDEXBUFFER_CONFIG),
+                        (u32)count / 4 * 6, GPUCMD_HEADER(0, 0xF, GPUREG_NUMVERTICES),
+                        0, GPUCMD_HEADER(0, 0xF, GPUREG_VERTEX_OFFSET),
+                        0x100, GPUCMD_HEADER(0, 0x2, GPUREG_GEOSTAGE_CONFIG),
+                        0x100, GPUCMD_HEADER(0, 0x2, GPUREG_GEOSTAGE_CONFIG2),
                         0, GPUCMD_HEADER(0, 0x1, GPUREG_START_DRAW_FUNC0),
-                        1, GPUCMD_HEADER(0, 0xF, GPUREG_DRAWARRAYS),
+                        1, GPUCMD_HEADER(0, 0xF, GPUREG_DRAWELEMENTS),
                         1, GPUCMD_HEADER(0, 0x1, GPUREG_START_DRAW_FUNC0),
-                        0, GPUCMD_HEADER(0, 0x1, GPUREG_GEOSTAGE_CONFIG2),
-                        1, GPUCMD_HEADER(0, 0xF, GPUREG_VTX_FUNC)};
-    memcpy(p, draw, sizeof(draw));
-    p += sizeof(draw) / 4;
-    GPUCMD_AddRawCommands(cmds, (u32)(p - cmds));
+                        0, GPUCMD_HEADER(0, 0x2, GPUREG_GEOSTAGE_CONFIG),
+                        0, GPUCMD_HEADER(0, 0x2, GPUREG_GEOSTAGE_CONFIG2),
+                        1, GPUCMD_HEADER(0, 0xF, GPUREG_VTX_FUNC),
+                        0, GPUCMD_HEADER(0, 0x8, GPUREG_PRIMITIVE_CONFIG),
+                        0, GPUCMD_HEADER(0, 0x8, GPUREG_PRIMITIVE_CONFIG)};
+    GPUCMD_AddRawCommands(draw, sizeof(draw) / 4);
 }
 
 C3DRenderer::C3DRenderer() : mImpl(0), mLogicalW(640), mLogicalH(480), mDrawCalls(0), mUploads(0), mVertices(0)
@@ -1396,7 +1404,7 @@ bool C3DRenderer::Init(Loader, const char** ppError)
     }
     Mtx_OrthoTilt(&p->mBottomProjection, 0.0f, (f32)kBottomW, (f32)kBottomH, 0.0f, 0.0f, 1.0f, true);
     p->mDvlb = DVLB_ParseFile((u32*)render_shbin, (u32)(render_shbin_end - render_shbin));
-    p->mVerts = (C3DVertex*)linearAlloc(kMaxVerts * sizeof(C3DVertex));
+    p->mVerts = (C3DVertex*)linearAlloc(kMaxVerts * sizeof(C3DVertex) + kMaxIndices * sizeof(u16));
     if (!p->mDvlb || !p->mVerts)
     {
         if (p->mDvlb)
@@ -1411,6 +1419,12 @@ bool C3DRenderer::Init(Loader, const char** ppError)
         *ppError = "citro3d renderer: shader or vertex buffer allocation failed";
         return false;
     }
+    p->mIndices = (u16*)(p->mVerts + kMaxVerts);
+    for (s32 i = 0; i < kMaxIndices; i++)
+    {
+        p->mIndices[i] = (u16)(i / 6 * 4 + kFan[i % 6]);
+    }
+    GSPGPU_FlushDataCache(p->mIndices, kMaxIndices * sizeof(u16));
     shaderProgramInit(&p->mProgram);
     shaderProgramSetVsh(&p->mProgram, &p->mDvlb->DVLE[0]);
     p->mUniProjection = shaderInstanceGetUniformLocation(p->mProgram.vertexShader, "projection");
