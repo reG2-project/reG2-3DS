@@ -5,6 +5,7 @@
 #else
 #define PORT_PROF_SECTION(part)
 #define PORT_PROF_END()
+#define PORT_PROF_COUNT(count, n)
 #endif
 #include "ped_group_type.hpp"
 #include "ped_class.hpp"
@@ -394,14 +395,17 @@ void Game::Draw()
     gSpriteManager->ResetDrawnSpriteCount();
     gSpriteRenderer->ResetAll();
 
+    PORT_PROF_SECTION(kDrawSort);
     gSpriteGrid_3->DrawSpritesClipped();
     gSpriteGrid_2->DrawSpritesClipped();
     gSpriteGrid_1->DrawSpritesClipped();
 
+    PORT_PROF_SECTION(kDrawSetup);
     MakeScreenTableAndSetWindow();
 
     pgbh_BeginScene();
 
+    PORT_PROF_SECTION(kDrawMap);
 #if defined(GTA2_PORT)
     PortView::SetTurn(PortView::kWorld);
 #endif
@@ -410,11 +414,13 @@ void Game::Draw()
     PortView::SetTurn(PortView::kOff);
 #endif
 
+    PORT_PROF_SECTION(kDrawScores);
     if (!bExplodingScoresOff)
     {
         gExplodingScorePool->DrawExplodingScores();
     }
 
+    PORT_PROF_SECTION(kDrawHud);
     gHud_2B00->DrawGui(); // user
 
     if (bDo_mike)
@@ -422,8 +428,12 @@ void Game::Draw()
         gMike_A80->DebugDrawProfiling();
     }
 
+    PORT_PROF_SECTION(kDrawEnd);
     pgbh_EndScene();
     FreeSurface();
+    PORT_PROF_COUNT(kTiles, gpMapRenderer->mDrawnTileCount);
+    PORT_PROF_COUNT(kSprites, gSpriteManager->mDrawnSpriteCount);
+    PORT_PROF_END();
 }
 
 MATCH_FUNC(0x4B9380)

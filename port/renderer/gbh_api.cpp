@@ -3,6 +3,7 @@
 #include "port_exports.hpp"
 #include "cmdlog.hpp"
 #include "renderer.hpp"
+#include "../src/prof.hpp"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -259,6 +260,7 @@ RTexture* Resolve(STexture* pTexture, int variant)
     }
     if (pData->mDirty[variant] || gRenderer->Evicted(pData->mTex[variant]))
     {
+        PORT_PROF_EXCLUDED(kTexConvert);
         const s32 w = pTexture->field_E_width;
         const s32 h = pTexture->field_10_height;
         if (pData->mImage)
@@ -486,6 +488,8 @@ u32 NearLights(const Vert* pWorld, s32 count)
         z0 = pWorld[i].z < z0 ? pWorld[i].z : z0;
         z1 = pWorld[i].z > z1 ? pWorld[i].z : z1;
     }
+    PORT_PROF_COUNT(kLitPrims, 1);
+    PORT_PROF_COUNT(kLightTests, gNumLights);
     u32 n = 0;
     for (u32 j = 0; j < gNumLights; j++)
     {
@@ -510,6 +514,8 @@ u32 NearLights(const Vert* pWorld, s32 count)
 // numNear: the primitive's NearLights.
 u32 LightVertex(const Vert& vert, u8 shade, u32 colour, u32 numNear)
 {
+    PORT_PROF_COUNT(kLitVerts, 1);
+    PORT_PROF_COUNT(kNearLights, numNear);
     f32 lr = 0.0f, lg = 0.0f, lb = 0.0f;
     f32 sr = 0.0f, sg = 0.0f, sb = 0.0f;
     for (u32 k = 0; k < numNear; k++)
@@ -689,29 +695,33 @@ void RenderVertsUnturned(u32 flags, STexture* pTexture, Vert* pVerts, s32 count,
     const bool shadowLit = softShadow && !fullAmbient;
     const bool perPixel = (lit || shadowLit) && gRenderer->Options().mPerPixelLighting;
     u32 unlit[4];
-    const u32 numNear = lit || (shadowLit && !perPixel) ? NearLights(pVerts + 4, count) : 0;
-    if (lit)
+    if (lit || shadowLit)
     {
-        for (s32 i = 0; i < count; i++)
+        PORT_PROF(kPrimLight);
+        const u32 numNear = lit || (shadowLit && !perPixel) ? NearLights(pVerts + 4, count) : 0;
+        if (lit)
         {
-            unlit[i] = pVerts[i].diff;
-            pVerts[i].diff = LightVertex(pVerts[i + 4], shade, pVerts[i].diff, numNear);
-        }
-    }
-    else if (shadowLit)
-    {
-        // A shadow takes away the ambient light and half of the lights', so it fades in a lit pool but not in
-        // the dark (per pixel in the shader).
-        for (s32 i = 0; i < count; i++)
-        {
-            unlit[i] = 0xFFFFFFFFu;
-            if (!perPixel)
+            for (s32 i = 0; i < count; i++)
             {
-                const u32 l = LightVertex(pVerts[i + 4], 255, 0xFFFFFFu, numNear);
-                const f32 sum = (f32)(((l >> 16) & 0xFF) + ((l >> 8) & 0xFF) + (l & 0xFF));
-                const f32 ratio = (gAmbient[0] + gAmbient[1] + gAmbient[2]) / (sum > 1.0f ? sum : 1.0f);
-                const u32 a = (u32)((pVerts[i].diff >> 24) * (0.5f + 0.5f * (ratio < 1.0f ? ratio : 1.0f)));
-                pVerts[i].diff = (pVerts[i].diff & 0xFFFFFFu) | (a << 24);
+                unlit[i] = pVerts[i].diff;
+                pVerts[i].diff = LightVertex(pVerts[i + 4], shade, pVerts[i].diff, numNear);
+            }
+        }
+        else if (shadowLit)
+        {
+            // A shadow takes away the ambient light and half of the lights', so it fades in a lit pool but not in
+            // the dark (per pixel in the shader).
+            for (s32 i = 0; i < count; i++)
+            {
+                unlit[i] = 0xFFFFFFFFu;
+                if (!perPixel)
+                {
+                    const u32 l = LightVertex(pVerts[i + 4], 255, 0xFFFFFFu, numNear);
+                    const f32 sum = (f32)(((l >> 16) & 0xFF) + ((l >> 8) & 0xFF) + (l & 0xFF));
+                    const f32 ratio = (gAmbient[0] + gAmbient[1] + gAmbient[2]) / (sum > 1.0f ? sum : 1.0f);
+                    const u32 a = (u32)((pVerts[i].diff >> 24) * (0.5f + 0.5f * (ratio < 1.0f ? ratio : 1.0f)));
+                    pVerts[i].diff = (pVerts[i].diff & 0xFFFFFFu) | (a << 24);
+                }
             }
         }
     }
@@ -810,6 +820,8 @@ void TurnPoint(f32 x, f32 y, f32 d, f32* pX, f32* pY, f32* pD)
 // Turned in place and put back: the game draws some vertices twice (a car's damage over its sprite).
 void RenderVerts(u32 flags, STexture* pTexture, Vert* pVerts, s32 count, u32 baseColour)
 {
+    PORT_PROF_PRIM(kPrim);
+    PORT_PROF_COUNT(kPrims, 1);
     if (gViewTurn.mKind == kTurnOff || (flags & (FLAG_INTERNAL_BLIT | FLAG_FIT_TO_TEXTURE)) || count < 3 || count > 4 ||
         pVerts[0].z <= 0.0f)
     {
@@ -975,6 +987,7 @@ GBH_EXPORT void GTA2_CC gbh_BeginScene()
 {
     gGlobals.mNumPolysDrawn = 0;
     gSceneCount++;
+    PORT_PROF_COUNT(kAmbient, (u32)gAmbient[0]);
     SyncOptions();
 #if defined(__i386__)
     if (gTraceScene && gSceneCount == gTraceScene)
@@ -1164,6 +1177,7 @@ GBH_EXPORT void GTA2_CC gbh_ResetLights()
 
 GBH_EXPORT s32 GTA2_CC gbh_AddLight(SLight* pLight)
 {
+    PORT_PROF_COUNT(kLightsAdded, 1);
     gLightAdded = gNumLights < 256;
     if (!gLightAdded)
     {
