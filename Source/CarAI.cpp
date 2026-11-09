@@ -4,6 +4,11 @@
 #include <assert.h>
 
 #include "CarAI.hpp"
+#if defined(GTA2_PORT)
+#include "../port/src/prof.hpp"
+#else
+#define PORT_PROF(part)
+#endif
 #include "CarPhysics.hpp"
 #include "Car.hpp"
 #include "Game.hpp"
@@ -5226,6 +5231,7 @@ void CarAI::UpdateTrainMovement()
 MATCH_FUNC(0x453bb0)
 void CarAI::AI_Service()
 {
+    PORT_PROF(kCarsCarAi);
     InitAIvars();
     this->mAngle = this->mCar->mCarSprite->mRotation;
     this->mCurrDirection = Ang16::GetAngleFace(mAngle);

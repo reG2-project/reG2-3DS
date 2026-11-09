@@ -1,6 +1,9 @@
 #include "Ped.hpp"
 #if defined(GTA2_PORT)
 #include "../port/src/twin_stick.hpp"
+#include "../port/src/prof.hpp"
+#else
+#define PORT_PROF(part)
 #endif
 #include "ped_move_target_type.hpp"
 #include "ped_attack_target_type.hpp"
@@ -3825,6 +3828,7 @@ void Ped::Occupation_AI()
 MATCH_FUNC(0x462280)
 void Ped::UpdateAI()
 {
+    PORT_PROF(kPedsPedAi);
     gRunPedObjectiveAI = 1;
     Ped::Occupation_AI();
     gObjectiveMayAct = 0;
@@ -4305,6 +4309,7 @@ void Ped::UpdateCharB4()
 MATCH_FUNC(0x462e70)
 bool Ped::PoolUpdate()
 {
+    PORT_PROF(kPedsPed);
     if (Is_occupation_elvis())
     {
         if (gElvisVoiceTimer > 0)

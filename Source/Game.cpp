@@ -1,6 +1,10 @@
 #include "Game.hpp"
 #if defined(GTA2_PORT)
 #include "../port/src/view.hpp"
+#include "../port/src/prof.hpp"
+#else
+#define PORT_PROF_SECTION(part)
+#define PORT_PROF_END()
 #endif
 #include "ped_group_type.hpp"
 #include "ped_class.hpp"
@@ -464,6 +468,7 @@ void Game::UpdatePaused()
 MATCH_FUNC(0x4B9410)
 void Game::UpdateGame()
 {
+    PORT_PROF_SECTION(kPlayers);
     Player** ppPlayerIter = mPlayers;
     u32 i = 0;
     while (i < mNumPlayers)
@@ -479,17 +484,25 @@ void Game::UpdateGame()
     gCollisionSoundQueue->Reset();
     gCollisionCounters->ResetCount();
 
+    PORT_PROF_SECTION(kLights);
     if (gLighting)
     {
         gLight_1D4CC->Service();
     }
 
+    PORT_PROF_SECTION(kCranes);
     gCranePool_D9C->CranesService();
+    PORT_PROF_SECTION(kCrushers);
     gCrusherPool_94->CrushersService();
+    PORT_PROF_SECTION(kGenerators);
     gGeneratorPool_14AC->GeneratorsService();
+    PORT_PROF_SECTION(kPeds);
     gPedManager->PedsService();
+    PORT_PROF_SECTION(kTransport);
     gPublicTransport_181C->PublicTransportService(); // trains & buses
+    PORT_PROF_SECTION(kGarages);
     gGarage_48->GaragesService();
+    PORT_PROF_SECTION(kCars);
     gCarManager_6C->CarsService();
 
     if (bDo_mike)
@@ -497,35 +510,43 @@ void Game::UpdateGame()
         gMike_A80->Service();
     }
 
+    PORT_PROF_SECTION(kTrafficLights);
     if (!bSkip_traffic_lights)
     {
         gTrafficLights_194->TrafficLightsService(); // traffic lights
     }
 
+    PORT_PROF_SECTION(kObjects);
     gObject_5C->ObjectsService();
 
+    PORT_PROF_SECTION(kScripts);
     if (!bSkip_mission)
     {
         gScriptManager->ExecuteScriptThreads(); // missions
     }
 
+    PORT_PROF_SECTION(kCrews);
     gEmergencyCrewPool->ServiceAll();
 
+    PORT_PROF_SECTION(kAmbulance);
     if (!bSkip_ambulance)
     {
         gAmbulance_110->AmbulancesService(); // ambulance
     }
 
+    PORT_PROF_SECTION(kPolice);
     if (!bSkip_police)
     {
         gPolice_7B8->Service();
     }
 
+    PORT_PROF_SECTION(kParticles);
     if (!bSkip_particles)
     {
         gParticle_8->ParticlesService();
     }
 
+    PORT_PROF_SECTION(kTileAnim);
     gTileAnim_2->UpdateTileAnimations();
 
     if (bDo_show_timing)
@@ -533,11 +554,15 @@ void Game::UpdateGame()
         gFpsCounter->ShowFps();
     }
 
+    PORT_PROF_SECTION(kHud);
     gHud_2B00->UpdateHUD();
     gpRng->AdvanceCycle(); // rng
+    PORT_PROF_SECTION(kDoors);
     gDoor_4D4->DoorsService();
+    PORT_PROF_SECTION(kFireTrucks);
     gFirefighterPool_54->FireEnginesService(); // fire engines
 
+    PORT_PROF_SECTION(kScores);
     if (!bExplodingScoresOff)
     {
         gExplodingScorePool->Update();
@@ -557,6 +582,7 @@ void Game::UpdateGame()
 MATCH_FUNC(0x4B9640)
 bool Game::ExecuteGame()
 {
+    PORT_PROF_SECTION(kControls);
     UpdateAllPlayersControls();
 
     switch (mGameState)
@@ -566,6 +592,7 @@ bool Game::ExecuteGame()
 
             if (!bSkip_audio)
             {
+                PORT_PROF_SECTION(kSound);
                 gRoot_sound.Service();
             }
             mGameState = GameState::Paused_2;
@@ -575,14 +602,17 @@ bool Game::ExecuteGame()
             UpdateGame();
             if (!bSkip_audio)
             {
+                PORT_PROF_SECTION(kSound);
                 gRoot_sound.Service();
             }
             break;
 
         case GameState::Paused_2:
+            PORT_PROF_SECTION(kPaused);
             UpdatePaused();
             if (!bSkip_audio)
             {
+                PORT_PROF_SECTION(kSound);
                 gRoot_sound.Service();
             }
             break;
@@ -590,6 +620,7 @@ bool Game::ExecuteGame()
         default:
             break;
     }
+    PORT_PROF_END();
     return UpdateExitTimer();
 }
 

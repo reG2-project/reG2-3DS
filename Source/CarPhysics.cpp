@@ -5,6 +5,11 @@
 #include "explosion_type.hpp"
 #include "car_impact_mode.hpp"
 #include "CarPhysics.hpp"
+#if defined(GTA2_PORT)
+#include "../port/src/prof.hpp"
+#else
+#define PORT_PROF(part)
+#endif
 #include "CarAI.hpp"
 #include "CarInfoTable.hpp"
 #include "Globals.hpp"
@@ -3692,6 +3697,7 @@ bool CarPhysics::UpdateLastMovementTimer()
 MATCH_FUNC(0x562fe0)
 bool CarPhysics::ProcessCarPhysicsStateMachine()
 {
+    PORT_PROF(kCarsCarPhysics);
     char_type bCollided;
 
     SetCurrentCarInfoAndModelPhysics();

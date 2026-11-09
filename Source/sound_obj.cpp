@@ -1,4 +1,9 @@
 #include "sound_obj.hpp"
+#if defined(GTA2_PORT)
+#include "../port/src/prof.hpp"
+#else
+#define PORT_PROF(part)
+#endif
 #include "explosion_type.hpp"
 // Keep cSampleManager.hpp early: the include order changes the order VC6 emits the
 // sampManager and sound_obj calls in e.g. Type_9_InitCarEngineStartSound and SelectCarCarCollisionSound
@@ -4024,6 +4029,7 @@ void sound_obj::IncrementAudioEntitiesAge()
 MATCH_FUNC(0x41A730)
 void sound_obj::InterrogateAudioEntities()
 {
+    PORT_PROF(kSoundEntities);
     Camera* pCamera;
 
     if (mType5Idx != 0 && (pCamera = mAudioEntities[mType5Idx].mpObj->mpAny.pCamera_0xBC) != NULL)
@@ -4199,6 +4205,7 @@ void sound_obj::AddReleasingSounds()
 MATCH_FUNC(0x41AB80)
 void sound_obj::ProcessActiveQueues()
 {
+    PORT_PROF(kSoundQueues);
     SoundPos position;
     f32 x;
     f32 y;
