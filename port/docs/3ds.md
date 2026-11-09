@@ -316,6 +316,14 @@ New 3DS mode gives the same figures: the game's needs do not depend on the model
 city (6 MB) is the only addition still to come with the DSP. The minimap adds its 752 KB of linear memory
 and 64 KB of heap.
 
+Going back to the frontend after a game is the tight spot: the frontend allocates while the heap is in
+the pieces the city left (19 MB free in a 26.5 MB arena, the largest piece 4 to 6.5 MB, 7.5 MB still in
+use). Its 26 TGA backgrounds took 17 MB at 32 bits per texel, in blocks up to 1.2 MB, and after a long
+session that failed ("Couldn't allocate memory for targa file"). They are kept at their 16 bits and
+expanded for the upload only: the frontend takes 12.4 MB (20 MB of heap in use in all, against 28.6) and
+fits in what the city freed. With the heap cut to 35 MB in a test build, four game and frontend cycles
+keep 7.3 MB free at the top.
+
 ### Speed
 
 Azahar charges each instruction a fixed number of ARM11 cycles from a table (no caches, memory latency

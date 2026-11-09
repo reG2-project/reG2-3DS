@@ -48,13 +48,21 @@ struct TexData
 {
     RTexture* mTex[2];
     bool mDirty[2];
-    bool mImage; // 16-bit TGA image, already converted to mPixels
+    bool mImage; // 16-bit TGA image, kept in mPixels as X1R5G5B5, top row first
     u32 mEpoch;  // gTextureEpoch of the last conversion
-    std::vector<u32> mPixels;
+    std::vector<u16> mPixels;
 };
 
-// What every texel of a 16-bit TGA image is, as gbh_LoadImage converts it: opaque, 5-6-5 bits by replication.
+// What every texel of a 16-bit TGA image is, as ImageTexel expands it: opaque, 5-6-5 bits by replication.
 const u32 kImageTexels = RTX_KNOWN | RTX_OPAQUE | RTX_BINARY | RTX_565;
+
+// An X1R5G5B5 texel of a TGA image as RGBA. Green goes 5 -> 6 bits by a shift, as the original's 555 to 565
+// conversion.
+u32 ImageTexel(u32 p)
+{
+    const u32 r = (p >> 10) & 31, g = ((p >> 5) & 31) << 1, b = p & 31;
+    return ((r << 3) | (r >> 2)) | (((g << 2) | (g >> 4)) << 8) | (((b << 3) | (b >> 2)) << 16) | 0xFF000000u;
+}
 
 struct ImageEntry
 {
@@ -249,7 +257,13 @@ RTexture* Resolve(STexture* pTexture, int variant)
         const s32 h = pTexture->field_10_height;
         if (pData->mImage)
         {
-            gRenderer->UploadTexture(pData->mTex[variant], w, h, &pData->mPixels[0], RMIP_NONE, kImageTexels);
+            // Expanded only for the upload: the frontend's backgrounds would take 17 MB of heap at 32 bits.
+            std::vector<u32> rgba((size_t)w * h);
+            for (size_t i = 0; i < rgba.size(); i++)
+            {
+                rgba[i] = ImageTexel(pData->mPixels[i]);
+            }
+            gRenderer->UploadTexture(pData->mTex[variant], w, h, &rgba[0], RMIP_NONE, kImageTexels);
         }
         else if (pTexture->field_14_original_pixel_data_ptr && pTexture->field_18_pPaltData && w > 0 && h > 0)
         {
@@ -1486,14 +1500,7 @@ GBH_EXPORT s32 GTA2_CC gbh_LoadImage(SImage* pImage)
     for (s32 y = 0; y < h; y++)
     {
         const u16* row = src + (size_t)(topDown ? y : (h - 1 - y)) * w;
-        u32* dst = &pData->mPixels[(size_t)y * w];
-        for (s32 x = 0; x < w; x++)
-        {
-            const u32 p = row[x];
-            // Green goes 5 -> 6 bits by a shift, as the original's 555 to 565 conversion.
-            const u32 r = (p >> 10) & 31, g = ((p >> 5) & 31) << 1, b = p & 31;
-            dst[x] = ((r << 3) | (r >> 2)) | (((g << 2) | (g >> 4)) << 8) | (((b << 3) | (b >> 2)) << 16) | 0xFF000000u;
-        }
+        memcpy(&pData->mPixels[(size_t)y * w], row, (size_t)w * sizeof(u16));
     }
     gImages[slot].mLoaded = 1;
     gImages[slot].mWidth = w;
