@@ -758,8 +758,11 @@ void port_UpdatePad()
     // The console's R and L are buttons: all the way.
     sCarForward = CarAnalog(console || !car || key(0) || Button(SDL_GAMEPAD_BUTTON_DPAD_UP), Axis(SDL_GAMEPAD_AXIS_RIGHT_TRIGGER), kTriggerDeadZone);
     sCarBackward = CarAnalog(console || !car || key(1) || Button(SDL_GAMEPAD_BUTTON_DPAD_DOWN), Axis(SDL_GAMEPAD_AXIS_LEFT_TRIGGER), kTriggerDeadZone);
-    // From three fifths of the wheels' turn: less, a car at town speeds slides sideways without turning.
-    sCarSteer = car && steer < 1.0f ? 0.6f + 0.4f * steer : 1.0f;
+    // From three fifths of the wheels' turn: less, a car at town speeds slides sideways without turning. The
+    // console's short circle pad starts at three tenths, for a finer touch, and reaches a full turn near its edge.
+    const float least = console ? 0.3f : 0.6f;
+    const float span = console ? 0.75f : 0.4f;
+    sCarSteer = car && steer < 1.0f ? SDL_min(1.0f, least + span * steer) : 1.0f;
     for (int i = 0; i < kNumControls; i++)
     {
         // TWIN STICK on foot: the stick, d-pad and movement second keys move (port_TwinStickInput), RT attacks.
