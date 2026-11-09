@@ -21,6 +21,8 @@ extern "C" const u8 render_shbin[];
 extern "C" const u8 render_shbin_end[];
 extern "C" const u8 map_cache_shbin[];
 extern "C" const u8 map_cache_shbin_end[];
+// citro3d's context begins with the GX command queue it binds for its frames (C3D_Context in citro3d's internal.h).
+extern "C" gxCmdQueue_s __C3D_Context;
 
 namespace
 {
@@ -88,9 +90,18 @@ const u32 kStatePremultiplied = 1u << 31;
 const u32 kStateNoMip = 1u << 30;
 // Batch state only: the texture is A8, drawn in the vertex colour with its alpha.
 const u32 kStateAlphaTexture = 1u << 29;
-// Linear memory for the game's textures, least recently drawn evicted beyond it. The rest of the 16 MB holds
-// the vertices, command buffers, the port's own textures and some headroom. GTA2_3DS_TEXTURE_BUDGET=<KB> sets it.
+// The game's textures go to VRAM while it has room, else to linear memory; least recently drawn are evicted beyond
+// what VRAM had free at start plus this share of linear memory. GTA2_3DS_TEXTURE_BUDGET=<KB> sets the share.
 const u32 kTextureBudget = 8192 * 1024;
+// Textures of their own of these sizes go to VRAM: made in a staging buffer in linear memory, copied by the GPU's DMA.
+// The smallest is above kVramHole, so none takes that hole.
+const u32 kMaxStaging = 512 * 1024;
+const u32 kMinStaging = 1024;
+// libctru's VRAM allocator takes its pools as all free again once bank A has no free block left (vramMemAlignAt tests
+// the pool's first block): a hole of this size between two blocks kept always leaves one.
+const u32 kVramHole = 0x80;
+// GX queue entries left for citro3d: the frame's command list, the screens' transfers and clears.
+const u16 kQueueReserve = 8;
 const u32 kBatchStateMask = RS_ALPHA_TEST | RS_BLEND_ALPHA | RS_BLEND_ADD | RS_FILTER_LINEAR | RS_NO_TEXTURE;
 // Evictable 64x64 textures with mip levels (tiles, 64 texel sprite slots) share atlas pages by format: one batch for a
 // run of them. Each level's border repeats its edges (a texel at 8x8), so filtering sees a clamped texture of its own.
@@ -101,6 +112,20 @@ const s32 kSlotBorder = kSlotSize >> kSlotLevels;
 const s32 kSlotPitch = kSlotSize + 2 * kSlotBorder;
 const s32 kSlotsPerRow = kAtlasSize / kSlotPitch;
 const s32 kSlotsPerPage = kSlotsPerRow * kSlotsPerRow;
+
+// The first level whose slots are not whole 8x8 tiles. A VRAM page keeps it and the smaller levels in a shadow in
+// linear memory, copied whole; the larger levels go slot by slot.
+constexpr s32 FirstSplitLevel(s32 l)
+{
+    return l > kSlotLevels || ((kSlotPitch >> l) & 7) ? l : FirstSplitLevel(l + 1);
+}
+const s32 kShadowLevel = FirstSplitLevel(0);
+static_assert(kShadowLevel > 0 && kShadowLevel <= kSlotLevels, "slots in whole tiles at level 0, split below");
+
+bool InVram(const void* p)
+{
+    return (u32)p - OS_VRAM_VADDR < OS_VRAM_SIZE;
+}
 
 // Morton order of the low 3 bits of x inside an 8x8 tile; y's bits go one place higher.
 const u8 kMorton[8] = {0x00, 0x01, 0x04, 0x05, 0x10, 0x11, 0x14, 0x15};
@@ -360,9 +385,11 @@ struct UploadJob
     GPU_TEXCOLOR mFmt;
     bool mPremultiply;
     u8* mDst[8];    // each level's storage: the texture's, or for a slot its page's
-    s32 mPageSize;  // a slot's page size, 0 for a texture of its own
-    s32 mSlotX, mSlotY;
+    bool mSlot;
+    s32 mDstW[8], mDstX[8], mDstY[8]; // a slot's: each level's storage width, and the slot's corner in it
     u32 mBytes;     // a texture of its own: what its levels take
+    u8* mStaging;   // for VRAM: where the texels are made, for its copies queued once they are written
+    bool mCopied;
     // Under the worker's lock: where the job is, and a request to stop part way.
     u8 mState;
     std::atomic<bool> mStop;
@@ -511,6 +538,8 @@ struct AtlasPage
     bool mTaken[kSlotsPerPage];
     u32 mFreedFrame[kSlotsPerPage]; // a slot freed in the current frame waits for the next
     s32 mUsed;
+    u8* mShadow; // in VRAM: its levels from kShadowLevel on, copied to it when mShadowDirty
+    bool mShadowDirty;
 };
 
 struct C3DRenderer::Impl : HudTheme::Sink
@@ -595,8 +624,15 @@ struct C3DRenderer::Impl : HudTheme::Sink
     u32 mFrame;
     // Textures the GPU may still read: freed once the next frame has begun (C3D_FrameBegin waits for the GPU).
     std::vector<C3D_Tex> mPendingFree;
-    // Textures with storage and their bytes in linear memory; evictions and allocations that did not fit.
-    u32 mTexCount, mTexBytes, mEvictions, mAllocFails;
+    // Textures with storage and their bytes, those in VRAM; evictions and allocations that did not fit.
+    u32 mTexCount, mTexBytes, mVramBytes, mEvictions, mAllocFails;
+    // Textures to VRAM: citro3d's GX queue, which their copies join; staging buffers freed once the copies queued so
+    // far have run; the copies and the waits for them.
+    bool mVram;
+    void* mVramGuard[2];
+    gxCmdQueue_s* mGxQueue;
+    std::vector<u8*> mStagingDone;
+    u32 mCopies, mDrains;
     // Evictable textures with storage, least recently drawn first, their bytes and the budget for them.
     RTexture* mLruHead;
     RTexture* mLruTail;
@@ -637,10 +673,16 @@ struct C3DRenderer::Impl : HudTheme::Sink
     void DrawTriangles(const RVertex* pVerts, s32 count, RTexture* pTex, u32 state) override;
     void ApplyState(u32 state, const ScreenRect& scissor);
     void Draw(RTexture* pTex, u32 state, const ScreenRect& scissor, s32 first, s32 count);
-    bool Allocate(RTexture* pTex, s32 tw, s32 th, GPU_TEXCOLOR fmt, s32 levels, bool clear);
-    bool AllocateSlot(RTexture* pTex, GPU_TEXCOLOR fmt);
-    bool FindSlot(RTexture* pTex, GPU_TEXCOLOR fmt);
-    bool AddPage(GPU_TEXCOLOR fmt);
+    bool Allocate(RTexture* pTex, s32 tw, s32 th, GPU_TEXCOLOR fmt, s32 levels, bool clear, bool vram);
+    bool AllocateSlot(RTexture* pTex, GPU_TEXCOLOR fmt, bool vram);
+    bool FindSlot(RTexture* pTex, GPU_TEXCOLOR fmt, bool vram);
+    bool AddPage(GPU_TEXCOLOR fmt, bool vram);
+    void FreePage(size_t i);
+    void CopyToVram(const u8* pSrc, u8* pDst, u32 rowBytes, u32 rows, u32 dstPitch);
+    void CopyJob(RTexture* pTex, UploadJob* pJob);
+    void DrainCopies();
+    void FreeStaging();
+    void CopyShadows();
     void EndUpload(RTexture* pTex, bool write, bool wait);
     void EndDrawnUploads();
     static void WorkerMain(void* pArg);
@@ -714,6 +756,10 @@ void C3DRenderer::Impl::Release(RTexture* pTex)
     }
     mTexCount--;
     mTexBytes -= pTex->mBytes;
+    if (InVram(pTex->mTex.data))
+    {
+        mVramBytes -= pTex->mBytes;
+    }
     if (pTex->mUsedFrame == mFrame)
     {
         mPendingFree.push_back(pTex->mTex);
@@ -738,7 +784,7 @@ static u32 LevelsBytes(s32 size, s32 levels, GPU_TEXCOLOR fmt)
 static bool WriteTexels(const UploadJob& job, UploadScratch& scratch, const std::atomic<bool>* pStop)
 {
     const s32 kBand = 16;
-    const bool slot = job.mPageSize > 0;
+    const bool slot = job.mSlot;
     const u32 bytes = BitsPerTexel(job.mFmt) / 8;
     u32* pHalf = 0;
     if (job.mLevels > 0)
@@ -754,8 +800,8 @@ static bool WriteTexels(const UploadJob& job, UploadScratch& scratch, const std:
         // A slot's level goes straight to its page, past its border; one at an odd place (8x8) would split the 2x2
         // blocks, so it is made apart and copied.
         const s32 border = slot ? kSlotBorder >> l : 0;
-        const s32 x0 = slot ? job.mSlotX >> l : 0, y0 = slot ? job.mSlotY >> l : 0;
-        const s32 pageW = job.mPageSize >> l;
+        const s32 x0 = slot ? job.mDstX[l] : 0, y0 = slot ? job.mDstY[l] : 0;
+        const s32 pageW = job.mDstW[l];
         const bool apart = slot && ((x0 + border) & 1);
         if (apart)
         {
@@ -813,13 +859,13 @@ static bool WriteTexels(const UploadJob& job, UploadScratch& scratch, const std:
     return true;
 }
 
-// A free slot for pTex in a page of that format, unless the GPU may still read what was there.
-bool C3DRenderer::Impl::FindSlot(RTexture* pTex, GPU_TEXCOLOR fmt)
+// A free slot for pTex in a page of that format (in VRAM only if vram), unless the GPU may still read what was there.
+bool C3DRenderer::Impl::FindSlot(RTexture* pTex, GPU_TEXCOLOR fmt, bool vram)
 {
     for (size_t i = 0; i < mPages.size(); i++)
     {
         AtlasPage* pPage = mPages[i];
-        if (pPage->mTex.mTex.fmt != fmt || pPage->mUsed == kSlotsPerPage)
+        if (pPage->mTex.mTex.fmt != fmt || pPage->mUsed == kSlotsPerPage || (pPage->mShadow && !vram))
         {
             continue;
         }
@@ -838,12 +884,21 @@ bool C3DRenderer::Impl::FindSlot(RTexture* pTex, GPU_TEXCOLOR fmt)
     return false;
 }
 
-bool C3DRenderer::Impl::AddPage(GPU_TEXCOLOR fmt)
+// A page in VRAM, with its shadow, if asked and there is room; else in linear memory.
+bool C3DRenderer::Impl::AddPage(GPU_TEXCOLOR fmt, bool vram)
 {
     AtlasPage* pPage = new AtlasPage();
     memset(pPage, 0, sizeof(*pPage));
+    const C3D_TexInitParams vramParams = {(u16)kAtlasSize, (u16)kAtlasSize, (u8)kSlotLevels, fmt, GPU_TEX_2D, true};
     const C3D_TexInitParams params = {(u16)kAtlasSize, (u16)kAtlasSize, (u8)kSlotLevels, fmt, GPU_TEX_2D, false};
-    if (!C3D_TexInitWithParams(&pPage->mTex.mTex, NULL, params))
+    const u32 shadowOffset = LevelsBytes(kAtlasSize, kShadowLevel - 1, fmt);
+    const u32 bytes = LevelsBytes(kAtlasSize, kSlotLevels, fmt);
+    if (vram && (pPage->mShadow = (u8*)linearAlloc(bytes - shadowOffset)) && !C3D_TexInitWithParams(&pPage->mTex.mTex, NULL, vramParams))
+    {
+        linearFree(pPage->mShadow);
+        pPage->mShadow = 0;
+    }
+    if (!pPage->mShadow && !C3D_TexInitWithParams(&pPage->mTex.mTex, NULL, params))
     {
         delete pPage;
         return false;
@@ -851,19 +906,122 @@ bool C3DRenderer::Impl::AddPage(GPU_TEXCOLOR fmt)
     C3D_TexSetWrap(&pPage->mTex.mTex, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
     pPage->mTex.mValid = true;
     pPage->mTex.mLevels = (u8)kSlotLevels;
-    pPage->mTex.mBytes = LevelsBytes(kAtlasSize, kSlotLevels, fmt);
+    pPage->mTex.mBytes = bytes;
     mTexCount++;
-    mTexBytes += pPage->mTex.mBytes;
-    mPages.push_back(pPage);
+    mTexBytes += bytes;
+    // FindSlot fills the VRAM pages first.
+    if (pPage->mShadow)
+    {
+        mVramBytes += bytes;
+        mPages.insert(mPages.begin(), pPage);
+    }
+    else
+    {
+        mPages.push_back(pPage);
+    }
     return true;
 }
 
+// Frees page i, once the GPU is done with its slots (none in use since the previous frame).
+void C3DRenderer::Impl::FreePage(size_t i)
+{
+    AtlasPage* pPage = mPages[i];
+    Release(&pPage->mTex);
+    if (pPage->mShadow)
+    {
+        linearFree(pPage->mShadow);
+    }
+    delete pPage;
+    mPages.erase(mPages.begin() + i);
+}
+
+// Queues the DMA copy of rows of rowBytes, one after the other from pSrc (flushed), to rows dstPitch bytes apart. In a
+// frame only: citro3d's queue then runs at C3D_FrameEnd, ahead of the frame's command list, or here when short.
+void C3DRenderer::Impl::CopyToVram(const u8* pSrc, u8* pDst, u32 rowBytes, u32 rows, u32 dstPitch)
+{
+    if (mGxQueue->numEntries + 1 + kQueueReserve > mGxQueue->maxEntries)
+    {
+        DrainCopies();
+    }
+    GX_TextureCopy((u32*)pSrc, GX_BUFFER_DIM(rowBytes / 16, 0), (u32*)pDst, GX_BUFFER_DIM(rowBytes / 16, (dstPitch - rowBytes) / 16),
+                   rowBytes * rows, GX_TRANSFER_RAW_COPY(1));
+    mCopies++;
+}
+
+// The written texels of a job for VRAM to their place: a slot's larger levels as blocks of its own tiles, its page's
+// shadow later (CopyShadows); a texture of its own whole.
+void C3DRenderer::Impl::CopyJob(RTexture* pTex, UploadJob* pJob)
+{
+    if (!pJob->mStaging || pJob->mCopied || !mInFrame)
+    {
+        return;
+    }
+    pJob->mCopied = true;
+    AtlasPage* pPage = pTex->mPage;
+    if (!pPage)
+    {
+        CopyToVram(pJob->mStaging, (u8*)pTex->mTex.data, pJob->mBytes, 1, pJob->mBytes);
+        return;
+    }
+    const u32 bytes = BitsPerTexel(pPage->mTex.mTex.fmt) / 8;
+    const s32 x0 = pTex->mSlot % kSlotsPerRow * kSlotPitch;
+    const s32 y0 = pTex->mSlot / kSlotsPerRow * kSlotPitch;
+    for (s32 l = 0; l < kShadowLevel; l++)
+    {
+        const u32 pitch = kSlotPitch >> l, rowBytes = pitch * 8 * bytes, levelRowBytes = (u32)(kAtlasSize >> l) * 8 * bytes;
+        u8* pLevel = (u8*)C3D_Tex2DGetImagePtr(&pPage->mTex.mTex, l, NULL);
+        CopyToVram(pJob->mDst[l], pLevel + (u32)(y0 >> l) / 8 * levelRowBytes + (u32)(x0 >> l) / 8 * 64 * bytes, rowBytes, pitch / 8,
+                   levelRowBytes);
+    }
+    pPage->mShadowDirty = true;
+}
+
+// Runs the frame's queue so far (copies, clears) and waits for it: its entries are free again.
+void C3DRenderer::Impl::DrainCopies()
+{
+    gxCmdQueueRun(mGxQueue);
+    gxCmdQueueWait(mGxQueue, -1);
+    gxCmdQueueStop(mGxQueue);
+    gxCmdQueueClear(mGxQueue);
+    FreeStaging();
+    mDrains++;
+}
+
+// The staging buffers of the jobs ended, their copies done.
+void C3DRenderer::Impl::FreeStaging()
+{
+    for (size_t i = 0; i < mStagingDone.size(); i++)
+    {
+        linearFree(mStagingDone[i]);
+    }
+    mStagingDone.clear();
+}
+
+// The shadows written to since the last frame to their pages, ahead of the frame's draws in the queue.
+void C3DRenderer::Impl::CopyShadows()
+{
+    for (size_t i = 0; i < mPages.size(); i++)
+    {
+        AtlasPage* pPage = mPages[i];
+        if (!pPage->mShadowDirty)
+        {
+            continue;
+        }
+        const GPU_TEXCOLOR fmt = pPage->mTex.mTex.fmt;
+        const u32 offset = LevelsBytes(kAtlasSize, kShadowLevel - 1, fmt);
+        const u32 bytes = LevelsBytes(kAtlasSize, kSlotLevels, fmt) - offset;
+        GSPGPU_FlushDataCache(pPage->mShadow, bytes);
+        CopyToVram(pPage->mShadow, (u8*)pPage->mTex.mTex.data + offset, bytes, 1, bytes);
+        pPage->mShadowDirty = false;
+    }
+}
+
 // A slot for new texels, as Allocate: in the cache, each slot counts for its share of its page.
-bool C3DRenderer::Impl::AllocateSlot(RTexture* pTex, GPU_TEXCOLOR fmt)
+bool C3DRenderer::Impl::AllocateSlot(RTexture* pTex, GPU_TEXCOLOR fmt, bool vram)
 {
     if (pTex->mValid)
     {
-        if (pTex->mPage && pTex->mTex.fmt == fmt && pTex->mUsedFrame != mFrame)
+        if (pTex->mPage && pTex->mTex.fmt == fmt && pTex->mUsedFrame != mFrame && (vram || !pTex->mPage->mShadow))
         {
             return true;
         }
@@ -873,9 +1031,9 @@ bool C3DRenderer::Impl::AllocateSlot(RTexture* pTex, GPU_TEXCOLOR fmt)
     while (pTex->mEvictable && mCachedBytes + bytes > mBudget && EvictOne())
     {
     }
-    while (!FindSlot(pTex, fmt))
+    while (!FindSlot(pTex, fmt, vram))
     {
-        if (!AddPage(fmt) && !EvictOne())
+        if (!AddPage(fmt, vram) && !EvictOne())
         {
             mAllocFails++;
             pTex->mEvicted = true;
@@ -929,12 +1087,20 @@ void C3DRenderer::Impl::EndUpload(RTexture* pTex, bool write, bool wait)
         pJob->mMainWrote = true;
         mMainJobs++;
     }
+    if (state == kJobWritten || pJob->mMainWrote)
+    {
+        CopyJob(pTex, pJob);
+    }
     if (state == kJobRunning)
     {
         return;
     }
     pTex->mJob = 0;
     mUploading.erase(std::find(mUploading.begin(), mUploading.end(), pTex));
+    if (pJob->mStaging)
+    {
+        mStagingDone.push_back(pJob->mStaging);
+    }
     delete pJob;
 }
 
@@ -995,14 +1161,16 @@ void C3DRenderer::Impl::WorkerMain(void* pArg)
     LightLock_Unlock(&p->mWorkLock);
 }
 
-// Storage for new texels: kept when the GPU is done with it and it has the size and format, else replaced.
-bool C3DRenderer::Impl::Allocate(RTexture* pTex, s32 tw, s32 th, GPU_TEXCOLOR fmt, s32 levels, bool clear)
+// Storage for new texels: kept when the GPU is done with it and it has the size and format, else replaced. vram: in
+// VRAM if it has room.
+bool C3DRenderer::Impl::Allocate(RTexture* pTex, s32 tw, s32 th, GPU_TEXCOLOR fmt, s32 levels, bool clear, bool vram)
 {
     if (pTex->mValid)
     {
         const bool inFlight = pTex->mUsedFrame == mFrame;
         pTex->mTex.maxLevel = pTex->mLevels;
-        if (!inFlight && pTex->mTex.width == tw && pTex->mTex.height == th && pTex->mTex.fmt == fmt && pTex->mLevels == levels)
+        if (!inFlight && pTex->mTex.width == tw && pTex->mTex.height == th && pTex->mTex.fmt == fmt && pTex->mLevels == levels &&
+            (vram || !InVram(pTex->mTex.data)))
         {
             return true;
         }
@@ -1012,6 +1180,7 @@ bool C3DRenderer::Impl::Allocate(RTexture* pTex, s32 tw, s32 th, GPU_TEXCOLOR fm
     {
         mBoundTex = 0;
     }
+    const C3D_TexInitParams vramParams = {(u16)tw, (u16)th, (u8)levels, fmt, GPU_TEX_2D, true};
     const C3D_TexInitParams params = {(u16)tw, (u16)th, (u8)levels, fmt, GPU_TEX_2D, false};
     u32 bytes = 0;
     for (s32 l = 0; l <= levels; l++)
@@ -1023,7 +1192,8 @@ bool C3DRenderer::Impl::Allocate(RTexture* pTex, s32 tw, s32 th, GPU_TEXCOLOR fm
     }
     bool fits;
     // Should no free block be big enough, older textures go until one is.
-    while (!(fits = C3D_TexInitWithParams(&pTex->mTex, NULL, params)) && EvictOne())
+    while (!(fits = (vram && C3D_TexInitWithParams(&pTex->mTex, NULL, vramParams)) || C3D_TexInitWithParams(&pTex->mTex, NULL, params)) &&
+           EvictOne())
     {
     }
     if (!fits)
@@ -1051,6 +1221,10 @@ bool C3DRenderer::Impl::Allocate(RTexture* pTex, s32 tw, s32 th, GPU_TEXCOLOR fm
     pTex->mEvicted = false;
     mTexCount++;
     mTexBytes += pTex->mBytes;
+    if (InVram(pTex->mTex.data))
+    {
+        mVramBytes += pTex->mBytes;
+    }
     if (pTex->mEvictable)
     {
         LruAppend(pTex);
@@ -1098,6 +1272,7 @@ void C3DRenderer::Impl::BeginFrame()
     mInFrame = true;
     mFrameDrew = false;
     mFrame++;
+    FreeStaging();
     for (size_t i = 0; i < mPendingFree.size(); i++)
     {
         C3D_TexDelete(&mPendingFree[i]);
@@ -1109,9 +1284,7 @@ void C3DRenderer::Impl::BeginFrame()
         {
             // citro3d keeps the bound pointer: never leave it dangling.
             C3D_TexBind(0, &mWhite->mTex);
-            Release(&mPages[i]->mTex);
-            delete mPages[i];
-            mPages.erase(mPages.begin() + i--);
+            FreePage(i--);
         }
     }
     if (mNeedClear)
@@ -1779,8 +1952,26 @@ bool C3DRenderer::Init(Loader, const char** ppError)
     p->mUniAnyLights = shaderInstanceGetUniformLocation(p->mProgram.vertexShader, "anyLights");
     p->mNeedClear = true;
     p->mFrame = 1;
+    // GTA2_3DS_VRAM=0: textures in linear memory only.
+    const char* pVram = getenv("GTA2_3DS_VRAM");
+    p->mGxQueue = &__C3D_Context;
+    p->mVram = !(pVram && !strcmp(pVram, "0")) && p->mGxQueue->entries && p->mGxQueue->maxEntries > kQueueReserve + kShadowLevel;
+    if (p->mVram)
+    {
+        u8* pBlocks[3];
+        for (s32 i = 0; i < 3; i++)
+        {
+            pBlocks[i] = (u8*)vramAllocAt(kVramHole, VRAM_ALLOC_A);
+        }
+        p->mVram = pBlocks[0] && pBlocks[1] == pBlocks[0] + kVramHole && pBlocks[2] == pBlocks[1] + kVramHole;
+        vramFree(pBlocks[1]);
+        p->mVramGuard[0] = pBlocks[0];
+        p->mVramGuard[1] = pBlocks[2];
+    }
     const char* pBudget = getenv("GTA2_3DS_TEXTURE_BUDGET");
-    p->mBudget = pBudget ? (u32)atoi(pBudget) * 1024 : kTextureBudget;
+    p->mBudget = (pBudget ? (u32)atoi(pBudget) * 1024 : kTextureBudget) + (p->mVram ? vramSpaceFree() : 0);
+    fprintf(stderr, "c3d: VRAM %lu KB free (%s), texture budget %lu KB\n", (u32)vramSpaceFree() / 1024,
+            p->mVram ? "textures first" : "unused", p->mBudget / 1024);
     LightLock_Init(&p->mWorkLock);
     CondVar_Init(&p->mWorkCv);
     CondVar_Init(&p->mDoneCv);
@@ -1839,14 +2030,21 @@ void C3DRenderer::Shutdown()
     p->mSurface = 0;
     FreeTexture(p->mWhite);
     p->mWhite = 0;
-    for (size_t i = 0; i < p->mPages.size(); i++)
+    while (!p->mPages.empty())
     {
-        C3D_TexDelete(&p->mPages[i]->mTex.mTex);
-        delete p->mPages[i];
+        p->FreePage(p->mPages.size() - 1);
     }
     for (size_t i = 0; i < p->mPendingFree.size(); i++)
     {
         C3D_TexDelete(&p->mPendingFree[i]);
+    }
+    p->FreeStaging();
+    for (s32 i = 0; i < 2; i++)
+    {
+        if (p->mVramGuard[i])
+        {
+            vramFree(p->mVramGuard[i]);
+        }
     }
     shaderProgramFree(&p->mProgram);
     DVLB_Free(p->mDvlb);
@@ -1938,7 +2136,7 @@ void C3DRenderer::CompositeSurface(const u16* pPixels, s32 pitchBytes, s32 width
     // Begun first: the GPU is then done with the previous frame's surface, which is rewritten in place.
     p->BeginFrame();
     RTexture* pTex = p->mSurface;
-    if (!p->Allocate(pTex, Pow2(width), Pow2(height), GPU_RGBA5551, 0, true))
+    if (!p->Allocate(pTex, Pow2(width), Pow2(height), GPU_RGBA5551, 0, true, false))
     {
         return;
     }
@@ -2007,6 +2205,7 @@ void C3DRenderer::Present(s32, s32)
         GSPGPU_FlushDataCache(p->mVerts, p->mVertCount * sizeof(C3DVertex));
     }
     p->EndDrawnUploads();
+    p->CopyShadows();
     const u64 t0 = svcGetSystemTick();
     {
         PORT_PROF(kPresentFrameEnd);
@@ -2014,6 +2213,7 @@ void C3DRenderer::Present(s32, s32)
     }
     p->mInFrame = false;
     Stats3DS_SetTextures(p->mTexCount, p->mTexBytes, p->mCachedBytes, p->mEvictions, p->mAllocFails);
+    Stats3DS_SetVram(p->mVramBytes, p->mCopies, p->mDrains);
     if (p->mWorker)
     {
         LightLock_Lock(&p->mWorkLock);
@@ -2036,6 +2236,12 @@ void C3DRenderer::UploadTexture(RTexture* pTex, s32 width, s32 height, const u32
     if (!p || !pTex || !pRgba || width <= 0 || height <= 0)
     {
         return;
+    }
+    // The game's textures may go to VRAM, by copies queued in the frame.
+    const bool vram = p->mVram && pTex->mEvictable;
+    if (vram)
+    {
+        p->BeginFrame();
     }
     if (pTex == p->mBatchTex || (pTex->mPage && &pTex->mPage->mTex == p->mBatchTex))
     {
@@ -2066,9 +2272,27 @@ void C3DRenderer::UploadTexture(RTexture* pTex, s32 width, s32 height, const u32
         fmt = GPU_RGBA4;
     }
     const bool slot = pTex->mEvictable && tw == kSlotSize && th == kSlotSize && levels == kSlotLevels;
-    if (slot ? !p->AllocateSlot(pTex, fmt) : !p->Allocate(pTex, tw, th, fmt, levels, false))
+    // For VRAM, a staging buffer for the texels: a slot's blocks of its larger levels, or a texture's levels.
+    const u32 bytes = BitsPerTexel(fmt) / 8;
+    u32 stagingBytes = slot ? LevelsBytes(kSlotPitch, kShadowLevel - 1, fmt) : 0;
+    for (s32 l = 0; !slot && l <= levels; l++)
     {
+        stagingBytes += (u32)(tw >> l) * (u32)(th >> l) * bytes;
+    }
+    u8* pStaging = vram && stagingBytes >= kMinStaging && stagingBytes <= kMaxStaging ? (u8*)linearAlloc(stagingBytes) : 0;
+    if (slot ? !p->AllocateSlot(pTex, fmt, pStaging != 0) : !p->Allocate(pTex, tw, th, fmt, levels, false, pStaging != 0))
+    {
+        if (pStaging)
+        {
+            linearFree(pStaging);
+        }
         return;
+    }
+    C3D_Tex* pStorage = slot ? &pTex->mPage->mTex.mTex : &pTex->mTex;
+    if (pStaging && !InVram(pStorage->data))
+    {
+        linearFree(pStaging);
+        pStaging = 0;
     }
     mUploads++;
     pTex->mVersion++;
@@ -2083,15 +2307,29 @@ void C3DRenderer::UploadTexture(RTexture* pTex, s32 width, s32 height, const u32
     pJob->mLevels = levels;
     pJob->mFmt = fmt;
     pJob->mPremultiply = premultiply;
+    pJob->mSlot = slot;
+    pJob->mStaging = pStaging;
+    // In a VRAM page, a slot's levels before kShadowLevel go to the staging buffer as blocks of its own tiles, the
+    // others to the page's shadow; a texture of its own in VRAM is made whole in the staging buffer.
+    u8* pBlock = pStaging;
     for (s32 l = 0; l <= levels; l++)
     {
-        pJob->mDst[l] = (u8*)C3D_Tex2DGetImagePtr(slot ? &pTex->mPage->mTex.mTex : &pTex->mTex, l, NULL);
+        u8* pLevel = (u8*)C3D_Tex2DGetImagePtr(pStorage, l, NULL);
+        const bool block = slot && pStaging && l < kShadowLevel;
+        pJob->mDst[l] = !pStaging ? pLevel
+                        : !slot   ? pStaging + (pLevel - (u8*)pStorage->data)
+                        : block   ? pBlock
+                                  : pTex->mPage->mShadow + (pLevel - (u8*)C3D_Tex2DGetImagePtr(pStorage, kShadowLevel, NULL));
+        pJob->mDstW[l] = block ? kSlotPitch >> l : kAtlasSize >> l;
+        pJob->mDstX[l] = block ? 0 : (pTex->mSlot % kSlotsPerRow * kSlotPitch) >> l;
+        pJob->mDstY[l] = block ? 0 : (pTex->mSlot / kSlotsPerRow * kSlotPitch) >> l;
+        if (block)
+        {
+            pBlock += (size_t)(kSlotPitch >> l) * (kSlotPitch >> l) * bytes;
+        }
     }
     if (slot)
     {
-        pJob->mPageSize = kAtlasSize;
-        pJob->mSlotX = pTex->mSlot % kSlotsPerRow * kSlotPitch;
-        pJob->mSlotY = pTex->mSlot / kSlotsPerRow * kSlotPitch;
         pTex->mPage->mTex.mVersion++;
     }
     else
@@ -2115,6 +2353,11 @@ void C3DRenderer::UploadTexture(RTexture* pTex, s32 width, s32 height, const u32
     else
     {
         WriteTexels(*pJob, p->mScratch, 0);
+        p->CopyJob(pTex, pJob);
+        if (pStaging)
+        {
+            p->mStagingDone.push_back(pStaging);
+        }
         delete pJob;
     }
     Stats3DS_AddUpload(svcGetSystemTick() - t0);
@@ -2149,7 +2392,7 @@ void* C3DRenderer::LockTiled(RTexture* pTex, s32 size, bool alphaOnly)
     {
         p->Flush();
     }
-    if (!p->Allocate(pTex, size, size, alphaOnly ? GPU_A8 : GPU_RGB565, 0, false))
+    if (!p->Allocate(pTex, size, size, alphaOnly ? GPU_A8 : GPU_RGB565, 0, false, false))
     {
         return 0;
     }

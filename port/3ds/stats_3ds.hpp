@@ -12,6 +12,8 @@ void Stats3DS_AddBottom(u64 ticks, bool drawn);
 // The textures with storage and their bytes, those of the evictable ones, and the evictions and allocation
 // failures so far.
 void Stats3DS_SetTextures(u32 count, u32 bytes, u32 cachedBytes, u32 evictions, u32 failures);
+// The textures' bytes in VRAM, and the DMA copies there and the waits for them so far.
+void Stats3DS_SetVram(u32 bytes, u32 copies, u32 drains);
 // The upload worker's ticks and jobs so far, and the jobs the main thread wrote as it needed them first.
 void Stats3DS_SetUploadWorker(u64 ticks, u32 jobs, u32 mainJobs);
 // Once per frame, with the ticks C3D_FrameEnd took (the wait for the GPU and the screen).
