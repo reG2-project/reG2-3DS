@@ -308,8 +308,8 @@ void EndFrame()
     const u64 now = svcGetSystemTick();
     if (sLastFrame)
     {
-        // Late: past two refreshes of the screen, so shown a refresh later.
-        gCounts[kLateFrames] += now - sLastFrame > SYSCLOCK_ARM11 / 1000 * 34 ? 1 : 0;
+        // Late: three refreshes of the screen (50 ms) or more instead of two.
+        gCounts[kLateFrames] += now - sLastFrame > SYSCLOCK_ARM11 / 1000 * 42 ? 1 : 0;
         sParts[kFrame].cur += now - sLastFrame;
         sParts[kFrame].self += (s64)(now - sLastFrame);
         sParts[kFrame].calls++;
