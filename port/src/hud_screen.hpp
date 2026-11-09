@@ -24,6 +24,9 @@ void SetGroup(Group group);
 bool LayoutPixels();
 // False while the group goes to a HUD screen that keeps its last picture in this frame: its draws can be left out.
 bool Drawn();
+// The group's draws that follow depend only on that text and state: true if the HUD screen draws again those it kept
+// for them, and the caller leaves its own out.
+bool Keep(const wchar_t* pText, u32 state);
 // The brief's line width in layout pixels: the original's, or less to fit the HUD screen.
 s32 BriefLineWidth(s32 width);
 } // namespace PortHudScreen

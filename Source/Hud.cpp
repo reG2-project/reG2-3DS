@@ -2307,6 +2307,13 @@ void Hud_Brief::DrawBrief()
                          0,
                          0);
 
+#if defined(GTA2_PORT)
+        // Long and drawn glyph by glyph: the HUD screen draws its last copy again while it is the same.
+        if (PortHudScreen::Keep(mStr, mNumLines))
+        {
+            return;
+        }
+#endif
         // u32: converts with the Fix16(u32) constructor, whose out-of-line copy is 0x4926F0
         u32 first_line_ypos = 480 - GetLineSpacingFromFontType_5D7700_inlined(gBriefFont) * mNumLines;
         DrawStringScaledPalette(mStr, // str

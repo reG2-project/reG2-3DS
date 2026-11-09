@@ -125,6 +125,9 @@ class IRenderer
     virtual bool SetHudGroup(s32) { return false; }
     // Whether the HUD screen may be redrawn in this frame: only then are its groups' draws wanted.
     virtual bool HudScreenDue() { return true; }
+    // The HUD screen group's draws that follow depend only on key: true if the renderer draws again those it kept for it,
+    // and the caller leaves its own out; else it keeps them.
+    virtual bool KeepHudGroup(u32) { return false; }
     // How much of that screen's width the brief may take, in layout pixels; 0 without one.
     virtual s32 HudScreenWidth() const { return 0; }
 };

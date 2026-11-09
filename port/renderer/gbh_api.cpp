@@ -1391,6 +1391,11 @@ bool port_HudScreenDue()
     return !gRenderer || gRenderer->HudScreenDue();
 }
 
+bool port_KeepHudGroup(u32 key)
+{
+    return gRenderer && gRenderer->KeepHudGroup(key);
+}
+
 s32 port_HudScreenWidth()
 {
     return gRenderer ? gRenderer->HudScreenWidth() : 0;

@@ -184,7 +184,9 @@ The bottom screen is drawn only when what it shows changed, in every other frame
 brief's scroll and the minimap's state (the player's position to the pixel, heading in 64 steps, gang and
 markers). citro3d transfers and swaps a screen only when its target was drawn on, so otherwise the screen
 keeps its last frame. The game leaves the bottom screen's HUD draws out of the frames in between
-(`PortHudScreen::Drawn`, `IRenderer::HudScreenDue`).
+(`PortHudScreen::Drawn`, `IRenderer::HudScreenDue`). The brief's text, drawn glyph by glyph (136 draws for a long
+one), is drawn by the game once: while its text stays the same, the renderer copies the vertices and batches it kept
+(`PortHudScreen::Keep`, `IRenderer::KeepHudGroup`), unless one of their textures changed.
 
 ## Build
 
