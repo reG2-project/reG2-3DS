@@ -70,6 +70,15 @@ pass that premultiplies, converts, pads, writes Morton order and averages the ne
 scratch buffer. The CPU surface is composited through an RGB5A1 texture. One frame of vertices lives
 in linear memory; texture frees wait for the GPU.
 
+The game registers every texture of its style at once and the gbh_* layer converts each on its first
+draw, so the textures a long session has drawn outgrow the linear heap: walking and driving in bil, 1.3 MB
+after a minute, 8.6 MB after ten, still growing. Uploads that did not fit used to leave tiles, sprites
+and the menus' letters white for good. The renderer keeps the gbh_* layer's textures in least recently
+drawn order (`IRenderer::SetEvictable`) and, before an allocation, frees the oldest until 2 MB of linear
+memory stays free, and more while no free block is big enough; those of the frame the GPU may still read
+stay. An evicted texture is converted again on its next draw (`IRenderer::Evicted`).
+`GTA2_3DS_LINEAR_RESERVE=<KB>` sets the free part, to test eviction.
+
 The top screen is drawn at 400x240: the game's 800x480 scaled by half, with no vertex offset and bilinear
 filtering, so the game's 1:1 quads (menus, text) come out as the exact 2x2 average of their texels.
 Blended textures are premultiplied at upload, so filtered edges take no colour from transparent texels.
