@@ -617,6 +617,7 @@ void RenderVertsUnturned(u32 flags, STexture* pTexture, Vert* pVerts, s32 count,
     {
         Trace("draw", flags, pTexture, pVerts, count, baseColour);
     }
+    PORT_PROF_SECTION(kPrimClip);
     if (count < 3 || count > 4 || pVerts[0].z <= 0.0f || !gRenderer)
     {
         return;
@@ -644,6 +645,7 @@ void RenderVertsUnturned(u32 flags, STexture* pTexture, Vert* pVerts, s32 count,
         flags |= FLAG_NO_FILTER;
     }
 
+    PORT_PROF_SECTION(kPrimResolve);
     RTexture* pTex = pTexture ? Resolve(pTexture, (flags & (FLAG_BLEND_ADD | FLAG_BLEND_ALPHA | FLAG_COLOUR_KEY)) ? kAlpha : kOpaque) : 0;
     const f32 texW = pTexture && pTexture->field_E_width ? (f32)pTexture->field_E_width : 1.0f;
     const f32 texH = pTexture && pTexture->field_10_height ? (f32)pTexture->field_10_height : 1.0f;
@@ -652,6 +654,7 @@ void RenderVertsUnturned(u32 flags, STexture* pTexture, Vert* pVerts, s32 count,
     const f32 scaleU = image ? 1.0f / texW : slotScale;
     const f32 scaleV = image ? 1.0f / texH : slotScale;
 
+    PORT_PROF_SECTION(kPrimSetup);
     if (flags & FLAG_FIT_TO_TEXTURE)
     {
         // The original's quad: (x0, y0) .. (x0 + w - 0.001, y0 + h - 0.001), UVs 0 .. w - 0.001.
@@ -694,6 +697,7 @@ void RenderVertsUnturned(u32 flags, STexture* pTexture, Vert* pVerts, s32 count,
     const bool lit = (flags & FLAG_LIGHTING) && !fullAmbient;
     const bool shadowLit = softShadow && !fullAmbient;
     const bool perPixel = (lit || shadowLit) && gRenderer->Options().mPerPixelLighting;
+    PORT_PROF_END();
     u32 unlit[4];
     if (lit || shadowLit)
     {
@@ -725,6 +729,7 @@ void RenderVertsUnturned(u32 flags, STexture* pTexture, Vert* pVerts, s32 count,
             }
         }
     }
+    PORT_PROF_SECTION(kPrimVerts);
     if (perPixel && gLightsDirty)
     {
         UploadLights();
@@ -799,6 +804,7 @@ void RenderVertsUnturned(u32 flags, STexture* pTexture, Vert* pVerts, s32 count,
         fprintf(stderr, "  -> amb=%.1f lights=%u state=%x diff=%08x %08x %08x %08x\n", gAmbient[0], gNumLights, state, pVerts[0].diff,
                 pVerts[1].diff, pVerts[2].diff, count > 3 ? pVerts[3].diff : 0);
     }
+    PORT_PROF_END();
     gRenderer->DrawTriangles(tris, n, pTex, state);
     gGlobals.mNumPolysDrawn += count - 2;
 }
@@ -822,6 +828,7 @@ void RenderVerts(u32 flags, STexture* pTexture, Vert* pVerts, s32 count, u32 bas
 {
     PORT_PROF_PRIM(kPrim);
     PORT_PROF_COUNT(kPrims, 1);
+    PORT_PROF_SECTION(kPrimTurn);
     if (gViewTurn.mKind == kTurnOff || (flags & (FLAG_INTERNAL_BLIT | FLAG_FIT_TO_TEXTURE)) || count < 3 || count > 4 ||
         pVerts[0].z <= 0.0f)
     {
@@ -1345,6 +1352,8 @@ GBH_EXPORT s32 GTA2_CC gbh_DrawTilePart(u32 flags, STexture* pTexture, Vert* pDa
 
 static s32 DrawTileImpl(u32 flags, STexture* pTexture, Vert* pData, s32 diffuseColour)
 {
+    PORT_PROF_PRIM(kPrim);
+    PORT_PROF_SECTION(kPrimUv);
     u32 drawFlags = flags;
     if (!(flags & FLAG_TILE_UV))
     {

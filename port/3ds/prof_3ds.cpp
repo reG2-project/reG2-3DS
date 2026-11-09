@@ -21,7 +21,8 @@ const char* const kPartNames[] = {
     "firetrucks", "scores", "sound", "sound.entities", "sound.queues", "paused", "collide",
     "frame", "loop.next", "loop.beforestep", "loop.afterstep", "loop.begindraw", "loop.enddraw", "loop.fps", "log",
     "inputs", "pump", "pump.pad", "idle", "draw", "draw.sort", "draw.setup", "draw.map", "draw.scores",
-    "draw.hud", "draw.end", "prim", "prim.light", "prim.c3d", "flush", "present", "present.bottom", "present.overlay",
+    "draw.hud", "draw.end", "prim", "prim.uv", "prim.turn", "prim.clip", "prim.resolve",
+    "prim.setup", "prim.light", "prim.verts", "prim.c3d", "flush", "present", "present.bottom", "present.overlay",
     "present.frameend", "tex.convert", "tex.upload", "wait.vsync", "wait.gpu", "gpu", "c3d.cpu", 0};
 const char* const kCountNames[] = {
     "drive", "cars.visible", "peds.onscreen", "steps", "prims", "drawcalls", "vertices", "states", "binds", "uploads",
@@ -247,7 +248,7 @@ void Pop(int index)
 
 void Section(Part part)
 {
-    if (!gOn)
+    if (!gOn || gPrimScale == kSkip)
     {
         return;
     }
@@ -256,12 +257,12 @@ void Section(Part part)
     {
         PopTop(now);
     }
-    PushAt(part, 1, true, now);
+    PushAt(part, gPrimScale, true, now);
 }
 
 void EndSection()
 {
-    if (gOn && sDepth && sStack[sDepth - 1].section)
+    if (gOn && gPrimScale != kSkip && sDepth && sStack[sDepth - 1].section)
     {
         PopTop(svcGetSystemTick());
     }

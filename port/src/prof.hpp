@@ -67,7 +67,13 @@ enum Part
     kDrawHud,
     kDrawEnd,
     kPrim,
+    kPrimUv,
+    kPrimTurn,
+    kPrimClip,
+    kPrimResolve,
+    kPrimSetup,
     kPrimLight,
+    kPrimVerts,
     kPrimC3d,
     kFlush,
     kPresent,
@@ -123,7 +129,7 @@ extern unsigned gCounts[kCountCount];
 int Push(Part part, unsigned scale);
 // Ends that entry and the sections opened above it.
 void Pop(int index);
-// Ends the open section of the current scope, and starts one for part.
+// Ends the open section of the current scope, and starts one for part. In a primitive, as its scopes.
 void Section(Part part);
 void EndSection();
 // Whether the next primitive is one of those timed.
@@ -181,6 +187,7 @@ class PrimScope
         {
             gPrimScale = SamplePrimitive();
             mIndex = Push(part, gPrimScale);
+            gPrimScale = mIndex >= 0 ? gPrimScale : kSkip;
         }
     }
     ~PrimScope()
