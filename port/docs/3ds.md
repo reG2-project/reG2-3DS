@@ -211,6 +211,8 @@ The game folder is the `.3dsx`'s own folder when it holds `data/fstyle.sty` (fro
 Homebrew Launcher passes as `argv[0]`, which libctru sets before the constructors), else `sdmc:/3ds/gta2/`:
 `data/` (without `Movie`: about 65 MB without `GTAudio`, 355 MB with it), `gta2_registry.ini`, `player/` (the saves), `test/`.
 The frontend's music and the car radio need `data/GTAudio` (the CD's 22 WAVs): without it the game runs silent there.
+From the 2004 Rockstar Classics installer, `port/tools/extract_gta2.sh GTA2INSTALLER.exe <dir>` (sh and
+`unshield`) writes that `data/` without running the installer; on Windows, install the game and copy its `data/`.
 Without the data in either, the top screen lists the folders tried and the files expected until START.
 The game's own error boxes (a missing city file, for example), which SDL cannot show on the 3DS, appear on
 the bottom screen until START (`--wrap=SDL_ShowSimpleMessageBox`) rather than the game closing silently.
