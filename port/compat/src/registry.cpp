@@ -69,8 +69,19 @@ Key* FromHandle(HKEY h)
     return reinterpret_cast<Key*>(h);
 }
 
+// While a menu is open its changes are saved as it closes: a save rewrites the file, tens of
+// milliseconds on the 3DS, for each step of a setting.
+bool sDeferSaves;
+bool sUnsaved;
+
 void Save()
 {
+    if (sDeferSaves)
+    {
+        sUnsaved = true;
+        return;
+    }
+    sUnsaved = false;
     FILE* f = fopen(kFileName, "w");
     if (!f)
     {
@@ -237,7 +248,30 @@ LONG Open(HKEY root, LPCSTR subKey, PHKEY pResult, bool create)
     *pResult = reinterpret_cast<HKEY>(&it->second);
     return ERROR_SUCCESS;
 }
+void SaveUnsaved()
+{
+    sDeferSaves = false;
+    if (sUnsaved)
+    {
+        Save();
+    }
+}
 } // namespace
+
+void port_DeferRegistrySaves(bool defer)
+{
+    static bool sAtExit;
+    if (defer && !sAtExit)
+    {
+        sAtExit = true;
+        atexit(SaveUnsaved);
+    }
+    sDeferSaves = defer;
+    if (!defer)
+    {
+        SaveUnsaved();
+    }
+}
 
 extern "C" {
 
@@ -307,6 +341,13 @@ LSTATUS WINAPI RegSetValueExA(HKEY h, LPCSTR name, DWORD, DWORD type, const BYTE
     if (!pKey)
     {
         return ERROR_INVALID_HANDLE;
+    }
+    // The game writes some values unchanged at each start, and a save rewrites the file.
+    const std::map<std::string, std::pair<std::string, Value>>::const_iterator it = pKey->mValues.find(Lower(name ? name : ""));
+    if (it != pKey->mValues.end() && it->second.second.mType == type && it->second.second.mData.size() == size &&
+        (!size || memcmp(it->second.second.mData.data(), pData, size) == 0))
+    {
+        return ERROR_SUCCESS;
     }
     SetValue(*pKey, name ? name : "", type, pData, size);
     Save();
