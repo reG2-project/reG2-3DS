@@ -66,10 +66,10 @@ u32 sFrames;
 // Scopes and sections started, and what one costs in ticks: taken out of the entries they run in.
 u32 sScopes;
 u32 sSections;
+u32 sTickTicks;
 u32 sScopeTicks;
 u32 sSectionTicks;
 u64 sLastFrame;
-double sTickUs;
 
 bool Excluded(u32 part)
 {
@@ -84,8 +84,10 @@ double Ms(double ticks)
 void PopTop(u64 now)
 {
     Entry& e = sStack[--sDepth];
+    // The timers started inside, and its own: a tick read for a scope, a whole section's cost for a section.
     const u64 timers = (u64)((sScopes - (e.timers0 & 0xFFFF)) & 0xFFFF) * sScopeTicks +
-                       (u64)((sSections - (e.timers0 >> 16)) & 0xFFFF) * sSectionTicks;
+                       (u64)((sSections - (e.timers0 >> 16)) & 0xFFFF) * sSectionTicks +
+                       (e.section ? sSectionTicks : sTickTicks);
     const u64 left = sExcluded - e.excluded0 + timers;
     const u64 raw = now - e.t0 > left ? now - e.t0 - left : 0;
     const u64 est = raw * e.scale;
@@ -150,7 +152,7 @@ void Calibrate()
     {
         svcGetSystemTick();
     }
-    sTickUs = Ms(svcGetSystemTick() - t0) * 1000.0 / n;
+    sTickTicks = (u32)((svcGetSystemTick() - t0) / n);
     t0 = svcGetSystemTick();
     for (int i = 0; i < n; i++)
     {
@@ -168,7 +170,7 @@ void Calibrate()
     sScopes = 0;
     sSections = 0;
     Log3DS_Printf("prof: every %lu frames, 1 primitive in %lu timed; a tick read takes %.3f us, a scope %.3f us, a section %.3f us\n",
-            sInterval, sSample, sTickUs, Ms(sScopeTicks) * 1000.0, Ms(sSectionTicks) * 1000.0);
+            sInterval, sSample, Ms(sTickTicks) * 1000.0, Ms(sScopeTicks) * 1000.0, Ms(sSectionTicks) * 1000.0);
 }
 
 void PrintParts(const char* label, u32 first, u32 last, u32 units)
