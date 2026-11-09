@@ -23,6 +23,9 @@ u32 sPeakLinear;
 u32 sLinearTotal;
 u64 sWaitTicks;
 u32 sTexCount, sTexBytes, sCachedBytes, sEvictions, sAllocFails;
+bool sWorker;
+u64 sWorkerTicks, sWorkerTicks0;
+u32 sWorkerJobs, sWorkerJobs0, sMainJobs, sMainJobs0;
 bool sCountSleeps;
 
 double Ms(u64 ticks)
@@ -72,6 +75,14 @@ void Stats3DS_SetTextures(u32 count, u32 bytes, u32 cachedBytes, u32 evictions, 
     sAllocFails = failures;
 }
 
+void Stats3DS_SetUploadWorker(u64 ticks, u32 jobs, u32 mainJobs)
+{
+    sWorker = true;
+    sWorkerTicks = ticks;
+    sWorkerJobs = jobs;
+    sMainJobs = mainJobs;
+}
+
 void Stats3DS_Frame(u64 frameEndTicks)
 {
     sWaitTicks += frameEndTicks;
@@ -105,7 +116,16 @@ void Stats3DS_Frame(u64 frameEndTicks)
         Log3DS_Printf("3ds: %.1f ms per frame, frame begin %.2f ms, end %.2f ms, uploads %.1f per frame %.2f ms, bottom %.3f ms (max %.3f, drawn %lu of %lu); heap %u KB (peak %u KB, arena %u KB), linear %lu KB (peak %lu KB, free %lu KB); textures %lu, %lu KB (evictable %lu KB), evicted %lu, failed %lu\n",
                 Ms(now - sLastTick) / n, Ms(sFrameBeginTicks) / n, Ms(sFrameEndTicks) / n, sUploads / n, Ms(sUploadTicks) / n, Ms(sBottomTicks) / n, Ms(sBottomMaxTicks), sBottomDrawn, sInterval, mi.uordblks / 1024,
                 (u32)(sPeakHeap / 1024), mi.arena / 1024, linearUsed / 1024, sPeakLinear / 1024, (u32)linearSpaceFree() / 1024, sTexCount, sTexBytes / 1024, sCachedBytes / 1024, sEvictions, sAllocFails);
+        if (sWorker)
+        {
+            Log3DS_Printf("3ds: upload worker %.1f %% of the time (%.2f ms per frame), %lu jobs; %lu written on the main thread\n",
+                          (sWorkerTicks - sWorkerTicks0) * 100.0 / (now - sLastTick), Ms(sWorkerTicks - sWorkerTicks0) / n,
+                          sWorkerJobs - sWorkerJobs0, sMainJobs - sMainJobs0);
+        }
     }
+    sWorkerTicks0 = sWorkerTicks;
+    sWorkerJobs0 = sWorkerJobs;
+    sMainJobs0 = sMainJobs;
     sLastTick = now;
     sFrameEndTicks = 0;
     sFrameBeginTicks = 0;

@@ -2,6 +2,8 @@
 #if defined(GTA2_PORT)
 #include "../port/src/view.hpp"
 #include "../port/src/prof.hpp"
+struct STexture;
+void port_PreloadTexture(STexture* pTexture);
 #else
 #define PORT_PROF_SECTION(part)
 #define PORT_PROF_END()
@@ -163,6 +165,15 @@ void Game::LoadGameFiles()
     gObjectDefinitions->InitDefinitions();
 
     gTextureCache_15D8->LoadStyleTextures();
+#if defined(GTA2_PORT)
+    // The effects' frames (explosions, fire, smoke, sparks, blood) now rather than on their first draw, mid-action.
+    const ObjectDefinition* pEffects = gObjectDefinitions->GetObjectDefinition(objects::object_112);
+    for (s32 i = 0; i < pEffects->mNumFrames; i++)
+    {
+        port_PreloadTexture(gTextureCache_15D8->GetSpriteTexture(sprite_types_enum::code_obj2_8, pEffects->mBaseSpriteIdx + i,
+                                                                 palette_types_enum::sprites_2, 0));
+    }
+#endif
 
     gGameSession.clear_secret_tokens_collected();
 

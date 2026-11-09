@@ -40,6 +40,29 @@ The 16 MB: 4.7 MB taken before any texture (1.5 MB of vertices, citro3d's 1 MB c
 screens' framebuffers, audio), 0.65 MB of the port's own textures in game (1.7 MB with the CPU surface in
 the frontend), the 8 MB budget, and about 2.9 MB of headroom. Peak use with the budget full: 13.5 MB.
 
+## Explosions and collisions
+
+What the two scenarios of Speed in `3ds.md` convert after the city load, in 100 s (each upload counted at its
+size in linear memory):
+
+| | tank firing into traffic | car into traffic at night |
+|---|---|---|
+| car damage (re-made on each new dent) | 105, 2.3 MB | 100, 2.7 MB |
+| peds' frames in their remaps (fleeing, burning) | 668, 1.5 MB | 507, 1.1 MB |
+| the HUD's rolling digits, re-made on each step of a roll | 520, 1.3 MB | 390, 0.9 MB |
+| effects (explosion, fire, smoke, sparks, blood) | 64, 0.4 MB | 59, 0.4 MB |
+| tiles | 2 | 103, 1.1 MB |
+| other sprites and remaps | 44, 0.4 MB | 65, 0.7 MB |
+
+An explosion's frames came one per frame of the explosion (a 128x128 one 3.1 ms in Azahar). The effects'
+205 frames (code object 112, the same in the three styles) are now converted after the city load, on the upload
+worker: 1.3 MB with their mip levels, of which 0.9 MB more stays resident than without (in ste after two
+minutes, 7.6 MB of textures against 6.7). They join the least recently drawn list as the load ends, so those
+never drawn are the first to go once the budget is reached; those an explosion draws stay near its end. The
+rest cannot be preloaded: car damage and the digits change, and the peds' frames are 25 000 textures. Their
+levels are made on the upload worker (Renderer in `3ds.md`). The copies of the texels queued for the worker
+take up to 1.8 MB of heap for the preload, which moves the heap's top 3 MB up (arena 23 MB against 20).
+
 ## Measurements
 
 Resident textures by kind with the 8 MB budget, with the size without mip levels (a quarter less) in

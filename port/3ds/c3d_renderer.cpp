@@ -8,6 +8,8 @@
 #include "minimap.hpp"
 #include <3ds.h>
 #include <citro3d.h>
+#include <algorithm>
+#include <atomic>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,6 +20,7 @@ extern "C" const u8 render_shbin[];
 extern "C" const u8 render_shbin_end[];
 
 struct AtlasPage;
+struct UploadJob;
 
 // The game's texture: a citro3d texture padded to a power of two, u and v scaled to the used part. In an atlas page's
 // slot, mTex is the page's and u and v are moved to the slot.
@@ -41,6 +44,7 @@ struct RTexture
     u32 mFailedFrame;
     RTexture* mLruPrev;
     RTexture* mLruNext;
+    UploadJob* mJob; // texels not yet known to be written
 };
 
 namespace
@@ -216,22 +220,31 @@ struct ScratchLevel
     u32 At(const u32* pRow, s32 x) const { return pRow[x]; }
 };
 
-// A w x h level into the PICA's tiled layout, image row y at t = 1 - y / h (Append flips v), and the next
-// level into pHalf when given. pHalf may be the source's storage: each average lands before what is still unread.
-template <typename T, typename Conv, typename Source>
-void WriteTiles(T* pDst, s32 w, s32 h, const Source& src, Conv conv, u32* pHalf, const u8* const* round)
+// Where a level goes: tiled storage mWidth texels wide, the level's corner at (mX, mY), both even.
+struct LevelDst
 {
-    for (s32 y = 0; y < h; y += 2)
+    void* mData;
+    s32 mWidth, mX, mY;
+};
+
+// Rows y0 to y1 of a w-wide level into the PICA's tiled layout, image row y at t = 1 - y / h (Append flips v), and
+// the next level into pHalf when given. pHalf may be the source's storage: each average lands before what is still unread.
+template <typename T, typename Conv, typename Source>
+void WriteTiles(const LevelDst& dst, s32 w, s32 y0, s32 y1, const Source& src, Conv conv, u32* pHalf, const u8* const* round)
+{
+    for (s32 y = y0; y < y1; y += 2)
     {
         const u32* pRow0 = src.Row(y);
         const u32* pRow1 = src.Row(y + 1);
-        T* pTiles = pDst + (size_t)(y >> 3) * (w >> 3) * 64 + ((u32)kMorton[y & 7] << 1);
+        const s32 ty = y + dst.mY;
+        T* pTiles = (T*)dst.mData + (size_t)(ty >> 3) * (dst.mWidth >> 3) * 64 + ((u32)kMorton[ty & 7] << 1);
         u32* pOut = pHalf ? pHalf + (size_t)(y / 2) * (w / 2) : 0;
         for (s32 x = 0; x < w; x += 2)
         {
             const u32 a = src.At(pRow0, x), b = src.At(pRow0, x + 1), c = src.At(pRow1, x), d = src.At(pRow1, x + 1);
             // A 2x2 block is 4 consecutive texels in Morton order.
-            T* p = pTiles + (x >> 3) * 64 + kMorton[x & 7];
+            const s32 tx = x + dst.mX;
+            T* p = pTiles + (tx >> 3) * 64 + kMorton[tx & 7];
             p[0] = conv(a);
             p[1] = conv(b);
             p[2] = conv(c);
@@ -244,9 +257,9 @@ void WriteTiles(T* pDst, s32 w, s32 h, const Source& src, Conv conv, u32* pHalf,
     }
 }
 
-// A level of a texture of format fmt, and the next one into pHalf when given.
+// Rows y0 to y1 of a level w texels wide of a texture of format fmt, and the next level's into pHalf when given.
 template <typename Source>
-void WriteLevel(void* pData, GPU_TEXCOLOR fmt, s32 w, s32 h, const Source& src, u32* pHalf)
+void WriteLevel(const LevelDst& dst, GPU_TEXCOLOR fmt, s32 w, s32 y0, s32 y1, const Source& src, u32* pHalf)
 {
     static const s8 kBits[][4] = {{8, 8, 8, 8}, {8, 8, 8, 0}, {5, 5, 5, 1}, {5, 6, 5, 0}, {4, 4, 4, 4}};
     const s8* bits = kBits[fmt <= GPU_RGBA4 ? fmt : 0];
@@ -254,22 +267,22 @@ void WriteLevel(void* pData, GPU_TEXCOLOR fmt, s32 w, s32 h, const Source& src, 
     switch (fmt)
     {
     case GPU_RGB565:
-        WriteTiles((u16*)pData, w, h, src, [](u32 c) {
+        WriteTiles<u16>(dst, w, y0, y1, src, [](u32 c) {
             return (u16)((((c >> 3) & 0x1F) << 11) | (((c >> 10) & 0x3F) << 5) | ((c >> 19) & 0x1F));
         }, pHalf, round);
         break;
     case GPU_RGBA4:
-        WriteTiles((u16*)pData, w, h, src, [](u32 c) {
+        WriteTiles<u16>(dst, w, y0, y1, src, [](u32 c) {
             return (u16)((((c >> 4) & 0xF) << 12) | (((c >> 12) & 0xF) << 8) | (((c >> 20) & 0xF) << 4) | (c >> 28));
         }, pHalf, round);
         break;
     case GPU_RGBA5551:
-        WriteTiles((u16*)pData, w, h, src, [](u32 c) {
+        WriteTiles<u16>(dst, w, y0, y1, src, [](u32 c) {
             return (u16)((((c >> 3) & 0x1F) << 11) | (((c >> 11) & 0x1F) << 6) | (((c >> 19) & 0x1F) << 1) | (c >> 31));
         }, pHalf, round);
         break;
     default:
-        WriteTiles((u32*)pData, w, h, src, [](u32 c) { return __builtin_bswap32(c); }, pHalf, round);
+        WriteTiles<u32>(dst, w, y0, y1, src, [](u32 c) { return __builtin_bswap32(c); }, pHalf, round);
         break;
     }
 }
@@ -289,6 +302,64 @@ void CopySlot(T* pDst, s32 dstW, s32 x0, s32 y0, const T* pSrc, s32 size, s32 bo
     }
 }
 
+// The border of a slot's level already in its page level dstW texels wide, as CopySlot makes it.
+template <typename T>
+void FillBorder(T* pDst, s32 dstW, s32 x0, s32 y0, s32 size, s32 border)
+{
+    const s32 ix = x0 + border, iy = y0 + border;
+    for (s32 y = -border; y < size + border; y++)
+    {
+        const s32 sy = y < 0 ? 0 : y < size ? y : size - 1;
+        for (s32 x = -border; x < size + border; x++)
+        {
+            if (y == sy && x == 0)
+            {
+                x = size - 1;
+                continue;
+            }
+            const s32 sx = x < 0 ? 0 : x < size ? x : size - 1;
+            pDst[TiledIndex(ix + x, iy + y, dstW)] = pDst[TiledIndex(ix + sx, iy + sy, dstW)];
+        }
+    }
+}
+
+// The main thread's or the worker's buffers for WriteTexels.
+struct UploadScratch
+{
+    std::vector<u32> mLevel;      // the next mip level being made
+    std::vector<u32> mSlotTexels; // a slot's level made apart from its page
+};
+
+enum
+{
+    kJobQueued,
+    kJobRunning,
+    kJobWritten,
+    kJobStopped,
+};
+} // namespace
+
+// An upload's texels made from the caller's (copied for the worker) into each level of the texture's storage, or of
+// its slot in an atlas page, then flushed for the GPU: on the worker on the system core, else on the main thread.
+struct UploadJob
+{
+    std::vector<u32> mCopy;
+    const u32* mRgba;
+    s32 mWidth, mHeight, mCw, mCh, mTw, mTh, mLevels;
+    GPU_TEXCOLOR mFmt;
+    bool mPremultiply;
+    u8* mDst[8];    // each level's storage: the texture's, or for a slot its page's
+    s32 mPageSize;  // a slot's page size, 0 for a texture of its own
+    s32 mSlotX, mSlotY;
+    u32 mBytes;     // a texture of its own: what its levels take
+    // Under the worker's lock: where the job is, and a request to stop part way.
+    u8 mState;
+    std::atomic<bool> mStop;
+    bool mMainWrote; // the main thread wrote the texels, the worker perhaps still writing the same ones
+};
+
+namespace
+{
 // The draw maps texels 1:1 onto logical pixels, axis aligned and without perspective.
 bool OneToOne(const RVertex* pVerts, s32 count, const RTexture* pTex)
 {
@@ -514,9 +585,18 @@ struct C3DRenderer::Impl : HudTheme::Sink
     u32 mBudget;
     RTexture* mWhite;
     RTexture* mSurface;
-    std::vector<u32> mLevel; // UploadTexture's next mip level being made
     std::vector<AtlasPage*> mPages;
-    std::vector<u32> mSlotTexels; // a slot's levels before they go to its page
+    UploadScratch mScratch;
+    // The worker writes uploads' texels on the system core; its queue, the jobs' states and its counts are under
+    // mWorkLock. mUploading: the main thread's textures with a job.
+    Thread mWorker;
+    LightLock mWorkLock;
+    CondVar mWorkCv, mDoneCv;
+    std::vector<UploadJob*> mQueue;
+    bool mWorkerQuit;
+    u64 mWorkerTicks;
+    u32 mWorkerJobs, mMainJobs;
+    std::vector<RTexture*> mUploading;
     bool mWarnedVerts, mWarnedCmdBuf, mWarnedAlloc;
     C3DRenderer* mOwner;
 
@@ -540,7 +620,9 @@ struct C3DRenderer::Impl : HudTheme::Sink
     bool AllocateSlot(RTexture* pTex, GPU_TEXCOLOR fmt);
     bool FindSlot(RTexture* pTex, GPU_TEXCOLOR fmt);
     bool AddPage(GPU_TEXCOLOR fmt);
-    void WriteSlot(RTexture* pTex, const u8* pTexels);
+    void EndUpload(RTexture* pTex, bool write, bool wait);
+    void EndDrawnUploads();
+    static void WorkerMain(void* pArg);
     void Release(RTexture* pTex);
     void LruRemove(RTexture* pTex);
     void LruAppend(RTexture* pTex);
@@ -587,6 +669,7 @@ static u32 BitsPerTexel(GPU_TEXCOLOR fmt)
 // Drops the texture's storage, once the GPU is done with it.
 void C3DRenderer::Impl::Release(RTexture* pTex)
 {
+    EndUpload(pTex, pTex->mUsedFrame == mFrame, true);
     if (!pTex->mValid)
     {
         return;
@@ -628,6 +711,85 @@ static u32 LevelsBytes(s32 size, s32 levels, GPU_TEXCOLOR fmt)
         bytes += (u32)(size >> l) * (u32)(size >> l) * BitsPerTexel(fmt) / 8;
     }
     return bytes;
+}
+
+// The job's texels, in bands of rows; false if asked to stop (pStop), the rest then left unwritten.
+static bool WriteTexels(const UploadJob& job, UploadScratch& scratch, const std::atomic<bool>* pStop)
+{
+    const s32 kBand = 16;
+    const bool slot = job.mPageSize > 0;
+    const u32 bytes = BitsPerTexel(job.mFmt) / 8;
+    u32* pHalf = 0;
+    if (job.mLevels > 0)
+    {
+        scratch.mLevel.resize((size_t)(job.mTw / 2) * (job.mTh / 2));
+        pHalf = &scratch.mLevel[0];
+    }
+    const SourceLevel src = {job.mRgba, job.mWidth, job.mHeight, job.mCw, job.mCh, job.mPremultiply};
+    // One pass per level: each writes its texels and averages the next level into the scratch buffer.
+    for (s32 l = 0; l <= job.mLevels; l++)
+    {
+        const s32 w = job.mTw >> l, h = job.mTh >> l;
+        // A slot's level goes straight to its page, past its border; one at an odd place (8x8) would split the 2x2
+        // blocks, so it is made apart and copied.
+        const s32 border = slot ? kSlotBorder >> l : 0;
+        const s32 x0 = slot ? job.mSlotX >> l : 0, y0 = slot ? job.mSlotY >> l : 0;
+        const s32 pageW = job.mPageSize >> l;
+        const bool apart = slot && ((x0 + border) & 1);
+        if (apart)
+        {
+            scratch.mSlotTexels.resize(((size_t)w * h * bytes + 3) / 4);
+        }
+        const LevelDst dst = {apart ? (void*)&scratch.mSlotTexels[0] : job.mDst[l], slot && !apart ? pageW : w,
+                              slot && !apart ? x0 + border : 0, slot && !apart ? y0 + border : 0};
+        u32* pNext = l < job.mLevels ? pHalf : 0;
+        const ScratchLevel level = {pHalf, w};
+        for (s32 y = 0; y < h; y += kBand)
+        {
+            if (pStop && pStop->load(std::memory_order_relaxed))
+            {
+                return false;
+            }
+            const s32 y1 = y + kBand < h ? y + kBand : h;
+            if (l == 0)
+            {
+                WriteLevel(dst, job.mFmt, w, y, y1, src, pNext);
+            }
+            else
+            {
+                WriteLevel(dst, job.mFmt, w, y, y1, level, pNext);
+            }
+        }
+        if (!slot)
+        {
+            continue;
+        }
+        if (apart && bytes == 2)
+        {
+            CopySlot((u16*)job.mDst[l], pageW, x0, y0, (const u16*)dst.mData, w, border);
+        }
+        else if (apart)
+        {
+            CopySlot((u32*)job.mDst[l], pageW, x0, y0, (const u32*)dst.mData, w, border);
+        }
+        else if (bytes == 2)
+        {
+            FillBorder((u16*)job.mDst[l], pageW, x0, y0, w, border);
+        }
+        else
+        {
+            FillBorder((u32*)job.mDst[l], pageW, x0, y0, w, border);
+        }
+        // The rows of 8x8 tiles the slot touches.
+        const u32 rowBytes = (u32)pageW * 8 * bytes;
+        const u32 first = (u32)y0 / 8, last = (u32)(y0 + w + 2 * border - 1) / 8;
+        GSPGPU_FlushDataCache(job.mDst[l] + first * rowBytes, (last - first + 1) * rowBytes);
+    }
+    if (!slot)
+    {
+        GSPGPU_FlushDataCache(job.mDst[0], job.mBytes);
+    }
+    return true;
 }
 
 // A free slot for pTex in a page of that format, unless the GPU may still read what was there.
@@ -715,33 +877,101 @@ bool C3DRenderer::Impl::AllocateSlot(RTexture* pTex, GPU_TEXCOLOR fmt)
     return true;
 }
 
-// pTexels: the slot's levels one after the other, tiled.
-void C3DRenderer::Impl::WriteSlot(RTexture* pTex, const u8* pTexels)
+// Ends pTex's upload. write: texels written here unless the worker has (a job it runs is stopped: the system core may be
+// throttled for milliseconds). wait: the worker done with the storage, else a job it still runs is collected later.
+void C3DRenderer::Impl::EndUpload(RTexture* pTex, bool write, bool wait)
 {
-    AtlasPage* pPage = pTex->mPage;
-    C3D_Tex* pPageTex = &pPage->mTex.mTex;
-    const u32 bytes = BitsPerTexel(pPageTex->fmt) / 8;
-    const s32 x0 = pTex->mSlot % kSlotsPerRow * kSlotPitch;
-    const s32 y0 = pTex->mSlot / kSlotsPerRow * kSlotPitch;
-    for (s32 l = 0; l <= kSlotLevels; l++)
+    UploadJob* pJob = pTex->mJob;
+    if (!pJob)
     {
-        const s32 size = kSlotSize >> l, border = kSlotBorder >> l, w = kAtlasSize >> l;
-        u8* pLevel = (u8*)C3D_Tex2DGetImagePtr(pPageTex, l, NULL);
-        if (bytes == 2)
-        {
-            CopySlot((u16*)pLevel, w, x0 >> l, y0 >> l, (const u16*)pTexels, size, border);
-        }
-        else
-        {
-            CopySlot((u32*)pLevel, w, x0 >> l, y0 >> l, (const u32*)pTexels, size, border);
-        }
-        pTexels += (size_t)size * size * bytes;
-        // The rows of 8x8 tiles the slot touches.
-        const u32 rowBytes = (u32)w * 8 * bytes;
-        const u32 first = (u32)(y0 >> l) / 8, last = (u32)((y0 >> l) + size + 2 * border - 1) / 8;
-        GSPGPU_FlushDataCache(pLevel + first * rowBytes, (last - first + 1) * rowBytes);
+        return;
     }
-    pPage->mTex.mVersion++;
+    LightLock_Lock(&mWorkLock);
+    if (pJob->mState == kJobQueued)
+    {
+        mQueue.erase(std::find(mQueue.begin(), mQueue.end(), pJob));
+        pJob->mState = kJobStopped;
+    }
+    else if (pJob->mState == kJobRunning)
+    {
+        pJob->mStop = true;
+        while (wait && pJob->mState == kJobRunning)
+        {
+            CondVar_Wait(&mDoneCv, &mWorkLock);
+        }
+    }
+    const u8 state = pJob->mState;
+    LightLock_Unlock(&mWorkLock);
+    if (write && state != kJobWritten && !pJob->mMainWrote)
+    {
+        WriteTexels(*pJob, mScratch, 0);
+        pJob->mMainWrote = true;
+        mMainJobs++;
+    }
+    if (state == kJobRunning)
+    {
+        return;
+    }
+    pTex->mJob = 0;
+    mUploading.erase(std::find(mUploading.begin(), mUploading.end(), pTex));
+    delete pJob;
+}
+
+// Before the GPU reads the frame's textures: the uploads of those drawn ended, oldest first as the worker takes the
+// newest; the jobs the worker is done with collected.
+void C3DRenderer::Impl::EndDrawnUploads()
+{
+    if (mUploading.empty())
+    {
+        return;
+    }
+    PORT_PROF_EXCLUDED(kTexUpload);
+    for (size_t i = 0; i < mUploading.size();)
+    {
+        RTexture* pTex = mUploading[i];
+        LightLock_Lock(&mWorkLock);
+        const u8 state = pTex->mJob->mState;
+        LightLock_Unlock(&mWorkLock);
+        const bool drawn = pTex->mUsedFrame == mFrame;
+        if (drawn || state == kJobWritten || state == kJobStopped)
+        {
+            EndUpload(pTex, drawn, false);
+            if (!pTex->mJob)
+            {
+                continue;
+            }
+        }
+        i++;
+    }
+}
+
+void C3DRenderer::Impl::WorkerMain(void* pArg)
+{
+    Impl* p = (Impl*)pArg;
+    UploadScratch scratch;
+    LightLock_Lock(&p->mWorkLock);
+    while (!p->mWorkerQuit)
+    {
+        if (p->mQueue.empty())
+        {
+            CondVar_Wait(&p->mWorkCv, &p->mWorkLock);
+            continue;
+        }
+        // The newest first: the frame's own uploads before the city load's.
+        UploadJob* pJob = p->mQueue.back();
+        p->mQueue.pop_back();
+        pJob->mState = kJobRunning;
+        LightLock_Unlock(&p->mWorkLock);
+        const u64 t0 = svcGetSystemTick();
+        const bool written = WriteTexels(*pJob, scratch, &pJob->mStop);
+        const u64 t1 = svcGetSystemTick();
+        LightLock_Lock(&p->mWorkLock);
+        p->mWorkerTicks += t1 - t0;
+        p->mWorkerJobs += written ? 1 : 0;
+        pJob->mState = written ? kJobWritten : kJobStopped;
+        CondVar_Broadcast(&p->mDoneCv);
+    }
+    LightLock_Unlock(&p->mWorkLock);
 }
 
 // Storage for new texels: kept when the GPU is done with it and it has the size and format, else replaced.
@@ -1507,6 +1737,18 @@ bool C3DRenderer::Init(Loader, const char** ppError)
     p->mFrame = 1;
     const char* pBudget = getenv("GTA2_3DS_TEXTURE_BUDGET");
     p->mBudget = pBudget ? (u32)atoi(pBudget) * 1024 : kTextureBudget;
+    LightLock_Init(&p->mWorkLock);
+    CondVar_Init(&p->mWorkCv);
+    CondVar_Init(&p->mDoneCv);
+    // On the system core, of which the application gets 30 %, below the sound's thread there. GTA2_3DS_UPLOAD_WORKER=0:
+    // every upload on the main thread.
+    const char* pWorker = getenv("GTA2_3DS_UPLOAD_WORKER");
+    if (!(pWorker && !strcmp(pWorker, "0")) && R_SUCCEEDED(APT_SetAppCpuTimeLimit(30)))
+    {
+        s32 priority = 0x30;
+        svcGetThreadPriority(&priority, CUR_THREAD_HANDLE);
+        p->mWorker = threadCreate(&Impl::WorkerMain, p, 32 * 1024, priority < 0x3F ? priority + 1 : 0x3F, 1, false);
+    }
     mImpl = p;
 
     const s32 n = 8;
@@ -1529,8 +1771,22 @@ void C3DRenderer::Shutdown()
     }
     if (p->mInFrame)
     {
+        p->EndDrawnUploads();
         C3D_FrameEnd(0);
         p->mInFrame = false;
+    }
+    while (!p->mUploading.empty())
+    {
+        p->EndUpload(p->mUploading.back(), false, true);
+    }
+    if (p->mWorker)
+    {
+        LightLock_Lock(&p->mWorkLock);
+        p->mWorkerQuit = true;
+        CondVar_Signal(&p->mWorkCv);
+        LightLock_Unlock(&p->mWorkLock);
+        threadJoin(p->mWorker, U64_MAX);
+        threadFree(p->mWorker);
     }
     HudTheme::Shutdown(*this);
     Minimap::Shutdown(*this);
@@ -1706,6 +1962,7 @@ void C3DRenderer::Present(s32, s32)
     {
         GSPGPU_FlushDataCache(p->mVerts, p->mVertCount * sizeof(C3DVertex));
     }
+    p->EndDrawnUploads();
     const u64 t0 = svcGetSystemTick();
     {
         PORT_PROF(kPresentFrameEnd);
@@ -1713,6 +1970,12 @@ void C3DRenderer::Present(s32, s32)
     }
     p->mInFrame = false;
     Stats3DS_SetTextures(p->mTexCount, p->mTexBytes, p->mCachedBytes, p->mEvictions, p->mAllocFails);
+    if (p->mWorker)
+    {
+        LightLock_Lock(&p->mWorkLock);
+        Stats3DS_SetUploadWorker(p->mWorkerTicks, p->mWorkerJobs, p->mMainJobs);
+        LightLock_Unlock(&p->mWorkLock);
+    }
     Stats3DS_Frame(svcGetSystemTick() - t0);
 }
 
@@ -1741,6 +2004,7 @@ void C3DRenderer::UploadTexture(RTexture* pTex, s32 width, s32 height, const u32
     PORT_PROF_EXCLUDED(kTexUpload);
     PORT_PROF_COUNT(kUploads, 1);
     const u64 t0 = svcGetSystemTick();
+    p->EndUpload(pTex, pTex->mUsedFrame == p->mFrame, true);
     // Partial alpha changes the colours when premultiplied, so only a scan tells their format.
     if (!(texels & RTX_KNOWN) || (mipmaps == RMIP_ALPHA && !(texels & RTX_BINARY)))
     {
@@ -1764,37 +2028,50 @@ void C3DRenderer::UploadTexture(RTexture* pTex, s32 width, s32 height, const u32
     }
     mUploads++;
     pTex->mVersion++;
-    // One pass per level: each writes its texels and averages the next level into the scratch buffer.
-    u32* pHalf = 0;
-    if (levels > 0)
+    UploadJob* pJob = new UploadJob();
+    pJob->mRgba = pRgba;
+    pJob->mWidth = width;
+    pJob->mHeight = height;
+    pJob->mCw = cw;
+    pJob->mCh = ch;
+    pJob->mTw = tw;
+    pJob->mTh = th;
+    pJob->mLevels = levels;
+    pJob->mFmt = fmt;
+    pJob->mPremultiply = premultiply;
+    for (s32 l = 0; l <= levels; l++)
     {
-        p->mLevel.resize((size_t)(tw / 2) * (th / 2));
-        pHalf = &p->mLevel[0];
-    }
-    // A slot's levels are made one after the other, as in a texture of its own, then copied to its page.
-    if (slot)
-    {
-        p->mSlotTexels.resize(LevelsBytes(kSlotSize, kSlotLevels, fmt) / 4);
-    }
-    u8* pLevel = slot ? (u8*)&p->mSlotTexels[0] : (u8*)pTex->mTex.data;
-    const SourceLevel src = {pRgba, width, height, cw, ch, premultiply};
-    WriteLevel(pLevel, fmt, tw, th, src, pHalf);
-    for (s32 l = 1; l <= levels; l++)
-    {
-        const ScratchLevel level = {pHalf, tw >> l};
-        const size_t lastBytes = (size_t)(tw >> (l - 1)) * (th >> (l - 1)) * BitsPerTexel(fmt) / 8;
-        pLevel = slot ? pLevel + lastBytes : (u8*)C3D_Tex2DGetImagePtr(&pTex->mTex, l, NULL);
-        WriteLevel(pLevel, fmt, tw >> l, th >> l, level, l < levels ? pHalf : 0);
+        pJob->mDst[l] = (u8*)C3D_Tex2DGetImagePtr(slot ? &pTex->mPage->mTex.mTex : &pTex->mTex, l, NULL);
     }
     if (slot)
     {
-        p->WriteSlot(pTex, (const u8*)&p->mSlotTexels[0]);
+        pJob->mPageSize = kAtlasSize;
+        pJob->mSlotX = pTex->mSlot % kSlotsPerRow * kSlotPitch;
+        pJob->mSlotY = pTex->mSlot / kSlotsPerRow * kSlotPitch;
+        pTex->mPage->mTex.mVersion++;
     }
     else
     {
-        C3D_TexFlush(&pTex->mTex);
+        pJob->mBytes = pTex->mBytes;
         pTex->mScaleU = (f32)cw / tw;
         pTex->mScaleV = (f32)ch / th;
+    }
+    // The game's textures go to the worker; drawn in this frame, they are done by its end (EndDrawnUploads).
+    if (p->mWorker && pTex->mEvictable)
+    {
+        pJob->mCopy.assign(pRgba, pRgba + (size_t)width * height);
+        pJob->mRgba = &pJob->mCopy[0];
+        pTex->mJob = pJob;
+        p->mUploading.push_back(pTex);
+        LightLock_Lock(&p->mWorkLock);
+        p->mQueue.push_back(pJob);
+        CondVar_Signal(&p->mWorkCv);
+        LightLock_Unlock(&p->mWorkLock);
+    }
+    else
+    {
+        WriteTexels(*pJob, p->mScratch, 0);
+        delete pJob;
     }
     Stats3DS_AddUpload(svcGetSystemTick() - t0);
 }
