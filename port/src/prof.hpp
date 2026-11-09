@@ -215,8 +215,8 @@ class PrimScope
 #define PORT_PROF_EXCLUDED(part) PortProf::ExcludedScope PORT_PROF_CAT(portProf, __LINE__)(PortProf::part)
 #define PORT_PROF_PRIM(part) PortProf::PrimScope PORT_PROF_CAT(portProf, __LINE__)(PortProf::part)
 // Times from here to the next section or PORT_PROF_END in the same scope.
-#define PORT_PROF_SECTION(part) PortProf::Section(PortProf::part)
-#define PORT_PROF_END() PortProf::EndSection()
+#define PORT_PROF_SECTION(part) (PortProf::gOn && PortProf::gPrimScale != PortProf::kSkip ? PortProf::Section(PortProf::part) : (void)0)
+#define PORT_PROF_END() (PortProf::gOn && PortProf::gPrimScale != PortProf::kSkip ? PortProf::EndSection() : (void)0)
 #define PORT_PROF_COUNT(count, n) (PortProf::gOn ? (void)(PortProf::gCounts[PortProf::count] += (n)) : (void)0)
 #define PORT_PROF_ADD_MS(part, ms) (PortProf::gOn ? PortProf::AddMs(PortProf::part, (ms)) : (void)0)
 #define PORT_PROF_RESET() PortProf::Reset()
