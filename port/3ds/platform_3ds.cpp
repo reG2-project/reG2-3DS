@@ -301,8 +301,8 @@ namespace PortPlatform
 {
 bool Has(Feature feature)
 {
-    // Two fixed screens, the citro3d renderer's classic look and the console's own buttons; the New 3DS's
-    // C-stick aims.
+    // Two fixed screens, the HUD on its own, the original's camera, the citro3d renderer's classic look and the
+    // console's own buttons; the New 3DS's C-stick aims.
     static int sNew3ds = -1;
     if (sNew3ds < 0)
     {

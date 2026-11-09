@@ -13,6 +13,8 @@ enum Feature
     kRendererOptions, // the OpenGL renderer's GRAPHICS page and its added lights
     k3dSound, // positional sound (OpenAL Soft) to turn on or off
     kRebinding, // keys, mouse and pad inputs bound in the menu
+    kTurningView, // the CHINATOWN camera, turned and tilted with the player's vehicle
+    kHudScale, // a HUD drawn over the world, at a scale to choose
     kKeyboard,
     kTwinStick, // a second stick to aim with
 };

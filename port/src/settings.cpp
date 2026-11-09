@@ -586,6 +586,13 @@ bool Available(Id id)
         case kControls:
         case kAimCamera:
             return P::Has(P::kTwinStick);
+        case kCamera:
+        case kCameraRotation:
+        case kCameraTurnSpeed:
+        case kCameraTilt:
+            return P::Has(P::kTurningView);
+        case kHudScale:
+            return P::Has(P::kHudScale);
         default:
             return true;
     }
@@ -598,7 +605,7 @@ const wchar_t* Name(Id id)
 
 f32 HudScale()
 {
-    return HudScalePercent() / 100.0f;
+    return Available(kHudScale) ? HudScalePercent() / 100.0f : 1.0f;
 }
 
 f32 SafeArea()
@@ -656,7 +663,7 @@ bool ChinatownCamera()
 #if defined(GTA2_PORT_SDL)
     if (sCamera < 0)
     {
-        sCamera = Screen(kCamera) != 0;
+        sCamera = Available(kCamera) && Screen(kCamera) != 0;
     }
     return sCamera != 0;
 #else
