@@ -215,22 +215,31 @@ struct ScratchLevel
     u32 At(const u32* pRow, s32 x) const { return pRow[x]; }
 };
 
+// Where a level goes: tiled storage mWidth texels wide, the level's corner at (mX, mY), both even.
+struct LevelDst
+{
+    void* mData;
+    s32 mWidth, mX, mY;
+};
+
 // A w x h level into the PICA's tiled layout, image row y at t = 1 - y / h (Append flips v), and the next
 // level into pHalf when given. pHalf may be the source's storage: each average lands before what is still unread.
 template <typename T, typename Conv, typename Source>
-void WriteTiles(T* pDst, s32 w, s32 h, const Source& src, Conv conv, u32* pHalf, const u8* const* round)
+void WriteTiles(const LevelDst& dst, s32 w, s32 h, const Source& src, Conv conv, u32* pHalf, const u8* const* round)
 {
     for (s32 y = 0; y < h; y += 2)
     {
         const u32* pRow0 = src.Row(y);
         const u32* pRow1 = src.Row(y + 1);
-        T* pTiles = pDst + (size_t)(y >> 3) * (w >> 3) * 64 + ((u32)kMorton[y & 7] << 1);
+        const s32 ty = y + dst.mY;
+        T* pTiles = (T*)dst.mData + (size_t)(ty >> 3) * (dst.mWidth >> 3) * 64 + ((u32)kMorton[ty & 7] << 1);
         u32* pOut = pHalf ? pHalf + (size_t)(y / 2) * (w / 2) : 0;
         for (s32 x = 0; x < w; x += 2)
         {
             const u32 a = src.At(pRow0, x), b = src.At(pRow0, x + 1), c = src.At(pRow1, x), d = src.At(pRow1, x + 1);
             // A 2x2 block is 4 consecutive texels in Morton order.
-            T* p = pTiles + (x >> 3) * 64 + kMorton[x & 7];
+            const s32 tx = x + dst.mX;
+            T* p = pTiles + (tx >> 3) * 64 + kMorton[tx & 7];
             p[0] = conv(a);
             p[1] = conv(b);
             p[2] = conv(c);
@@ -245,7 +254,7 @@ void WriteTiles(T* pDst, s32 w, s32 h, const Source& src, Conv conv, u32* pHalf,
 
 // A level of a texture of format fmt, and the next one into pHalf when given.
 template <typename Source>
-void WriteLevel(void* pData, GPU_TEXCOLOR fmt, s32 w, s32 h, const Source& src, u32* pHalf)
+void WriteLevel(const LevelDst& dst, GPU_TEXCOLOR fmt, s32 w, s32 h, const Source& src, u32* pHalf)
 {
     static const s8 kBits[][4] = {{8, 8, 8, 8}, {8, 8, 8, 0}, {5, 5, 5, 1}, {5, 6, 5, 0}, {4, 4, 4, 4}};
     const s8* bits = kBits[fmt <= GPU_RGBA4 ? fmt : 0];
@@ -253,22 +262,22 @@ void WriteLevel(void* pData, GPU_TEXCOLOR fmt, s32 w, s32 h, const Source& src, 
     switch (fmt)
     {
     case GPU_RGB565:
-        WriteTiles((u16*)pData, w, h, src, [](u32 c) {
+        WriteTiles<u16>(dst, w, h, src, [](u32 c) {
             return (u16)((((c >> 3) & 0x1F) << 11) | (((c >> 10) & 0x3F) << 5) | ((c >> 19) & 0x1F));
         }, pHalf, round);
         break;
     case GPU_RGBA4:
-        WriteTiles((u16*)pData, w, h, src, [](u32 c) {
+        WriteTiles<u16>(dst, w, h, src, [](u32 c) {
             return (u16)((((c >> 4) & 0xF) << 12) | (((c >> 12) & 0xF) << 8) | (((c >> 20) & 0xF) << 4) | (c >> 28));
         }, pHalf, round);
         break;
     case GPU_RGBA5551:
-        WriteTiles((u16*)pData, w, h, src, [](u32 c) {
+        WriteTiles<u16>(dst, w, h, src, [](u32 c) {
             return (u16)((((c >> 3) & 0x1F) << 11) | (((c >> 11) & 0x1F) << 6) | (((c >> 19) & 0x1F) << 1) | (c >> 31));
         }, pHalf, round);
         break;
     default:
-        WriteTiles((u32*)pData, w, h, src, [](u32 c) { return __builtin_bswap32(c); }, pHalf, round);
+        WriteTiles<u32>(dst, w, h, src, [](u32 c) { return __builtin_bswap32(c); }, pHalf, round);
         break;
     }
 }
@@ -287,6 +296,48 @@ void CopySlot(T* pDst, s32 dstW, s32 x0, s32 y0, const T* pSrc, s32 size, s32 bo
         }
     }
 }
+
+// The border of a slot's level already in its page level dstW texels wide, as CopySlot makes it.
+template <typename T>
+void FillBorder(T* pDst, s32 dstW, s32 x0, s32 y0, s32 size, s32 border)
+{
+    const s32 ix = x0 + border, iy = y0 + border;
+    for (s32 y = -border; y < size + border; y++)
+    {
+        const s32 sy = y < 0 ? 0 : y < size ? y : size - 1;
+        for (s32 x = -border; x < size + border; x++)
+        {
+            if (y == sy && x == 0)
+            {
+                x = size - 1;
+                continue;
+            }
+            const s32 sx = x < 0 ? 0 : x < size ? x : size - 1;
+            pDst[TiledIndex(ix + x, iy + y, dstW)] = pDst[TiledIndex(ix + sx, iy + sy, dstW)];
+        }
+    }
+}
+
+// WriteTexels' buffers.
+struct UploadScratch
+{
+    std::vector<u32> mLevel;      // the next mip level being made
+    std::vector<u32> mSlotTexels; // a slot's level made apart from its page
+};
+
+// An upload's texels made from the caller's into each level of the texture's storage, or of its slot in an atlas page,
+// then flushed for the GPU.
+struct UploadJob
+{
+    const u32* mRgba;
+    s32 mWidth, mHeight, mCw, mCh, mTw, mTh, mLevels;
+    GPU_TEXCOLOR mFmt;
+    bool mPremultiply;
+    u8* mDst[8];    // each level's storage: the texture's, or for a slot its page's
+    s32 mPageSize;  // a slot's page size, 0 for a texture of its own
+    s32 mSlotX, mSlotY;
+    u32 mBytes;     // a texture of its own: what its levels take
+};
 
 // The draw maps texels 1:1 onto logical pixels, axis aligned and without perspective.
 bool OneToOne(const RVertex* pVerts, s32 count, const RTexture* pTex)
@@ -502,9 +553,8 @@ struct C3DRenderer::Impl : HudTheme::Sink
     u32 mBudget;
     RTexture* mWhite;
     RTexture* mSurface;
-    std::vector<u32> mLevel; // UploadTexture's next mip level being made
     std::vector<AtlasPage*> mPages;
-    std::vector<u32> mSlotTexels; // a slot's levels before they go to its page
+    UploadScratch mScratch;
     bool mWarnedVerts, mWarnedCmdBuf, mWarnedAlloc;
     C3DRenderer* mOwner;
 
@@ -525,7 +575,6 @@ struct C3DRenderer::Impl : HudTheme::Sink
     bool AllocateSlot(RTexture* pTex, GPU_TEXCOLOR fmt);
     bool FindSlot(RTexture* pTex, GPU_TEXCOLOR fmt);
     bool AddPage(GPU_TEXCOLOR fmt);
-    void WriteSlot(RTexture* pTex, const u8* pTexels);
     void Release(RTexture* pTex);
     void LruRemove(RTexture* pTex);
     void LruAppend(RTexture* pTex);
@@ -615,6 +664,75 @@ static u32 LevelsBytes(s32 size, s32 levels, GPU_TEXCOLOR fmt)
     return bytes;
 }
 
+// The job's texels into their storage, flushed for the GPU.
+static void WriteTexels(const UploadJob& job, UploadScratch& scratch)
+{
+    const bool slot = job.mPageSize > 0;
+    const u32 bytes = BitsPerTexel(job.mFmt) / 8;
+    u32* pHalf = 0;
+    if (job.mLevels > 0)
+    {
+        scratch.mLevel.resize((size_t)(job.mTw / 2) * (job.mTh / 2));
+        pHalf = &scratch.mLevel[0];
+    }
+    const SourceLevel src = {job.mRgba, job.mWidth, job.mHeight, job.mCw, job.mCh, job.mPremultiply};
+    // One pass per level: each writes its texels and averages the next level into the scratch buffer.
+    for (s32 l = 0; l <= job.mLevels; l++)
+    {
+        const s32 w = job.mTw >> l, h = job.mTh >> l;
+        // A slot's level goes straight to its page, past its border; one at an odd place (8x8) would split the 2x2
+        // blocks, so it is made apart and copied.
+        const s32 border = slot ? kSlotBorder >> l : 0;
+        const s32 x0 = slot ? job.mSlotX >> l : 0, y0 = slot ? job.mSlotY >> l : 0;
+        const s32 pageW = job.mPageSize >> l;
+        const bool apart = slot && ((x0 + border) & 1);
+        if (apart)
+        {
+            scratch.mSlotTexels.resize(((size_t)w * h * bytes + 3) / 4);
+        }
+        const LevelDst dst = {apart ? (void*)&scratch.mSlotTexels[0] : job.mDst[l], slot && !apart ? pageW : w,
+                              slot && !apart ? x0 + border : 0, slot && !apart ? y0 + border : 0};
+        u32* pNext = l < job.mLevels ? pHalf : 0;
+        const ScratchLevel level = {pHalf, w};
+        if (l == 0)
+        {
+            WriteLevel(dst, job.mFmt, w, h, src, pNext);
+        }
+        else
+        {
+            WriteLevel(dst, job.mFmt, w, h, level, pNext);
+        }
+        if (!slot)
+        {
+            continue;
+        }
+        if (apart && bytes == 2)
+        {
+            CopySlot((u16*)job.mDst[l], pageW, x0, y0, (const u16*)dst.mData, w, border);
+        }
+        else if (apart)
+        {
+            CopySlot((u32*)job.mDst[l], pageW, x0, y0, (const u32*)dst.mData, w, border);
+        }
+        else if (bytes == 2)
+        {
+            FillBorder((u16*)job.mDst[l], pageW, x0, y0, w, border);
+        }
+        else
+        {
+            FillBorder((u32*)job.mDst[l], pageW, x0, y0, w, border);
+        }
+        // The rows of 8x8 tiles the slot touches.
+        const u32 rowBytes = (u32)pageW * 8 * bytes;
+        const u32 first = (u32)y0 / 8, last = (u32)(y0 + w + 2 * border - 1) / 8;
+        GSPGPU_FlushDataCache(job.mDst[l] + first * rowBytes, (last - first + 1) * rowBytes);
+    }
+    if (!slot)
+    {
+        GSPGPU_FlushDataCache(job.mDst[0], job.mBytes);
+    }
+}
+
 // A free slot for pTex in a page of that format, unless the GPU may still read what was there.
 bool C3DRenderer::Impl::FindSlot(RTexture* pTex, GPU_TEXCOLOR fmt)
 {
@@ -698,35 +816,6 @@ bool C3DRenderer::Impl::AllocateSlot(RTexture* pTex, GPU_TEXCOLOR fmt)
     pTex->mEvicted = false;
     LruAppend(pTex);
     return true;
-}
-
-// pTexels: the slot's levels one after the other, tiled.
-void C3DRenderer::Impl::WriteSlot(RTexture* pTex, const u8* pTexels)
-{
-    AtlasPage* pPage = pTex->mPage;
-    C3D_Tex* pPageTex = &pPage->mTex.mTex;
-    const u32 bytes = BitsPerTexel(pPageTex->fmt) / 8;
-    const s32 x0 = pTex->mSlot % kSlotsPerRow * kSlotPitch;
-    const s32 y0 = pTex->mSlot / kSlotsPerRow * kSlotPitch;
-    for (s32 l = 0; l <= kSlotLevels; l++)
-    {
-        const s32 size = kSlotSize >> l, border = kSlotBorder >> l, w = kAtlasSize >> l;
-        u8* pLevel = (u8*)C3D_Tex2DGetImagePtr(pPageTex, l, NULL);
-        if (bytes == 2)
-        {
-            CopySlot((u16*)pLevel, w, x0 >> l, y0 >> l, (const u16*)pTexels, size, border);
-        }
-        else
-        {
-            CopySlot((u32*)pLevel, w, x0 >> l, y0 >> l, (const u32*)pTexels, size, border);
-        }
-        pTexels += (size_t)size * size * bytes;
-        // The rows of 8x8 tiles the slot touches.
-        const u32 rowBytes = (u32)w * 8 * bytes;
-        const u32 first = (u32)(y0 >> l) / 8, last = (u32)((y0 >> l) + size + 2 * border - 1) / 8;
-        GSPGPU_FlushDataCache(pLevel + first * rowBytes, (last - first + 1) * rowBytes);
-    }
-    pPage->mTex.mVersion++;
 }
 
 // Storage for new texels: kept when the GPU is done with it and it has the size and format, else replaced.
@@ -1666,38 +1755,25 @@ void C3DRenderer::UploadTexture(RTexture* pTex, s32 width, s32 height, const u32
     }
     mUploads++;
     pTex->mVersion++;
-    // One pass per level: each writes its texels and averages the next level into the scratch buffer.
-    u32* pHalf = 0;
-    if (levels > 0)
+    UploadJob job = {pRgba, width, height, cw, ch, tw, th, levels, fmt, premultiply};
+    for (s32 l = 0; l <= levels; l++)
     {
-        p->mLevel.resize((size_t)(tw / 2) * (th / 2));
-        pHalf = &p->mLevel[0];
-    }
-    // A slot's levels are made one after the other, as in a texture of its own, then copied to its page.
-    if (slot)
-    {
-        p->mSlotTexels.resize(LevelsBytes(kSlotSize, kSlotLevels, fmt) / 4);
-    }
-    u8* pLevel = slot ? (u8*)&p->mSlotTexels[0] : (u8*)pTex->mTex.data;
-    const SourceLevel src = {pRgba, width, height, cw, ch, premultiply};
-    WriteLevel(pLevel, fmt, tw, th, src, pHalf);
-    for (s32 l = 1; l <= levels; l++)
-    {
-        const ScratchLevel level = {pHalf, tw >> l};
-        const size_t lastBytes = (size_t)(tw >> (l - 1)) * (th >> (l - 1)) * BitsPerTexel(fmt) / 8;
-        pLevel = slot ? pLevel + lastBytes : (u8*)C3D_Tex2DGetImagePtr(&pTex->mTex, l, NULL);
-        WriteLevel(pLevel, fmt, tw >> l, th >> l, level, l < levels ? pHalf : 0);
+        job.mDst[l] = (u8*)C3D_Tex2DGetImagePtr(slot ? &pTex->mPage->mTex.mTex : &pTex->mTex, l, NULL);
     }
     if (slot)
     {
-        p->WriteSlot(pTex, (const u8*)&p->mSlotTexels[0]);
+        job.mPageSize = kAtlasSize;
+        job.mSlotX = pTex->mSlot % kSlotsPerRow * kSlotPitch;
+        job.mSlotY = pTex->mSlot / kSlotsPerRow * kSlotPitch;
+        pTex->mPage->mTex.mVersion++;
     }
     else
     {
-        C3D_TexFlush(&pTex->mTex);
+        job.mBytes = pTex->mBytes;
         pTex->mScaleU = (f32)cw / tw;
         pTex->mScaleV = (f32)ch / th;
     }
+    WriteTexels(job, p->mScratch);
     Stats3DS_AddUpload(svcGetSystemTick() - t0);
 }
 
