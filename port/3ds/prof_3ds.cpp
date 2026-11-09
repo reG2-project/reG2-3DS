@@ -1,4 +1,5 @@
 #include "../src/prof.hpp"
+#include "log_3ds.hpp"
 #include <3ds.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -166,34 +167,34 @@ void Calibrate()
     memset(&sParts[kCalibrate], 0, sizeof(sParts[kCalibrate]));
     sScopes = 0;
     sSections = 0;
-    fprintf(stderr, "prof: every %lu frames, 1 primitive in %lu timed; a tick read takes %.3f us, a scope %.3f us, a section %.3f us\n",
+    Log3DS_Printf("prof: every %lu frames, 1 primitive in %lu timed; a tick read takes %.3f us, a scope %.3f us, a section %.3f us\n",
             sInterval, sSample, sTickUs, Ms(sScopeTicks) * 1000.0, Ms(sSectionTicks) * 1000.0);
 }
 
 void PrintParts(const char* label, u32 first, u32 last, u32 units)
 {
-    fprintf(stderr, "prof %s:", label);
+    Log3DS_Printf("prof %s:", label);
     for (u32 i = first; i < last; i++)
     {
         const Stat& s = sParts[i];
         if (s.calls && kPartNames[i])
         {
-            fprintf(stderr, " %s=%.3f/%.3f/%.3f/%.1f", kPartNames[i], Ms(s.sum) / units, Ms(s.max), Ms(s.self) / units,
+            Log3DS_Printf(" %s=%.3f/%.3f/%.3f/%.1f", kPartNames[i], Ms(s.sum) / units, Ms(s.max), Ms(s.self) / units,
                     (double)s.calls / units);
         }
     }
-    fprintf(stderr, "\n");
+    Log3DS_Printf("\n");
 }
 
 void PrintCounts(u32 first, u32 last, u32 units, bool newLine)
 {
     for (u32 i = first; i < last; i++)
     {
-        fprintf(stderr, " %s=%.2f/%lu", kCountNames[i], (double)sCountSum[i] / units, sCountMax[i]);
+        Log3DS_Printf(" %s=%.2f/%lu", kCountNames[i], (double)sCountSum[i] / units, sCountMax[i]);
     }
     if (newLine)
     {
-        fprintf(stderr, "\n");
+        Log3DS_Printf("\n");
     }
 }
 
@@ -202,11 +203,15 @@ void Print()
     // Each value: average per step (or frame), maximum in one, average without the parts under it, calls.
     const u32 steps = sSteps ? sSteps : 1;
     // The times leave the timers' own cost out; this is what they added to the frame.
-    fprintf(stderr, "prof: %lu frames, %lu steps, %.0f scopes and %.0f sections per frame (%.2f ms)\n", sFrames, sSteps,
-            (double)sScopes / sFrames, (double)sSections / sFrames, Ms((u64)sScopes * sScopeTicks + (u64)sSections * sSectionTicks) / sFrames);
+    u32 logBytes;
+    u64 logTicks;
+    Log3DS_LastWrite(&logBytes, &logTicks);
+    Log3DS_Printf("prof: %lu frames, %lu steps, %.0f scopes and %.0f sections per frame (%.2f ms); last log write %lu bytes in %.2f ms\n",
+                  sFrames, sSteps, (double)sScopes / sFrames, (double)sSections / sFrames,
+                  Ms((u64)sScopes * sScopeTicks + (u64)sSections * sSectionTicks) / sFrames, logBytes, Ms(logTicks));
     PrintParts("step", 0, kStepParts, steps);
     PrintParts("frame", kStepParts, kPartCount, sFrames);
-    fprintf(stderr, "prof count:");
+    Log3DS_Printf("prof count:");
     PrintCounts(0, kStepCounts, steps, false);
     PrintCounts(kStepCounts, kCountCount, sFrames, true);
     memset(sParts, 0, sizeof(sParts));

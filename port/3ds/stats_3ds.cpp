@@ -1,4 +1,5 @@
 #include "stats_3ds.hpp"
+#include "log_3ds.hpp"
 #include <3ds.h>
 #include <malloc.h>
 #include <stdio.h>
@@ -101,7 +102,7 @@ void Stats3DS_Frame(u64 frameEndTicks)
     if (sLastTick)
     {
         const double n = sInterval;
-        fprintf(stderr, "3ds: %.1f ms per frame, frame begin %.2f ms, end %.2f ms, uploads %.1f per frame %.2f ms, bottom %.3f ms (max %.3f, drawn %lu of %lu); heap %u KB (peak %u KB, arena %u KB), linear %lu KB (peak %lu KB, free %lu KB); textures %lu, %lu KB (evictable %lu KB), evicted %lu, failed %lu\n",
+        Log3DS_Printf("3ds: %.1f ms per frame, frame begin %.2f ms, end %.2f ms, uploads %.1f per frame %.2f ms, bottom %.3f ms (max %.3f, drawn %lu of %lu); heap %u KB (peak %u KB, arena %u KB), linear %lu KB (peak %lu KB, free %lu KB); textures %lu, %lu KB (evictable %lu KB), evicted %lu, failed %lu\n",
                 Ms(now - sLastTick) / n, Ms(sFrameBeginTicks) / n, Ms(sFrameEndTicks) / n, sUploads / n, Ms(sUploadTicks) / n, Ms(sBottomTicks) / n, Ms(sBottomMaxTicks), sBottomDrawn, sInterval, mi.uordblks / 1024,
                 (u32)(sPeakHeap / 1024), mi.arena / 1024, linearUsed / 1024, sPeakLinear / 1024, (u32)linearSpaceFree() / 1024, sTexCount, sTexBytes / 1024, sCachedBytes / 1024, sEvictions, sAllocFails);
     }
