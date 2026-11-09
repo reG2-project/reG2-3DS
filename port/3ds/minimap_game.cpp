@@ -129,6 +129,8 @@ u32 ScanArrowColour(s32 arrow)
     return m ? Rgba(r / m, g / m, b / m) : 0;
 }
 
+const s32 kMaxSavePoints = 4;
+
 s32 Quarter(Fix16 v)
 {
     return (s32)floorf(v.ToFloat() * 4.0f + 0.5f);
@@ -249,6 +251,60 @@ void FindTerritories(View* pView)
         AddMark(pView, sMarks[i].x4, sMarks[i].y4, kTerritory, sMarks[i].arrow);
     }
 }
+
+// The churches where the player saves: the middle of each DO_SAVE_GAME command's area, read once per script.
+void FindSavePoints(View* pView)
+{
+    static char sScript[sizeof(ScriptManager::mFullScrFileName)];
+    static s32 sX4[kMaxSavePoints], sY4[kMaxSavePoints], sCount;
+    if (!gScriptManager)
+    {
+        return;
+    }
+    if (strcmp(sScript, gScriptManager->mFullScrFileName))
+    {
+        strcpy(sScript, gScriptManager->mFullScrFileName);
+        sCount = 0;
+        for (u16 i = 0; i < GTA2_COUNTOF(gScriptManager->mBasePointers) && sCount < kMaxSavePoints; i++)
+        {
+            const SCR_DO_SAVE_GAME* pCmd = static_cast<const SCR_DO_SAVE_GAME*>(gScriptManager->GetBasePointer(i));
+            if (pCmd && pCmd->mType == SCRCMD_DO_SAVE_GAME)
+            {
+                sX4[sCount] = Quarter(pCmd->mRect.mPos.x);
+                sY4[sCount++] = Quarter(pCmd->mRect.mPos.y);
+            }
+        }
+    }
+    for (s32 i = 0; i < sCount; i++)
+    {
+        AddMark(pView, sX4[i], sY4[i], kSavePoint, 0);
+    }
+}
+
+// Sprite `sprite` (an index into all the style's sprites) as RGBA, as ReadUserSprite.
+bool ReadSprite(u16 sprite, u32* pRgba, s32 maxTexels, s32* pW, s32* pH)
+{
+    const sprite_index* pIndex = gGtx_0x106C->get_sprite_index(sprite);
+    if (!pIndex || !pIndex->mpData || pIndex->mWidth * pIndex->mHeight > maxTexels)
+    {
+        return false;
+    }
+    // Sprite pages are 256 bytes wide; palette entries are 64 dwords apart.
+    const u32* pPal = reinterpret_cast<const u32*>(
+        gGtx_0x106C->GetPalData(gGtx_0x106C->get_phys_pal(gGtx_0x106C->GetTruePalette(palette_types_enum::sprites_2, sprite))));
+    *pW = pIndex->mWidth;
+    *pH = pIndex->mHeight;
+    for (s32 y = 0; y < pIndex->mHeight; y++)
+    {
+        for (s32 x = 0; x < pIndex->mWidth; x++)
+        {
+            const u8 index = pIndex->mpData[y * 256 + x];
+            const u32 c = pPal[index * 64];
+            pRgba[y * pIndex->mWidth + x] = index ? Rgba((c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF) : 0;
+        }
+    }
+    return true;
+}
 } // namespace
 
 bool ReadView(View* pView)
@@ -273,6 +329,7 @@ bool ReadView(View* pView)
     const Gang* pGang = pPlayer->get_gang_curr_location();
     const s32 slot = pGang ? (s32)(pGang - gGangPool_CA8->mGangList) : -1;
     pView->gang = slot >= 0 && slot < kMaxGangs && pView->arrows[slot] ? slot + 1 : 0;
+    FindSavePoints(pView);
     if (pView->gang)
     {
         FindPhones(pView, pPlayer, pGang);
@@ -386,26 +443,12 @@ u32 ArrowColour(s32 arrow)
 }
 bool ReadUserSprite(s32 n, u32* pRgba, s32 maxTexels, s32* pW, s32* pH)
 {
-    const u16 sprite = gGtx_0x106C->GetSpriteTrueIndex(sprite_types_enum::user_6, (s16)n);
-    const sprite_index* pIndex = gGtx_0x106C->get_sprite_index(sprite);
-    if (!pIndex || !pIndex->mpData || pIndex->mWidth * pIndex->mHeight > maxTexels)
-    {
-        return false;
-    }
-    // Sprite pages are 256 bytes wide; palette entries are 64 dwords apart.
-    const u32* pPal = reinterpret_cast<const u32*>(
-        gGtx_0x106C->GetPalData(gGtx_0x106C->get_phys_pal(gGtx_0x106C->GetTruePalette(palette_types_enum::sprites_2, sprite))));
-    *pW = pIndex->mWidth;
-    *pH = pIndex->mHeight;
-    for (s32 y = 0; y < pIndex->mHeight; y++)
-    {
-        for (s32 x = 0; x < pIndex->mWidth; x++)
-        {
-            const u8 index = pIndex->mpData[y * 256 + x];
-            const u32 c = pPal[index * 64];
-            pRgba[y * pIndex->mWidth + x] = index ? Rgba((c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF) : 0;
-        }
-    }
-    return true;
+    return ReadSprite(gGtx_0x106C->GetSpriteTrueIndex(sprite_types_enum::user_6, (s16)n), pRgba, maxTexels, pW, pH);
+}
+
+bool ReadPauseFontGlyph(char c, u32* pRgba, s32 maxTexels, s32* pW, s32* pH)
+{
+    const u16 glyph = gGtx_0x106C->GetSpriteIdxFromFont(gStylePauseFont, (s16)(c - 33));
+    return ReadSprite(gGtx_0x106C->GetSpriteTrueIndex(sprite_types_enum::font_7, (s16)glyph), pRgba, maxTexels, pW, pH);
 }
 } // namespace MinimapGame

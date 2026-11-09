@@ -126,13 +126,18 @@ the city's style:
   in the gang's colour on the map's edge, turned towards it, with its pip (none for the info phone), as
   the top screen draws it;
 - outside every territory, each gang's respect meter icon at the nearest block of its territory, or on
-  the map's edge in its direction.
+  the map's edge in its direction;
+- the church where the player saves, at the middle of the area of each `DO_SAVE_GAME` command of the
+  city's script (found once per script among its commands, one per city), or on the map's edge in its
+  direction, also during missions. Its icon is the pause menu font's `+` (`gStylePauseFont`) cut into a
+  Latin cross: arms one texel shorter than the stem is wide, the foot twice as long, with a shade around.
 
-Nothing else: no pickups, hidden weapons, secret tokens, frenzies, garages, churches or mission targets.
-Arrows and icons are drawn at half size, as the bottom screen draws the HUD, pips at full size. The only
-colours of the port's own are shades (black with alpha: rims, shadows, the tube's shadow, the edges'
-shade) and the frame and player arrow, original art embedded at build time from the study's PNGs by
-`embed_png.py`.
+Nothing else: no pickups, hidden weapons, secret tokens, frenzies, garages or mission targets.
+Arrows and icons are drawn at half size, as the bottom screen draws the HUD, pips and the cross at full
+size. The only colours of the port's own are shades (black with alpha: rims, shadows, the tube's shadow,
+the edges' shade, the cross's) and the frame and player arrow, original art embedded at build time from
+the study's PNGs by `embed_png.py`. The player arrow is drawn turned and filtered, so the atlas keeps a
+clear column between it and the frame.
 
 The map is built once per city from the map and tiles in memory (about 200 ms in Azahar's Old 3DS mode,
 330 KB of heap while it runs) into a 512x512 RGB565 texture filled in place, 2x2 texels per block (512 KB
@@ -140,8 +145,8 @@ of linear memory). The territory edges are a 256x256 RGBA4 texture (128 KB, buil
 up, about 20 ms), the light tint over the player's territory a 256x256 A8 texture (64 KB) drawn in the
 gang's colour and filled again when the player changes territory (2 to 3 ms) from each block's gang,
 kept in the textures' order (64 KB of heap). The frame and the player's arrow are a 32 KB atlas, the
-game's sprites for the markers a 16 KB sheet made per city. The game's
-headers and the renderer's clash, so `minimap_game.cpp` reads the game and `minimap.cpp` draws.
+game's sprites for the markers a 32 KB RGBA8 sheet made per city (the cross's shade has partial alpha).
+The game's headers and the renderer's clash, so `minimap_game.cpp` reads the game and `minimap.cpp` draws.
 `GTA2_3DS_MINIMAP=wide` gives the map the whole row while no brief shows; `off` leaves it out and gives the
 row to the brief.
 
@@ -335,7 +340,7 @@ Measured in Azahar's Old 3DS mode with `GTA2_3DS_STATS` (peaks over a minute and
 | bil with sound (SDL's dummy driver) | 22.2 MB | 6.8 MB |
 
 New 3DS mode gives the same figures: the game's needs do not depend on the model. The sound bank of a
-city (6 MB) is the only addition still to come with the DSP. The minimap adds its 752 KB of linear memory
+city (6 MB) is the only addition still to come with the DSP. The minimap adds its 768 KB of linear memory
 and 64 KB of heap.
 
 Going back to the frontend after a game is the tight spot: the frontend allocates while the heap is in
