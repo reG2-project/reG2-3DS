@@ -1,8 +1,9 @@
 # 3DS texture memory
 
-The 3DS renderer (`port/3ds/c3d_renderer.cpp`) keeps every texture in linear memory, which the port fixes at
-16 MB (`platform_3ds.cpp`). Figures below are from Azahar in Old 3DS mode, scripted walking and driving with
-the pause menu every 50 s (`GTA2_3DS_STATS`, and per-frame logs from a measurement build).
+The 3DS renderer (`port/3ds/c3d_renderer.cpp`) keeps the game's textures in VRAM while it has room and in
+linear memory beyond it (see VRAM below); the port's own textures stay in linear memory. Figures below are from
+Azahar in Old 3DS mode, scripted walking and driving with the pause menu every 50 s (`GTA2_3DS_STATS`, and
+per-frame logs from a measurement build), with linear memory only and a 16 MB linear heap unless said otherwise.
 
 ## Why a cache
 
@@ -22,8 +23,8 @@ streaming texture cache:
   sprites and remaps, and the frontend's images. The port's own textures (minimap, HUD backdrop, FPS
   overlay, CPU surface) stay resident.
 - The evictable textures form a list in least recently drawn order; a draw moves its texture to the end.
-- An upload that would take them over the budget (8 MB, `GTA2_3DS_TEXTURE_BUDGET=<KB>`) frees from the
-  front first. Textures drawn in the current frame are never freed (the GPU reads them after the frame
+- An upload that would take them over the budget (what VRAM has free at start, 5.3 MB, plus an 8 MB share of
+  linear memory, `GTA2_3DS_TEXTURE_BUDGET=<KB>`) frees from the front first, wherever it is. Textures drawn in the current frame are never freed (the GPU reads them after the frame
   ends); those of earlier frames are safe, since `C3D_FrameBegin` waits for the GPU.
 - Should the allocation still fail (no free block big enough), more are freed until it fits. If nothing is
   left to free, the texture draws untextured for that frame and is tried again on the next.
@@ -39,6 +40,56 @@ streaming texture cache:
 The 16 MB: 4.7 MB taken before any texture (1.5 MB of vertices, citro3d's 1 MB command buffer, the
 screens' framebuffers, audio), 0.65 MB of the port's own textures in game (1.7 MB with the CPU surface in
 the frontend), the 8 MB budget, and about 2.9 MB of headroom. Peak use with the budget full: 13.5 MB.
+
+## VRAM
+
+VRAM is 6 MB next to the GPU, which samples it faster than linear memory (FCRAM). It holds the two render
+targets (top 400x240 and bottom 320x240, RGBA8, no depth buffer: 0.66 MB); the screens' framebuffers are in
+linear memory (`gfxInitDefault`). That leaves 5.3 MB, which the game's textures take first:
+
+- Atlas pages (0.68 MB each in 16 bits) and the game's textures of their own from 1 KB to 512 KB are allocated
+  in VRAM while it has room, else in linear memory as before. VRAM pages come first when a slot is picked. The
+  port's own textures, the CPU surface and `LockTiled` textures, which the CPU writes in place, stay in linear
+  memory.
+- The CPU does not write VRAM: an upload's texels are made (on the upload worker or the main thread) in a
+  staging buffer in linear memory of its own, and once written the main thread queues the GPU's DMA copy
+  (`GX_TextureCopy`) into citro3d's GX queue. citro3d runs that queue at `C3D_FrameEnd`, in order, so the copies
+  land before the frame's command list draws. Uploads drawn in the frame are written by its end as before
+  (Renderer in `3ds.md`), so their copies make the frame; the others' are queued in the frame their job is
+  collected.
+- A slot's levels 0 and 1 (80 and 40 texels square with the border) are whole 8x8 tiles: each is one copy of a
+  rectangle of tile rows. Levels 2 and 3 (20 and 10) share tiles with the next slots, so a VRAM page keeps them
+  in a shadow in linear memory (40 KB in 16 bits), written in place, and copies it whole once per frame when a
+  slot changed. A texture of its own is one copy.
+- Staging buffers are freed once the GPU is done with their copies (the next `C3D_FrameBegin`); storage still
+  waits for the GPU as before, so the GPU never samples a texture whose copy has not run nor one already freed.
+- citro3d's queue holds 32 entries a frame (it stops the program past that). When a copy would leave fewer than
+  8 for citro3d's own (the command list, the screens' transfers and clears), the queue is run and waited for in
+  the frame (`waits` in `GTA2_3DS_STATS`). The game's uploads begin the frame first, so copies always join one.
+  The renderer reaches the queue as citro3d's context's first member (`__C3D_Context`), checked at start.
+- libctru's VRAM allocator takes its pools as all free again once bank A has no free block left (its first
+  block is how it tells it has been set up): in a test, textures were then placed over the top screen's target.
+  A 128-byte hole between two blocks kept at start, smaller than any texture put there, always leaves one.
+- One budget for both: what VRAM has free at start plus an 8 MB share of linear memory, 13.3 MB, one least
+  recently drawn list across both. `GTA2_3DS_VRAM=0` keeps everything in linear memory with the 8 MB budget.
+
+A 21 minute drive in bil (Azahar, Old 3DS, `GTA2_TEST_CAR`, steering by turns, the upload worker on):
+
+| | linear memory only | VRAM first |
+|---|---|---|
+| textures resident, most | 9.9 MB | 15.2 MB, 5.5 MB of it in VRAM |
+| first eviction | 1.7 min | 13.3 min |
+| evictions | 989 | 356 |
+| linear memory in use, most (of 22 MB) | 22.2 MB | 22.1 MB |
+| DMA copies per frame, waits for the queue | | 0.03, 9 (at the city load) |
+| `tex.upload` (main thread), slowest frame | 10.2 ms | 12.9 ms |
+
+Linear memory runs as full in both: the budget counts slots by their share of a page, and the 8 MB share ends up
+as about 10 MB of pages. Once eviction starts, VRAM keeps 4.2 to 4.3 MB of textures and 1.2 MB in holes no page
+fits (pages go only when their last slot does), so linear memory takes the difference. With a 0.5 MB linear share
+(`GTA2_3DS_TEXTURE_BUDGET=512`, 5.8 MB in all) eviction starts after 30 s, VRAM holds 4.7 to 4.9 MB and linear
+memory peaks at 16.8 MB: eviction works across both. Azahar times neither the GPU nor the DMA: the gain in GPU time
+(5.7 ms per frame on an Old 3DS with linear memory only) and the copies' cost are to be measured on the console.
 
 ## Explosions and collisions
 
@@ -103,9 +154,8 @@ the budget is reached either way.
 
 citro3d's and devkitPro's examples load their textures once (`Tex3DS_TextureImport`, `C3D_TexInit`) and
 free them at exit; games built for the console usually ship their textures in the GPU's own formats (ETC1
-among them) and load them with the scene. Neither has to bound textures converted on demand as here. The PICA200 can
-also sample from VRAM (6 MB, of which the two render targets take 0.7 MB): a second tier there, filled by
-the GPU's DMA from linear memory, would be the next step should 8 MB fall short.
+among them) and load them with the scene. Neither has to bound textures converted on demand as here. OpenLara's
+3DS port puts its textures in VRAM first and in linear memory when VRAM is full, as here.
 
 ## Later: ETC1
 

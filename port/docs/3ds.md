@@ -109,9 +109,11 @@ expands them into its list of triangles). citro3d writes them as 4 vertices: eac
 triangles (0, 1, 2) and (0, 2, 3) of an index buffer written once at start, so a quad takes 4 vertices
 rather than 6, and a triangle repeats its last corner (its second triangle is empty).
 
-The game's textures are a cache in linear memory: an 8 MB budget, least recently drawn evicted first and
-converted again on their next draw. Without it, the textures a long session has drawn outgrew the 16 MB
-and showed white. Design and measurements: `3ds_texture_memory.md`.
+The game's textures are a cache in VRAM first and linear memory beyond: a budget of what VRAM has free at
+start (5.3 MB) plus 8 MB of linear memory, least recently drawn evicted first and converted again on their next
+draw. Without it, the textures a long session has drawn outgrew linear memory and showed white. The CPU writes an
+upload for VRAM into a staging buffer in linear memory, copied by the GPU's DMA in citro3d's queue ahead of the
+frame's draws (`GTA2_3DS_VRAM=0`: linear memory only). Design and measurements: `3ds_texture_memory.md`.
 
 A texture is converted on its first draw: the gbh_* layer turns the palette into RGBA (`tex.convert`), the
 renderer makes its levels (premultiplied, converted, in Morton order, each averaged into the next: `tex.upload`).
@@ -307,7 +309,8 @@ over the last second and refreshed 4 times per second, `GTA2_UNCAPPED=1` draws a
 keeps its 30.3 steps per second, citro3d does not wait for the screens' refresh) to measure the headroom
 (Azahar, bil: about 185 frames per second walking at noon, 165 driving through traffic, about 100 driving at dusk,
 the same in New 3DS mode, which runs the same clock; Azahar leaves out the GPU's time),
-`GTA2_AUDIO_DRIVER=dummy` runs the sound without the DSP, `GTA2_3DS_UPLOAD_WORKER=0` makes the textures' levels on
+`GTA2_AUDIO_DRIVER=dummy` runs the sound without the DSP, `GTA2_3DS_VRAM=0` keeps the textures in linear memory
+(`GTA2_3DS_STATS` logs what VRAM holds, the DMA copies and the waits for them), `GTA2_3DS_UPLOAD_WORKER=0` makes the textures' levels on
 the main thread (see Renderer; `GTA2_3DS_STATS` logs the worker's time and the jobs the main thread wrote), `GTA2_3DS_MINIMAP=wide` or `off` sets the
 minimap's place (see Renderer). To boot into a city, the registry's `Debug` keys
 `skip_frontend`, `mapname`, `stylename` and `scriptname` (see `Source/debug.cpp`).
@@ -625,6 +628,8 @@ memory access (the map's columns and blocks, the grid's lists), which Azahar doe
 - Menus: the port's own menus (pause, options) with a larger font scale on the 3DS, or on the bottom
   screen at 1:1.
 - Sound on hardware: the DSP's channels (clicks on stops, OpenDSP's load with 20 voices), sleep.
+- Textures in VRAM on hardware: the GPU's time against `GTA2_3DS_VRAM=0`, the DMA copies' cost, no stale or
+  wrong texels after slots are taken again.
 - Real Old 3DS timings: Azahar's are optimistic for memory bound code (no cache model). If the
   hardware is short, the next candidates are the per-vertex lighting at night and the draw calls.
 - Real hardware: a 3DS or New 3DS with custom firmware.
