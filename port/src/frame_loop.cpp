@@ -269,6 +269,7 @@ void BeginDraw()
     }
     Trace('D');
     PortView::BeginDraw(sAlpha);
+    PortInterp::Drawn();
     port_SetGameFlip(true);
 }
 
