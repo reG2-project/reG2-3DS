@@ -1489,68 +1489,22 @@ static s32 DrawTileImpl(u32 flags, STexture* pTexture, Vert* pData, s32 diffuseC
         pData[3].v = 63.499901f;
     }
 
-    f32 uvs[4][2];
+    // Rotation in 90 degree steps (0x40 is a 180 degree turn, done as two flips), then the flips (8: u, 0x10: v):
+    // corner i takes the UVs of corner pRot[i ^ flip].
+    static const u8 kRot[4][4] = {{0, 1, 2, 3}, {3, 0, 1, 2}, {0, 1, 2, 3}, {1, 2, 3, 0}};
+    const u8* pRot = kRot[(flags & 0x60) >> 5];
+    if ((flags & 0x60) == 0x40)
+    {
+        drawFlags = flags ^ 0x18;
+    }
+    const u32 flip = (drawFlags & 8 ? 1 : 0) ^ (drawFlags & 0x10 ? 3 : 0);
+    const f32 us[4] = {pData[0].u, pData[1].u, pData[2].u, pData[3].u};
+    const f32 vs[4] = {pData[0].v, pData[1].v, pData[2].v, pData[3].v};
     for (int i = 0; i < 4; i++)
     {
-        uvs[i][0] = pData[i].u;
-        uvs[i][1] = pData[i].v;
-    }
-
-    // Rotation in 90 degree steps (0x40 is a 180 degree turn, done as two flips).
-    static const int kRot90[4] = {3, 0, 1, 2};
-    static const int kRot270[4] = {1, 2, 3, 0};
-    const int* pRot = 0;
-    switch (flags & 0x60)
-    {
-        case 0x20:
-            pRot = kRot90;
-            break;
-        case 0x40:
-            drawFlags = flags ^ 0x18;
-            break;
-        case 0x60:
-            pRot = kRot270;
-            break;
-    }
-    if (pRot)
-    {
-        for (int i = 0; i < 4; i++)
-        {
-            pData[i].u = uvs[pRot[i]][0];
-            pData[i].v = uvs[pRot[i]][1];
-        }
-        for (int i = 0; i < 4; i++)
-        {
-            uvs[i][0] = pData[i].u;
-            uvs[i][1] = pData[i].v;
-        }
-    }
-
-    if (drawFlags & 8)
-    {
-        static const int kFlip[4] = {1, 0, 3, 2};
-        for (int i = 0; i < 4; i++)
-        {
-            pData[i].u = uvs[kFlip[i]][0];
-            pData[i].v = uvs[kFlip[i]][1];
-        }
-        if (drawFlags & 0x10)
-        {
-            for (int i = 0; i < 4; i++)
-            {
-                uvs[i][0] = pData[i].u;
-                uvs[i][1] = pData[i].v;
-            }
-        }
-    }
-    if (drawFlags & 0x10)
-    {
-        static const int kFlip[4] = {3, 2, 1, 0};
-        for (int i = 0; i < 4; i++)
-        {
-            pData[i].u = uvs[kFlip[i]][0];
-            pData[i].v = uvs[kFlip[i]][1];
-        }
+        const u32 k = pRot[i ^ flip];
+        pData[i].u = us[k];
+        pData[i].v = vs[k];
     }
 
     RenderVerts(drawFlags, pTexture, pData, 4, (u32)diffuseColour & 0xFF);
