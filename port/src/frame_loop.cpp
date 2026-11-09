@@ -2,7 +2,10 @@
 #include "Game.hpp"
 #include "Player.hpp"
 #include "Ped.hpp"
+#include "Car.hpp"
+#include "Char_Pool.hpp"
 #include "interpolation.hpp"
+#include "prof.hpp"
 #include "settings.hpp"
 #include "sprite.hpp"
 #include "view.hpp"
@@ -157,6 +160,7 @@ void Reset()
     PortInterp::Clear();
     PortView::Clear();
     ApplySettings();
+    PORT_PROF_RESET();
 }
 
 Action Next(s32 stepMs, bool forceStep, bool noDraw)
@@ -213,6 +217,7 @@ Action Next(s32 stepMs, bool forceStep, bool noDraw)
     }
     if (wake > now + kMinDelayNs)
     {
+        PORT_PROF(kIdle);
         port_DelayNs(wake - now - kMinDelayNs / 2);
     }
     return kIdle;
@@ -234,6 +239,11 @@ void AfterStep()
     port_CountGameStep();
     PortView::Step();
     Trace('S');
+    const Ped* pPed = gGame_0x40 && gGame_0x40->mLocalPlayer ? gGame_0x40->mLocalPlayer->mPlayerPed : NULL;
+    PORT_PROF_COUNT(kDrive, pPed && pPed->mCar ? 1 : 0);
+    PORT_PROF_COUNT(kCarsVisible, gCarManager_6C ? (u8)gCarManager_6C->mVisibleCarsCount : 0);
+    PORT_PROF_COUNT(kPedsOnScreen, gPedManager ? (u8)gPedManager->mNumPedsOnScreen : 0);
+    PORT_PROF_END_STEP();
 }
 
 void BeginDraw()
@@ -259,6 +269,7 @@ void EndDraw()
     sInDraw = false;
     sStatsDraws++;
     sStatsDrawNs += sStats ? port_NowNs() - sStatsT0 : 0;
+    PORT_PROF_END_FRAME();
 }
 
 u32 StepsBeforeDraw()
