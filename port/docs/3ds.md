@@ -192,14 +192,25 @@ the DSP cost nothing measurable. bil walks at 30 frames per second with sound. T
 that possible (bit-exact with the previous output): the limiter scanned its 64-frame lookahead for every
 output frame (a quarter of the Old 3DS core), and each voice now has a loop per sample format with a
 steady-state path. Azahar's GDB stub only shows the main thread: the audio time was measured with tick
-counters and a lowest-priority thread counting idle time on core 0. OpenDSP was tested by its author on a New 3DS with Luma3DS; whether a stock DSP module accepts its
+counters and a lowest-priority thread counting idle time on core 0.
+
+The frontend plays `GTAudio/D.wav` (PCM, 22050 Hz stereo; `A.wav` on the credits page) and the radio the
+stations `1.wav` to `12.wav` and their `a` variants (IMA ADPCM), all as streams (`AIL_open_stream`). A stream
+takes 64 KB: 32 KB of the file read at once, about every 1.5 s for a station and 0.37 s for the menu music, and
+0.37 s of decoded frames, topped up by the audio thread before each mix without the lock the game's sound
+calls take. In Azahar (Old 3DS mode, driving in `ste` with the radio, per 5 s) a station's mix takes 4 % of
+the audio thread and its reading and decoding 3 to 6 % (a read about 10 ms), the heap 26.2 MB. Opening a
+station on the main thread takes 30 to 60 ms the first time a file is opened, 13 to 21 ms after: over
+2000 frames the radio adds one frame over 60 ms per station change (82 ms), none without the radio.
+OpenDSP was tested by its author on a New 3DS with Luma3DS; whether a stock DSP module accepts its
 unsigned image, and its sleep handling, need a console.
 
 ## Running
 
 The game folder is the `.3dsx`'s own folder when it holds `data/fstyle.sty` (from the path the
 Homebrew Launcher passes as `argv[0]`, which libctru sets before the constructors), else `sdmc:/3ds/gta2/`:
-`data/` (without `GTAudio` and `Movie`, about 65 MB), `gta2_registry.ini`, `player/` (the saves), `test/`.
+`data/` (without `Movie`: about 65 MB without `GTAudio`, 355 MB with it), `gta2_registry.ini`, `player/` (the saves), `test/`.
+The frontend's music and the car radio need `data/GTAudio` (the CD's 22 WAVs): without it the game runs silent there.
 Without the data in either, the top screen lists the folders tried and the files expected until START.
 The game's own error boxes (a missing city file, for example), which SDL cannot show on the 3DS, appear on
 the bottom screen until START (`--wrap=SDL_ShowSimpleMessageBox`) rather than the game closing silently.
