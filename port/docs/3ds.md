@@ -50,7 +50,11 @@ Each is small and makes sense on `port/m0` too:
 
 - clang compiles (`--target=armv6k-none-eabihf`), as on Linux: the game needs its MSVC extensions.
   devkitARM's GCC links, with newlib, libstdc++ and libctru. The image of `port/3ds/Dockerfile` is the
-  official `devkitpro/devkitarm` with `clang-22` added.
+  official `devkitpro/devkitarm` with `clang-22` and its linker plugin (`llvm-22-linker-tools`) added.
+- ARM code (not Thumb) for the ARM11 MPCore with VFPv2 (`-mcpu=mpcore -mfpu=vfpv2`), -O2
+  (RelWithDebInfo), unaligned loads and stores as devkitARM's GCC makes them (`-munaligned-access`), and
+  full link time optimisation: the objects are LLVM bitcode, which devkitARM's ld compiles through
+  clang's plugin (`LLVMgold.so`). See Old 3DS, Speed.
 - GCC for ARM uses short enums, clang int-sized ones: SDL3 is built with `-fno-short-enums`
   (`build_sdl3.sh`), since the port shares SDL's structs. libctru and citro3d keep short enums; the
   renderer only passes their enums by value.
@@ -403,6 +407,13 @@ and the main thread 11.4 ms became 7.9. Most of it is Azahar's system call cost:
 Texture uploads went from up to six passes per texture to one per level, 2.5 to 3 times faster
 in Azahar (a 64x64 sprite 2.3 to 0.84 ms, a 128x128 one 9.2 to 3.1 ms; upload time in a frame of a
 long drive at most 7 to 10 ms instead of 19 to 29). Remaining leads: fewer draw calls (about 100 per frame) with a tile atlas. The system core runs the sound (see Sound).
+
+Build options, the same walk, three runs each (main thread CPU per frame, logic step): 7.91 and 3.43 ms
+without them; 7.80 and 3.30 with unaligned access (clang's bare metal default goes byte by byte where it
+cannot prove alignment); 7.33 and 2.90 with full LTO (ThinLTO 7.38 and 2.96); 7.25 and 2.81 with both,
+the build kept. The draw time with its wait for the GPU stays at 12.4 ms, and the `.3dsx` grows from
+2.69 to 2.78 MB with the inlining across files. Azahar has no cache model, so the larger code may cost
+more on hardware than it shows here: the options are worth checking on a console (`GTA2_LOOP_STATS`).
 
 On the 3DS any per-frame file access is expensive: each path component of an `fopen`, `access` or
 `stat` is a request to the FS service (tens of milliseconds in Azahar). The pause menu and the
