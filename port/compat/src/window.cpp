@@ -8,6 +8,7 @@
 #include <map>
 #include <string>
 #include "port_platform.hpp"
+#include "../../src/prof.hpp"
 #include "../../renderer/gl_context.hpp"
 
 namespace
@@ -217,13 +218,17 @@ BOOL WINAPI PeekMessageA(MSG* pMsg, HWND, UINT, UINT, UINT flags)
 {
     if (Queue().empty())
     {
+        PORT_PROF(kPump);
+        PORT_PROF_COUNT(kPumps, 1);
         port_InjectTestInput(port_FrameCount());
         SDL_Event e;
         while (SDL_PollEvent(&e))
         {
+            PORT_PROF_COUNT(kEvents, 1);
             port_OnInputEvent(e);
             Translate(e);
         }
+        PORT_PROF(kPumpPad);
         port_UpdatePad();
     }
     if (Queue().empty())

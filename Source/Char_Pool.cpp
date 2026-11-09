@@ -1,4 +1,9 @@
 #include "Char_Pool.hpp"
+#if defined(GTA2_PORT)
+#include "../port/src/prof.hpp"
+#else
+#define PORT_PROF(part)
+#endif
 #include "ped_group_type.hpp"
 #include "ped_class.hpp"
 #include "ped_fire_mode.hpp"
@@ -586,6 +591,7 @@ void PedManager::SpawnDummies(Camera* pCam)
 MATCH_FUNC(0x470330)
 void PedManager::Dummies()
 {
+    PORT_PROF(kPedsDummies);
     s16 max_dummies = gPedManager->mMaxDummyChars;
     if (gPolice_7B8->mMaxWantedLevel > cop_level_enum::police_3)
     {

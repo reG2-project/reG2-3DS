@@ -1,4 +1,9 @@
 #include "SpriteGrid.hpp"
+#if defined(GTA2_PORT)
+#include "../port/src/prof.hpp"
+#else
+#define PORT_PROF(part)
+#endif
 #include "Camera.hpp"
 #include "Car.hpp"
 #include "Globals.hpp"
@@ -117,6 +122,7 @@ void SpriteGrid::DebugLogAll()
 MATCH_FUNC(0x477bd0)
 bool SpriteGrid::CheckAndHandleCollisionInStrips(Sprite* pSprite)
 {
+    PORT_PROF(kCollide);
     bool bHit = false;
 
     gCollisionCounters->mQueryId++;
@@ -134,6 +140,7 @@ bool SpriteGrid::CheckAndHandleCollisionInStrips(Sprite* pSprite)
 MATCH_FUNC(0x477c30)
 bool SpriteGrid::CheckAndHandleAllCollisionsForSprite(Sprite* pSprite, s32 sprite_type_filter)
 {
+    PORT_PROF(kCollide);
     sSpriteGridSpriteTypeFilter = sprite_type_filter;
     bool bHit = false;
     ++gCollisionCounters->mQueryId;
@@ -252,6 +259,7 @@ void SpriteGrid::SetSpriteToExclude(Sprite* pSprite)
 MATCH_FUNC(0x477e60)
 Sprite* SpriteGrid::FindCollidingSpritePreferType(Sprite* pSprite, s32 desired_sprite_type)
 {
+    PORT_PROF(kCollide);
     sSpriteGridPreferredType = desired_sprite_type;
     sSpriteGridSmallestDistSprite = NULL;
 
@@ -275,6 +283,7 @@ Sprite* SpriteGrid::FindCollidingSpritePreferType(Sprite* pSprite, s32 desired_s
 MATCH_FUNC(0x477f30)
 bool SpriteGrid::CollectRectCollisions(Fix16_Rect* pRect, bool bDeepCheck, s32 exclude_sprite_type, Sprite* pExclude, SpriteList* pOutList)
 {
+    PORT_PROF(kCollide);
     sSpriteGridList = pOutList;
     bool bRet = SpriteGrid::CheckRectForCollisions(pRect, bDeepCheck, exclude_sprite_type, pExclude);
     sSpriteGridList = NULL;
@@ -284,6 +293,7 @@ bool SpriteGrid::CollectRectCollisions(Fix16_Rect* pRect, bool bDeepCheck, s32 e
 MATCH_FUNC(0x477f60)
 bool SpriteGrid::CheckRectForCollisions(Fix16_Rect* pRect, bool bDeepCheck, s32 exclude_sprite_type, Sprite* pExclude)
 {
+    PORT_PROF(kCollide);
     bool bRet = false;
     ++gCollisionCounters->mQueryId;
     pRect->DoSetCurrentRect();

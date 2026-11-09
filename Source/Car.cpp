@@ -1,6 +1,9 @@
 #include "Car.hpp"
 #if defined(GTA2_PORT)
 #include "../port/src/twin_stick.hpp"
+#include "../port/src/prof.hpp"
+#else
+#define PORT_PROF(part)
 #endif
 #include "car_shop_event.hpp"
 #include "car_thread_trigger.hpp"
@@ -5848,6 +5851,7 @@ bool Car::TrailerUpdate()
 MATCH_FUNC(0x443170)
 bool Car::PoolUpdate()
 {
+    PORT_PROF(kCarsCar);
     if (!this->mLastSeenTimer)
     {
         gCarManager_6C->mVisibleCarsCount++;
@@ -7029,6 +7033,7 @@ bool TrafficSpawner::SpawnTrafficCarFacing(s32 angle_face)
 MATCH_FUNC(0x583670)
 void TrafficSpawner::GenerateTraffic()
 {
+    PORT_PROF(kCarsTraffic);
     if (!bSkip_recycling)
     {
         mCam = gGame_0x40->IteratePlayerCamera();

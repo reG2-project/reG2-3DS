@@ -2,6 +2,7 @@
 #include "c3d_context.hpp"
 #include "fps_overlay.hpp"
 #include "stats_3ds.hpp"
+#include "../src/prof.hpp"
 #include "../src/hud_screen.hpp"
 #include "hud_theme.hpp"
 #include "minimap.hpp"
@@ -626,8 +627,20 @@ void C3DRenderer::Impl::BeginFrame()
     const u64 t0 = svcGetSystemTick();
     // GTA2_UNCAPPED (frame_loop.cpp): without waiting for the screens' refresh, frames the screens never show.
     static const bool sUncapped = getenv("GTA2_UNCAPPED") != NULL;
-    C3D_FrameBegin(sUncapped ? 0 : C3D_FRAME_SYNCDRAW);
+    // C3D_FRAME_SYNCDRAW's two waits apart: the screens' next refresh, then the GPU.
+    if (!sUncapped)
+    {
+        PORT_PROF_EXCLUDED(kWaitVsync);
+        C3D_FrameSync();
+    }
+    {
+        PORT_PROF_EXCLUDED(kWaitGpu);
+        C3D_FrameBegin(0);
+    }
     Stats3DS_AddFrameBegin(svcGetSystemTick() - t0);
+    // Those of the previous frame, now over.
+    PORT_PROF_ADD_MS(kGpu, C3D_GetDrawingTime());
+    PORT_PROF_ADD_MS(kC3dCpu, C3D_GetProcessingTime());
     mInFrame = true;
     mFrameDrew = false;
     mFrame++;
@@ -749,6 +762,7 @@ void C3DRenderer::Impl::Flush()
     {
         return;
     }
+    PORT_PROF(kFlush);
     if (mBatchRule)
     {
         const HudBatch batch = {mBatchStart, n, mBatchTex, mBatchState, mBatchScissor, mBatchRule->scroll};
@@ -771,6 +785,8 @@ void C3DRenderer::Impl::Flush()
     mBatchStart = mVertCount;
     mOwner->mDrawCalls++;
     mOwner->mVertices += (u32)n;
+    PORT_PROF_COUNT(kDrawCalls, 1);
+    PORT_PROF_COUNT(kVertices, (u32)n);
 }
 
 // How far down the scrolling part is drawn this frame: from all of its overflow (its top shown) to none.
@@ -825,6 +841,7 @@ u32 C3DRenderer::Impl::BottomSignature(f32 scroll, u32 minimap) const
 // or it was drawn less than kBottomEvery frames ago, it is left alone and keeps showing its last frame.
 void C3DRenderer::Impl::DrawHud()
 {
+    PORT_PROF(kPresentBottom);
     const u64 t0 = svcGetSystemTick();
     const f32 scroll = ScrollOffset();
     if (!mBottom)
@@ -880,6 +897,8 @@ void C3DRenderer::Impl::DrawHud()
         C3D_DrawArrays(GPU_TRIANGLES, b.start, b.count);
         mOwner->mDrawCalls++;
         mOwner->mVertices += (u32)b.count;
+        PORT_PROF_COUNT(kDrawCalls, 1);
+        PORT_PROF_COUNT(kVertices, (u32)b.count);
     }
     mHudBatches.clear();
     Stats3DS_AddBottom(svcGetSystemTick() - t0, true);
@@ -888,6 +907,7 @@ void C3DRenderer::Impl::DrawHud()
 // The FPS overlay over the top screen's corner, texel for pixel.
 void C3DRenderer::Impl::DrawOverlay()
 {
+    PORT_PROF(kPresentOverlay);
     s32 w, h;
     RTexture* pTex = FpsOverlay::Update(*mOwner, &w, &h);
     if (!pTex || !pTex->mValid)
@@ -967,6 +987,7 @@ void C3DRenderer::Impl::DrawTriangles(const RVertex* pVerts, s32 count, RTexture
 
 void C3DRenderer::Impl::ApplyState(RTexture* pTex, u32 state, const ScreenRect& scissor)
 {
+    PORT_PROF_COUNT(kStates, 1);
     if (!mStateValid || scissor != mAppliedScissor)
     {
         // Mtx_OrthoTilt turns the screen: x runs down the rows of the target (400 on top), y across its columns.
@@ -1032,6 +1053,7 @@ void C3DRenderer::Impl::ApplyState(RTexture* pTex, u32 state, const ScreenRect& 
     if (mBoundTex != &pBind->mTex || mBoundParam != pBind->mTex.param || mBoundLod != pBind->mTex.lodParam)
     {
         C3D_TexBind(0, &pBind->mTex);
+        PORT_PROF_COUNT(kBinds, 1);
         mBoundTex = &pBind->mTex;
         mBoundParam = pBind->mTex.param;
         mBoundLod = pBind->mTex.lodParam;
@@ -1277,6 +1299,7 @@ void C3DRenderer::Present(s32, s32)
     {
         return;
     }
+    PORT_PROF(kPresent);
     // A frame without draws shows the targets again.
     mImpl->BeginFrame();
     mImpl->Flush();
@@ -1290,7 +1313,10 @@ void C3DRenderer::Present(s32, s32)
         GSPGPU_FlushDataCache(p->mVerts, p->mVertCount * sizeof(C3DVertex));
     }
     const u64 t0 = svcGetSystemTick();
-    C3D_FrameEnd(0);
+    {
+        PORT_PROF(kPresentFrameEnd);
+        C3D_FrameEnd(0);
+    }
     p->mInFrame = false;
     Stats3DS_SetTextures(p->mTexCount, p->mTexBytes, p->mCachedBytes, p->mEvictions, p->mAllocFails);
     Stats3DS_Frame(svcGetSystemTick() - t0);
@@ -1318,6 +1344,8 @@ void C3DRenderer::UploadTexture(RTexture* pTex, s32 width, s32 height, const u32
     const s32 ch = height < kMaxTexSize ? height : kMaxTexSize;
     const s32 tw = Pow2(cw);
     const s32 th = Pow2(ch);
+    PORT_PROF_EXCLUDED(kTexUpload);
+    PORT_PROF_COUNT(kUploads, 1);
     const u64 t0 = svcGetSystemTick();
     // Partial alpha changes the colours when premultiplied, so only a scan tells their format.
     if (!(texels & RTX_KNOWN) || (mipmaps == RMIP_ALPHA && !(texels & RTX_BINARY)))
@@ -1463,6 +1491,7 @@ void C3DRenderer::DrawTriangles(const RVertex* pVerts, s32 count, RTexture* pTex
     {
         return;
     }
+    PORT_PROF(kPrimC3d);
     if (!pTex || !pTex->mValid || (state & RS_NO_TEXTURE))
     {
         pTex = 0;

@@ -66,6 +66,7 @@
 #include "TextTable.hpp"
 #if defined(GTA2_PORT)
 #include "../port/src/frame_loop.hpp"
+#include "../port/src/prof.hpp"
 #endif
 
 DEFINE_STATIC_GLOBAL(u8, sNetDisconnectPlayersBits, 0x6F56B8);
@@ -1469,11 +1470,15 @@ static bool PortRunGameFrame()
         case PortFrameLoop::kStep:
             if (sbInputsPending)
             {
+                PORT_PROF(kInputs);
                 do_network_and_local_inputs();
                 sbInputsPending = false;
             }
             PortFrameLoop::BeforeStep();
-            exit_requested = ExecuteGameTimed();
+            {
+                PORT_PROF(kStep);
+                exit_requested = ExecuteGameTimed();
+            }
             PortFrameLoop::AfterStep();
             sbForceGameUpdate = false;
             sbInputsPending = true;
@@ -1481,7 +1486,10 @@ static bool PortRunGameFrame()
             break;
         case PortFrameLoop::kDraw:
             PortFrameLoop::BeginDraw();
-            DrawAndFlip();
+            {
+                PORT_PROF(kDraw);
+                DrawAndFlip();
+            }
             PortFrameLoop::EndDraw();
             drew_frame = true;
             break;
