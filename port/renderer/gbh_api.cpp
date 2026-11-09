@@ -141,13 +141,9 @@ void LogCall(const char* func, u32 flags, STexture* t, u32 colour)
     gCmd.Call(func, flags, t ? t->field_0_id : 0, t ? t->field_E_width : 0, t ? t->field_10_height : 0, colour & 0xFF);
 }
 
-// Same fields as the reference log of the D3D calls: D3D render state values, texel units.
-void LogPrim(const Vert* pVerts, s32 count, u32 state, STexture* t, bool blit)
+// Same fields as the reference log of the D3D calls: D3D render state values, texel units. While gCmd.Active().
+__attribute__((noinline)) void LogPrim(const Vert* pVerts, s32 count, u32 state, STexture* t, bool blit)
 {
-    if (!gCmd.Active())
-    {
-        return;
-    }
     u32 st[5] = {0, 0, 0, 2, 2};
     if (state & RS_BLEND_ADD)
     {
@@ -588,11 +584,11 @@ u32 NearLights(const Vert* pWorld, s32 count, u32 first = 0)
         {
             for (u32 w = first / 32; w < gGrid.mWords; w++)
             {
-    mask[first / 32] &= ~((1u << (first % 32)) - 1);
                 mask[w] |= gGrid.mMask[cy * kGridCells + cx][w];
             }
         }
     }
+    mask[first / 32] &= ~((1u << (first % 32)) - 1);
     u32 n = 0, tests = 0;
     for (u32 w = first / 32; w < gGrid.mWords; w++)
     {
@@ -670,7 +666,8 @@ u32 ArgbToRgba(u32 c)
     return ((c >> 16) & 0xFF) | (c & 0xFF00) | ((c & 0xFF) << 16) | (c & 0xFF000000u);
 }
 
-void Trace(const char* what, u32 flags, STexture* pTexture, const Vert* pVerts, s32 count, u32 colour)
+// Out of line, as the other rare paths of a primitive: its common path stays short for the 3DS's small instruction cache.
+__attribute__((noinline)) void Trace(const char* what, u32 flags, STexture* pTexture, const Vert* pVerts, s32 count, u32 colour)
 {
     fprintf(stderr, "%s f=%05x tex=%u(%ux%u) c=%u", what, flags, pTexture ? pTexture->field_0_id : 0,
             pTexture ? pTexture->field_E_width : 0, pTexture ? pTexture->field_10_height : 0, colour);
@@ -682,13 +679,19 @@ void Trace(const char* what, u32 flags, STexture* pTexture, const Vert* pVerts, 
     fprintf(stderr, "\n");
 }
 
+__attribute__((noinline)) void TraceState(u32 state, const Vert* pVerts, s32 count)
+{
+    fprintf(stderr, "  -> amb=%.1f lights=%u state=%x diff=%08x %08x %08x %08x\n", gAmbient[0], gNumLights, state, pVerts[0].diff,
+            pVerts[1].diff, pVerts[2].diff, count > 3 ? pVerts[3].diff : 0);
+}
+
 const u32 FLAG_INTERNAL_BLIT = 0x80000000u;
 // The port's sprite shadow (port/src/shadows.cpp): a quad with world positions in pVerts[4..7] and its blur
 // radius in the red channel (texels * 32), drawn soft when the option is on.
 const u32 FLAG_SOFT_SHADOW = 0x40000000u;
 
 // Grows a sprite quad (corners in the order of increasing u, then v) by its blur radius plus a texel.
-void ExpandShadow(Vert* pVerts)
+__attribute__((noinline)) void ExpandShadow(Vert* pVerts)
 {
     const f32 du = pVerts[1].u - pVerts[0].u;
     const f32 dv = pVerts[3].v - pVerts[0].v;
@@ -714,6 +717,51 @@ void ExpandShadow(Vert* pVerts)
         pVerts[i].u += i == 1 || i == 2 ? e : -e;
         pVerts[i].v += i >= 2 ? e : -e;
     }
+}
+
+// LightCorners' colours before lighting.
+u32 gUnlit[4];
+
+// The corners' lit colours, gUnlit the colours before. Whether the vertex shader lights them instead.
+__attribute__((noinline)) bool LightCorners(Vert* pVerts, s32 count, u8 shade, bool lit, bool shadowLit, bool perPixel)
+{
+    PORT_PROF(kPrimLight);
+    PORT_PROF_COUNT(kLitPrims, 1);
+    if (lit && !perPixel && gLightsDirty && gRenderer->MaxShaderLights() >= 0)
+    {
+        UploadLights();
+    }
+    const bool shaderLit = lit && !perPixel && gShaderLights && NearLights(pVerts + 4, count, gShaderLightsEnd) == 0;
+    const u32 numNear = (lit && !shaderLit) || (shadowLit && !perPixel) ? NearLights(pVerts + 4, count) : 0;
+    if (lit)
+    {
+        for (s32 i = 0; i < count; i++)
+        {
+            gUnlit[i] = pVerts[i].diff;
+            if (!shaderLit)
+            {
+                pVerts[i].diff = LightVertex(pVerts[i + 4], shade, pVerts[i].diff, numNear);
+            }
+        }
+    }
+    else if (shadowLit)
+    {
+        // A shadow takes away the ambient light and half of the lights', so it fades in a lit pool but not in
+        // the dark (per pixel in the shader).
+        for (s32 i = 0; i < count; i++)
+        {
+            gUnlit[i] = 0xFFFFFFFFu;
+            if (!perPixel)
+            {
+                const u32 l = LightVertex(pVerts[i + 4], 255, 0xFFFFFFu, numNear);
+                const f32 sum = (f32)(((l >> 16) & 0xFF) + ((l >> 8) & 0xFF) + (l & 0xFF));
+                const f32 ratio = (gAmbient[0] + gAmbient[1] + gAmbient[2]) / (sum > 1.0f ? sum : 1.0f);
+                const u32 a = (u32)((pVerts[i].diff >> 24) * (0.5f + 0.5f * (ratio < 1.0f ? ratio : 1.0f)));
+                pVerts[i].diff = (pVerts[i].diff & 0xFFFFFFu) | (a << 24);
+            }
+        }
+    }
+    return shaderLit;
 }
 
 void RenderVertsUnturned(u32 flags, STexture* pTexture, Vert* pVerts, s32 count, u32 baseColour)
@@ -803,48 +851,7 @@ void RenderVertsUnturned(u32 flags, STexture* pTexture, Vert* pVerts, s32 count,
     const bool shadowLit = softShadow && !fullAmbient;
     const bool perPixel = (lit || shadowLit) && gRenderer->Options().mPerPixelLighting;
     PORT_PROF_END();
-    // Static, as sFan below: -ftrivial-auto-var-init would clear a local array on every call.
-    static u32 sUnlit[4];
-    bool shaderLit = false;
-    if (lit || shadowLit)
-    {
-        PORT_PROF(kPrimLight);
-        PORT_PROF_COUNT(kLitPrims, 1);
-        if (lit && !perPixel && gLightsDirty && gRenderer->MaxShaderLights() >= 0)
-        {
-            UploadLights();
-        }
-        shaderLit = lit && !perPixel && gShaderLights && NearLights(pVerts + 4, count, gShaderLightsEnd) == 0;
-        const u32 numNear = (lit && !shaderLit) || (shadowLit && !perPixel) ? NearLights(pVerts + 4, count) : 0;
-        if (lit)
-        {
-            for (s32 i = 0; i < count; i++)
-            {
-                sUnlit[i] = pVerts[i].diff;
-                if (!shaderLit)
-                {
-                    pVerts[i].diff = LightVertex(pVerts[i + 4], shade, pVerts[i].diff, numNear);
-                }
-            }
-        }
-        else if (shadowLit)
-        {
-            // A shadow takes away the ambient light and half of the lights', so it fades in a lit pool but not in
-            // the dark (per pixel in the shader).
-            for (s32 i = 0; i < count; i++)
-            {
-                sUnlit[i] = 0xFFFFFFFFu;
-                if (!perPixel)
-                {
-                    const u32 l = LightVertex(pVerts[i + 4], 255, 0xFFFFFFu, numNear);
-                    const f32 sum = (f32)(((l >> 16) & 0xFF) + ((l >> 8) & 0xFF) + (l & 0xFF));
-                    const f32 ratio = (gAmbient[0] + gAmbient[1] + gAmbient[2]) / (sum > 1.0f ? sum : 1.0f);
-                    const u32 a = (u32)((pVerts[i].diff >> 24) * (0.5f + 0.5f * (ratio < 1.0f ? ratio : 1.0f)));
-                    pVerts[i].diff = (pVerts[i].diff & 0xFFFFFFu) | (a << 24);
-                }
-            }
-        }
-    }
+    const bool shaderLit = (lit || shadowLit) && LightCorners(pVerts, count, shade, lit, shadowLit, perPixel);
     PORT_PROF_SECTION(kPrimVerts);
     if (perPixel && gLightsDirty)
     {
@@ -875,8 +882,12 @@ void RenderVertsUnturned(u32 flags, STexture* pTexture, Vert* pVerts, s32 count,
         state |= RS_SHADOW;
     }
 
-    LogPrim(pVerts, count, state, pTexture, (flags & FLAG_INTERNAL_BLIT) != 0);
+    if (gCmd.Active())
+    {
+        LogPrim(pVerts, count, state, pTexture, (flags & FLAG_INTERNAL_BLIT) != 0);
+    }
 
+    // Static: -ftrivial-auto-var-init would clear a local array on every call.
     static RVertex sFan[4];
     const bool vertexLights = perPixel || shaderLit;
     for (s32 i = 0; i < count; i++)
@@ -893,7 +904,7 @@ void RenderVertsUnturned(u32 flags, STexture* pTexture, Vert* pVerts, s32 count,
             r.wx = pVerts[i + 4].x;
             r.wy = pVerts[i + 4].y;
             r.wz = pVerts[i + 4].z;
-            r.unlit = ArgbToRgba(sUnlit[i]);
+            r.unlit = ArgbToRgba(gUnlit[i]);
             r.shade = shade / 255.0f;
             r.lit = 1.0f;
         }
@@ -907,8 +918,7 @@ void RenderVertsUnturned(u32 flags, STexture* pTexture, Vert* pVerts, s32 count,
     }
     if (gTraceScene && gSceneCount == gTraceScene)
     {
-        fprintf(stderr, "  -> amb=%.1f lights=%u state=%x diff=%08x %08x %08x %08x\n", gAmbient[0], gNumLights, state, pVerts[0].diff,
-                pVerts[1].diff, pVerts[2].diff, count > 3 ? pVerts[3].diff : 0);
+        TraceState(state, pVerts, count);
     }
     PORT_PROF_END();
     gRenderer->DrawFan(sFan, count, pTex, state);
