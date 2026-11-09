@@ -10,7 +10,7 @@ enum Feature
     kFastFrames, // frame limits above the original's 30
     kGamma, // BRIGHTNESS
     kSafeArea, // a margin for TVs that crop the picture
-    kRendererOptions, // the OpenGL renderer's GRAPHICS page and its added lights
+    kRendererOptions, // the OpenGL renderer's GRAPHICS page; the added lights need its pixel lighting
     k3dSound, // positional sound (OpenAL Soft) to turn on or off
     kRebinding, // keys, mouse and pad inputs bound in the menu
     kTurningView, // the CHINATOWN camera, turned and tilted with the player's vehicle

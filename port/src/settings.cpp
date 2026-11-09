@@ -334,6 +334,11 @@ s32 ScreenDefault(Id id)
     {
         return 12;
     }
+    // Lit per vertex, without the renderer's options (the 3DS), the port's lamps are on by default.
+    if (id == kHeadlights || id == kLightEffects)
+    {
+        return !Available(kPerPixelLighting);
+    }
     return id == kLighting || id == kExplodingScores || id == kVsync || id == kClock || id == kAimCamera ? 1 : 0;
 }
 
@@ -580,8 +585,6 @@ bool Available(Id id)
         case kTextureFilter:
         case kAntiAliasing:
         case kShadows:
-        case kHeadlights:
-        case kLightEffects:
             return P::Has(P::kRendererOptions);
         case kControls:
         case kAimCamera:
@@ -620,7 +623,7 @@ Id Requirement(Id id)
         return kCamera;
     }
 #if defined(GTA2_PORT_SDL)
-    if (id == kHeadlights || id == kLightEffects)
+    if ((id == kHeadlights || id == kLightEffects) && Available(kPerPixelLighting))
     {
         return kPerPixelLighting;
     }
