@@ -58,7 +58,8 @@ class C3DRenderer : public IRenderer
     void DrawTriangles(const RVertex* pVerts, s32 count, RTexture* pTex, u32 state) override;
     void SetClipRect(f32 left, f32 top, f32 right, f32 bottom) override;
     const RenderOptions& Options() const override { return mOptions; }
-    void SetLights(const RLight*, s32, const f32*, f32) override {}
+    void SetLights(const RLight* pLights, s32 count, const f32* pAmbient, f32 unlitAmbient) override;
+    s32 MaxShaderLights() const override;
     u32 GetDrawCallCount() const override { return mDrawCalls; }
     // The HUD's groups placed on the bottom screen, 1:1 in layout pixels.
     bool SetHudGroup(s32 group) override;
