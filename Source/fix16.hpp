@@ -11,6 +11,26 @@
 
 class Fix16;
 
+#if defined(GTA2_PORT) && defined(__arm__) && defined(__ARM_FP) && !defined(__ARM_FEATURE_IDIV)
+#define PORT_FIX16_VFP_DIVIDE
+__attribute__((noinline)) s32 PortFix16DivideInt64(s32 a, s32 b);
+
+// (a << 14) / b as the 64-bit division gives it, on the VFP where the CPU has no divide instruction: exact,
+// as |a << 14| < 2^53 keeps the rounded quotient on the same side of every integer.
+inline s32 PortFix16Divide(s32 a, s32 b)
+{
+    if (b != 0)
+    {
+        const f64 q = a * 16384.0 / b;
+        if (q > -2147483648.0 && q < 2147483648.0)
+        {
+            return static_cast<s32>(q);
+        }
+    }
+    return PortFix16DivideInt64(a, b);
+}
+#endif
+
 EXTERN_GLOBAL(Fix16, kFP16Zero_6FE20C);
 EXTERN_GLOBAL(Fix16, kFPZero);
 EXTERN_GLOBAL(Fix16, kFpZero_6F8E10);
@@ -110,7 +130,11 @@ class Fix16
     // 10.5 non inline addr is 0x539F90
     Fix16& operator/=(const Fix16& rhs)
     {
+#if defined(PORT_FIX16_VFP_DIVIDE)
+        mValue = PortFix16Divide(mValue, rhs.mValue);
+#else
         mValue = static_cast<s32>((static_cast<__int64>(mValue) << 14) / rhs.mValue);
+#endif
         return *this;
     }
 
@@ -394,7 +418,11 @@ class Fix16
     //MATCH_FUNC(0x436A20)
     Fix16 operator/(const Fix16& in) const
     {
+#if defined(PORT_FIX16_VFP_DIVIDE)
+        s32 value = PortFix16Divide(mValue, in.mValue);
+#else
         s32 value = static_cast<s32>((static_cast<__int64>(mValue) << 14) / in.mValue);
+#endif
         return Fix16(value, 0);
     }
 

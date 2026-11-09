@@ -35,10 +35,21 @@ Fix16 Fix16::Subtract(const Fix16& in) const
     return Fix16(value, 0);
 }
 
+#if defined(PORT_FIX16_VFP_DIVIDE)
+s32 PortFix16DivideInt64(s32 a, s32 b)
+{
+    return static_cast<s32>((static_cast<__int64>(a) << 14) / b);
+}
+#endif
+
 MATCH_FUNC(0x436A20)
 Fix16 Fix16::Divide(const Fix16& in) const
 {
+#if defined(PORT_FIX16_VFP_DIVIDE)
+    s32 value = PortFix16Divide(mValue, in.mValue);
+#else
     s32 value = static_cast<s32>((static_cast<__int64>(mValue) << 14) / in.mValue);
+#endif
     return Fix16(value, 0);
 }
 
@@ -57,7 +68,11 @@ s32 Fix16::IsGreater(const Fix16& other) const
 MATCH_FUNC(0x539F90)
 Fix16& Fix16::DivideAssign(const Fix16& rhs)
 {
+#if defined(PORT_FIX16_VFP_DIVIDE)
+    mValue = PortFix16Divide(mValue, rhs.mValue);
+#else
     mValue = static_cast<s32>((static_cast<__int64>(mValue) << 14) / rhs.mValue);
+#endif
     return *this;
 }
 

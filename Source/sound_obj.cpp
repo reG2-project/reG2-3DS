@@ -374,10 +374,19 @@ void sound_obj::ProcessType1_Sprite(s32 idx)
         this->msQueueSample.mEntityIndex = idx;
         this->msQueueSample.mpReleaseSource = NULL;
 
+#if defined(GTA2_PORT)
+        // A car past the siren's distance plays nothing that reads it, but a train (ProcessTrainCab).
+        this->mDistSquared = ComputeEmitterDistanceSquared();
+        const Car* pFarCar = this->mDistSquared >= Fix16(400) ? entity.mpObj->AsCar() : NULL;
+        entity.mbHasSolidAbove = pFarCar && !pFarCar->IsTrainModel() ?
+            false :
+            gMap_0x370->CheckColumnHasSolidAbove(msQueueSample.mObj.mX, msQueueSample.mObj.mY, msQueueSample.mObj.mZ);
+#else
         entity.mbHasSolidAbove = gMap_0x370->CheckColumnHasSolidAbove(msQueueSample.mObj.mX,
                                                                       msQueueSample.mObj.mY,
                                                                       msQueueSample.mObj.mZ);
         this->mDistSquared = ComputeEmitterDistanceSquared();
+#endif
         this->mDistCalculated = false;
 
         if (entity.mpObj->AsCharB4())
@@ -1425,6 +1434,17 @@ void sound_obj::ProcessOtherCarTypes(Sound_Params* pParams, SoundPosEntry* pAllo
             HandleAICarEngineSound(pParams);
             HandleCarTireScrubSound(pParams);
         }
+#if defined(GTA2_PORT)
+        // Past the farthest of these sounds, the siren's, only the handlers that keep a state have work to do.
+        if (mDistSquared >= Fix16(400))
+        {
+            HandleCarHornSound(pParams, pAlloc);
+            HandleHeavyVehicleStopSound(pParams, pAlloc);
+            PlayCarShopEventSound(pParams);
+            HandleAICarHornBeep(pParams);
+            return;
+        }
+#endif
         HandleCarDoorSounds(pParams);
         HandleSirenActivationSound(pParams);
         HandleCarAlarmSound(pParams);

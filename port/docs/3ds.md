@@ -261,9 +261,11 @@ also notes the sounds that ended and frees the channels faded out. SDL opens no 
 The frontend plays `GTAudio/D.wav` (PCM, 22050 Hz stereo; `A.wav` on the credits page) and the radio the
 stations `1.wav` to `12.wav` and their `a` variants (IMA ADPCM), all as streams (`AIL_open_stream`). A stream
 takes 64 KB: 32 KB of the file read at once, about every 1.5 s for a station and 0.37 s for the menu music, and
-0.37 s of decoded frames, topped up without the lock the game's sound calls take. Opening a
-station on the main thread takes 30 to 60 ms the first time a file is opened, 13 to 21 ms after: over
-2000 frames the radio adds one frame over 60 ms per station change (82 ms), none without the radio.
+0.37 s of decoded frames, topped up without the lock the game's sound calls take. Only the first open
+of a file runs on the main thread, 30 to 60 ms with its header read in Azahar (an Old 3DS driving showed
+25 to 78 ms spikes in the logic's sound part about every 5 s, most likely the opens and closes): the format
+is kept, and the audio thread opens the file again and closes it, so a later open costs the game 0.1 ms
+and a close nothing.
 
 The system core's time in Azahar (Old 3DS mode, per 5 s, the same scripted runs): with the CPU mixer, the
 audio thread took 16 to 17 % in the frontend with its music, 31 to 50 % driving a police car through traffic
@@ -568,6 +570,30 @@ of 150), and 0.65 to 0.87 ms in a frame that draws it. The frame rate stays at 3
 the territory edges and icons and the game's sprites (ste, the same walk on both builds): 0.029 ms
 standing against 0.027, 0.19 against 0.17 walking with the same frames drawn, 0.69 to 0.74 ms in a frame
 that draws it against 0.59 to 0.66.
+
+The logic step on an Old 3DS (`GTA2_3DS_PROF`, driving at night, 26 fps): 7.6 ms, of it cars 3.9 (the
+visit of the 63 or so cars 1.2, the AI of about 15 of them 1.0, the physics of 17 1.6), peds 1.6, sound
+1.1 (the entities 0.9, with the spikes above), collisions 0.5. Three costs that change nothing in the game
+are gone. Fix16's division, `(a << 14) / b` in 64 bits, went through the C library's 64-bit divide (the
+ARM11 has no divide instruction), 150 to 330 times a step and frame; it is the VFP's double division now,
+exact as `|a << 14| < 2^53` (2e8 random and edge pairs; in the scripted drive 581,000 divisions, all the
+same as the 64-bit one). The sound pass ran ten handlers for each car, though about 140 of the 150 are
+past every distance six of them check (20 blocks at most) and those keep no state before that check; for
+them only the four that do run, and their column's roof test (for the volume) is not made, but for
+trains. The stream opens and closes moved off the main thread (Sound). In Azahar, the same lockstep drive
+(2600 steps, night): the step 2.36 to 2.22 ms, the physics 0.34 to 0.30, the sound entities 0.43 to
+0.37. The checks: a hash of every car's and ped's position, rotation and speed, of `rand()`'s state and
+of every sample the sound queues, every 50 steps, the same in both builds over the drive and the walks,
+and the same frozen screenshots.
+
+Left as they were. The visit of a parked car spends a quarter of its time taking the car out of the
+sprite grid's cells and putting it back (0.12 ms per step in Azahar for about 100 cars): keeping such a
+car in place and moving its links to the front of their cells, as the removal and the re-add leave them,
+saved 0.03 ms but changed the order of the collision sounds, so it was dropped; the rest of the visit is
+the game's own state (doors, lights, despawning). The physics and the collisions have no other obvious
+cost of this kind (30 square roots a step, through the VFP; the grid's tests visit the cells under each
+sprite only); on hardware they are 6 times slower than in Azahar against 4 for the rest, which points to
+memory access (the map's columns and blocks, the grid's lists), which Azahar does not model.
 
 ## Next steps
 
