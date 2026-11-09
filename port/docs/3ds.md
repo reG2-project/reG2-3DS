@@ -97,23 +97,41 @@ texts, big messages and arrows. The frontend and the pause menu stay on the top 
 
 The bottom screen's last row holds the brief on the left and a minimap on the right (`port/3ds/minimap*`):
 the tube frame E of the design study (`port/docs/minimap`), north up, 21x21 blocks around the player at 4
-pixels per block. It is meant to be fair, so it shows little:
+pixels per block. It is meant to be fair, so it shows little, and every colour and icon on it comes from
+the city's style:
 
-- the ground by block kind (water, road, pavement, field, buildings lighter when taller), with the
-  study's rims and shadows and a little of each lid's colour;
-- the gang territory the player is in, as a tint in the gang's colour (its phone arrow's), stronger
-  along its edge; the other gangs' territories are not shown;
-- the player's arrow;
-- that gang's phones, under the rules of the game's own phone arrows (`Hud_Arrow::CheckVisibility`):
-  only inside the territory, not on a mission or in an arrow blocker zone, a mission phone only once the
-  player has the respect it asks for (green, yellow, red), answered phones left out; the info phone is a
-  square in the gang's colour. A phone off the map shows as an arrow on its edge, in its direction.
+- the ground in the mean colour of each block's lid tile, lighter as the block stands taller, with the
+  study's rims and shadows; where no block has a lid, and around the city, the mean colour of the city's
+  water tiles;
+- the gangs the respect meters show: each territory's edge (the map's gang zones) dashed in the gang's
+  colour, with a shade outside it, so a territory shows before the player walks in; the territory the
+  player is in under a light tint of that colour. A gang's colour is the bright half of the arrow that
+  points to its phones (user sprite `arrow`, `Hud_Arrow::DrawArrow`);
+- the player's arrow, along the ped's (or its car's) heading: a heading a moves by (sin a, cos a), so 0
+  faces down the map;
+- inside a territory, that gang's phones, under the rules of the game's own phone arrows
+  (`Hud_Arrow::CheckVisibility`): only inside the territory, not on a mission or in an arrow blocker zone,
+  a mission phone only once the player has the respect it asks for, answered phones left out. A mission
+  phone is the pip of the game's phone arrows (user sprites 8 to 10: yellow, green, red), the info phone
+  the gang's respect meter icon (user sprite 63 + arrow). A phone off the map is the game's phone arrow
+  in the gang's colour on the map's edge, turned towards it, with its pip (none for the info phone), as
+  the top screen draws it;
+- outside every territory, each gang's respect meter icon at the nearest block of its territory, or on
+  the map's edge in its direction.
 
 Nothing else: no pickups, hidden weapons, secret tokens, frenzies, garages, churches or mission targets.
-The map is built once per city from the map and tiles in memory (about 260 ms in Azahar's Old 3DS mode,
-260 KB of heap while it runs) into a 512x512 RGB565 texture filled in place, 2x2 texels per block (512 KB
-of linear memory); the tint is a 256x256 A8 texture (64 KB) rebuilt when the gang changes, and the frame
-and markers, embedded at build time from the study's PNGs by `embed_png.py`, a 32 KB atlas. The game's
+Arrows and icons are drawn at half size, as the bottom screen draws the HUD, pips at full size. The only
+colours of the port's own are shades (black with alpha: rims, shadows, the tube's shadow, the edges'
+shade) and the frame and player arrow, original art embedded at build time from the study's PNGs by
+`embed_png.py`.
+
+The map is built once per city from the map and tiles in memory (about 200 ms in Azahar's Old 3DS mode,
+330 KB of heap while it runs) into a 512x512 RGB565 texture filled in place, 2x2 texels per block (512 KB
+of linear memory). The territory edges are a 256x256 RGBA4 texture (128 KB, built when the gangs are set
+up, about 20 ms), the light tint over the player's territory a 256x256 A8 texture (64 KB) drawn in the
+gang's colour and filled again when the player changes territory (2 to 3 ms) from each block's gang,
+kept in the textures' order (64 KB of heap). The frame and the player's arrow are a 32 KB atlas, the
+game's sprites for the markers a 16 KB sheet made per city. The game's
 headers and the renderer's clash, so `minimap_game.cpp` reads the game and `minimap.cpp` draws.
 `GTA2_3DS_MINIMAP=wide` gives the map the whole row while no brief shows; `off` leaves it out and gives the
 row to the brief.
@@ -251,8 +269,8 @@ Measured in Azahar's Old 3DS mode with `GTA2_3DS_STATS` (peaks over a minute and
 | bil with sound (SDL's dummy driver) | 22.2 MB | 6.8 MB |
 
 New 3DS mode gives the same figures: the game's needs do not depend on the model. The sound bank of a
-city (6 MB) is the only addition still to come with the DSP. The minimap adds its 608 KB of linear memory
-(walking for 100 s with sound: bil 8.1 to 8.7 MB, ste 8.2 to 8.8 MB at peak); the heap does not change.
+city (6 MB) is the only addition still to come with the DSP. The minimap adds its 752 KB of linear memory
+and 64 KB of heap.
 
 ### Speed
 
@@ -293,7 +311,10 @@ draws at the 30 fps limit.
 The bottom screen's CPU time per frame (`GTA2_3DS_STATS`, walking, Old 3DS mode): 0.38 to 0.42 ms
 (0.45 to 0.51 at most) when it was drawn every frame without a minimap; with the minimap and drawn only
 on a change, 0.05 ms standing (5 frames of 150 drawn, for the clock), 0.18 to 0.44 ms walking (up to 75
-of 150), and 0.65 to 0.87 ms in a frame that draws it. The frame rate stays at 30.3 in bil and ste.
+of 150), and 0.65 to 0.87 ms in a frame that draws it. The frame rate stays at 30.3 in bil and ste. With
+the territory edges and icons and the game's sprites (ste, the same walk on both builds): 0.029 ms
+standing against 0.027, 0.19 against 0.17 walking with the same frames drawn, 0.69 to 0.74 ms in a frame
+that draws it against 0.59 to 0.66.
 
 ## Next steps
 

@@ -1,6 +1,6 @@
 # A minimap for the port
 
-Status: design study. The 3DS port draws frame E with the block-kind map on its bottom screen, with
+Status: design study. The 3DS port draws frame E with a lid colour map on its bottom screen, with
 a stingier choice of layers (`port/docs/3ds.md`, Renderer). This note records the frame designs, the
 map treatments, where every map layer comes from, and how it would be built.
 

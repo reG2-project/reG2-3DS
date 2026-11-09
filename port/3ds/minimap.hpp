@@ -1,5 +1,5 @@
-// The bottom screen's minimap, north up: the ground around the player, the gang territory the player is in and
-// that gang's phones, from what the game holds in memory. Nothing secret: no pickups, tokens, frenzies or garages.
+// The bottom screen's minimap, north up: the ground around the player, the gangs' territories, the phones of the one
+// the player is in, from what the game holds in memory. Nothing secret: no pickups, tokens, frenzies or garages.
 #pragma once
 
 #include "hud_theme.hpp"
