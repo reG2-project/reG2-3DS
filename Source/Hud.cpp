@@ -6,10 +6,13 @@
 #include "../port/src/day_night.hpp"
 #include "../port/src/twin_stick.hpp"
 #include "../port/src/hud_screen.hpp"
-// The groups a HUD screen of its own (the 3DS's bottom one) shows.
+// The groups a HUD screen of its own (the 3DS's bottom one) shows, and their draws, left out of frames that do not
+// redraw that screen.
 #define HUD_GROUP(group) PortHudScreen::SetGroup(PortHudScreen::group)
+#define HUD_DRAW(call) (PortHudScreen::Drawn() ? call : (void)0)
 #else
 #define HUD_GROUP(group)
+#define HUD_DRAW(call) call
 #endif
 #include "hud_message_priority.hpp"
 #include "hud_brief_priority.hpp"
@@ -2304,6 +2307,13 @@ void Hud_Brief::DrawBrief()
                          0,
                          0);
 
+#if defined(GTA2_PORT)
+        // Long and drawn glyph by glyph: the HUD screen draws its last copy again while it is the same.
+        if (PortHudScreen::Keep(mStr, mNumLines))
+        {
+            return;
+        }
+#endif
         // u32: converts with the Fix16(u32) constructor, whose out-of-line copy is 0x4926F0
         u32 first_line_ypos = 480 - GetLineSpacingFromFontType_5D7700_inlined(gBriefFont) * mNumLines;
         DrawStringScaledPalette(mStr, // str
@@ -3381,9 +3391,9 @@ void Hud::DrawGui()
     {
         SetFullAmbient();
         HUD_GROUP(kStats);
-        mPlayerStats.DrawPlayerStats();
+        HUD_DRAW(mPlayerStats.DrawPlayerStats());
 #if defined(GTA2_PORT)
-        PortDayNight::DrawClock();
+        HUD_DRAW(PortDayNight::DrawClock());
         HUD_GROUP(kWorld);
         PortTwinStick::DrawReticle();
         PortView::SetTurn(PortView::kMarkers);
@@ -3394,19 +3404,19 @@ void Hud::DrawGui()
 #endif
         mPlayerNames.DrawPlayerNames();
         HUD_GROUP(kWanted);
-        mWantedLevel.DrawWantedLevel();
+        HUD_DRAW(mWantedLevel.DrawWantedLevel());
         HUD_GROUP(kGangs);
-        mGangRespectBars.DrawGangRespectBars();
+        HUD_DRAW(mGangRespectBars.DrawGangRespectBars());
         HUD_GROUP(kStats);
-        mHealth.DrawHealth();
+        HUD_DRAW(mHealth.DrawHealth());
         HUD_GROUP(kWorld);
         mZoneName.DrawZoneName();
         mCarName.DrawCarName();
         mPickupText.Draw();
         HUD_GROUP(kBrief);
-        mBrief.DrawBrief();
+        HUD_DRAW(mBrief.DrawBrief());
         HUD_GROUP(kPagers);
-        mPagers.DrawPagers();
+        HUD_DRAW(mPagers.DrawPagers());
         HUD_GROUP(kWorld);
         mTexts.Service();
 #if defined(GTA2_PORT)

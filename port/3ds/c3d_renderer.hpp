@@ -63,6 +63,8 @@ class C3DRenderer : public IRenderer
     u32 GetDrawCallCount() const override { return mDrawCalls; }
     // The HUD's groups placed on the bottom screen, 1:1 in layout pixels.
     bool SetHudGroup(s32 group) override;
+    bool HudScreenDue() override;
+    bool KeepHudGroup(u32 key) override;
     s32 HudScreenWidth() const override;
     u32 GetUploadCount() const { return mUploads; }
     // Storage for a size x size texture (a power of two) that the caller fills in the tiled order (TiledIndex), then

@@ -63,7 +63,8 @@ const s32 kScreenH = 240;
 const s32 kBottomW = 320;
 const s32 kBottomH = 240;
 const s32 kMaxTexSize = 1024;
-// The bottom screen is drawn at most every that many frames, and only when what it shows changed.
+// The bottom screen is drawn in one frame of that many (the game leaves its HUD draws out of the others), and only
+// when what it shows changed.
 const u32 kBottomEvery = 2;
 // GLRenderer's default vertex offset: D3D pixel centres are on integers, the PICA's on halves.
 const f32 kPixelOffset = 0.5f - 1.0f / 2048.0f;
@@ -468,6 +469,17 @@ struct C3DRenderer::Impl : HudTheme::Sink
     };
     std::vector<HudBatch> mHudBatches;
     u32 mHudPanels; // a bit per HudTheme::Part drawn in this frame
+    // KeepHudGroup: a group's draws for a key, their batches' starts in mKeptVerts and their textures' versions; while
+    // a group's draws are taken, its key and where they start in this frame's.
+    const HudGroupRules* mKeptGroup;
+    u32 mKeptKey;
+    std::vector<C3DVertex> mKeptVerts;
+    std::vector<HudBatch> mKeptBatches;
+    std::vector<u32> mKeptVersions;
+    const HudGroupRules* mKeepingGroup;
+    u32 mKeepingKey;
+    s32 mKeepingVert;
+    size_t mKeepingBatch;
     // The scrolling part's top this frame (bottom screen pixels) and its slot's; how much of it was hidden above
     // the slot when its scroll began, and when.
     s32 mScrollTop, mScrollSlotTop;
@@ -515,7 +527,10 @@ struct C3DRenderer::Impl : HudTheme::Sink
     void SetLights(const RLight* pLights, s32 count, const f32* pAmbient, f32 unlitAmbient);
     f32 ScrollOffset();
     u32 BottomSignature(f32 scroll, u32 minimap) const;
+    bool BottomDue() const { return !mBottomFrame || mFrame % kBottomEvery == 0; }
     void DrawHud();
+    void EndKeep();
+    bool DrawKept();
     void DrawOverlay();
     void DrawQuads(const HudTheme::Quad* pQuads, s32 count, RTexture* pTex, u32 state) override;
     void DrawTriangles(const RVertex* pVerts, s32 count, RTexture* pTex, u32 state) override;
@@ -1079,23 +1094,30 @@ u32 C3DRenderer::Impl::BottomSignature(f32 scroll, u32 minimap) const
     return h;
 }
 
-// The bottom screen, after the top one: cleared, with the HUD's batches of the frame. When nothing on it changed,
-// or it was drawn less than kBottomEvery frames ago, it is left alone and keeps showing its last frame.
+// The bottom screen, after the top one: cleared, with the HUD's batches of the frame. In a frame that is not
+// BottomDue, or when nothing on it changed, it is left alone and keeps showing its last frame.
 void C3DRenderer::Impl::DrawHud()
 {
     PORT_PROF(kPresentBottom);
     const u64 t0 = svcGetSystemTick();
-    const f32 scroll = ScrollOffset();
     if (!mBottom)
     {
         mHudBatches.clear();
         return;
     }
+    if (!BottomDue())
+    {
+        mHudBatches.clear();
+        mHudPanels = 0;
+        Stats3DS_AddBottom(svcGetSystemTick() - t0, false);
+        return;
+    }
+    const f32 scroll = ScrollOffset();
     // The minimap shows with the HUD, in game only.
     const u32 minimap = mHudPanels && mMinimap != kMinimapOff ? Minimap::Update(*mOwner) : 0;
     const bool wide = mMinimap == kMinimapWide && !(mHudPanels & (1u << HudTheme::kBrief));
     const u32 sig = BottomSignature(scroll, minimap ^ wide);
-    if (mBottomFrame && (sig == mBottomSig || mFrame - mBottomFrame < kBottomEvery))
+    if (mBottomFrame && sig == mBottomSig)
     {
         mHudBatches.clear();
         mHudPanels = 0;
@@ -1140,6 +1162,81 @@ void C3DRenderer::Impl::DrawHud()
     }
     mHudBatches.clear();
     Stats3DS_AddBottom(svcGetSystemTick() - t0, true);
+}
+
+// The draws of the group being kept, taken from this frame's.
+void C3DRenderer::Impl::EndKeep()
+{
+    if (!mKeepingGroup)
+    {
+        return;
+    }
+    Flush();
+    mKeptGroup = mKeepingGroup;
+    mKeptKey = mKeepingKey;
+    mKeepingGroup = 0;
+    mKeptVerts.assign(mVerts + mKeepingVert, mVerts + mVertCount);
+    mKeptBatches.assign(mHudBatches.begin() + mKeepingBatch, mHudBatches.end());
+    mKeptVersions.clear();
+    for (size_t i = 0; i < mKeptBatches.size(); i++)
+    {
+        mKeptBatches[i].start -= mKeepingVert;
+        mKeptVersions.push_back(mKeptBatches[i].tex ? mKeptBatches[i].tex->mVersion : 0);
+    }
+}
+
+// The kept draws in this frame, as Append would add them, unless a texture changed since.
+bool C3DRenderer::Impl::DrawKept()
+{
+    const s32 count = (s32)mKeptVerts.size();
+    if (mVertCount + count > kMaxVerts)
+    {
+        return false;
+    }
+    for (size_t i = 0; i < mKeptBatches.size(); i++)
+    {
+        const RTexture* pTex = mKeptBatches[i].tex;
+        if (pTex && (!pTex->mValid || pTex->mVersion != mKeptVersions[i]))
+        {
+            return false;
+        }
+    }
+    memcpy(mVerts + mVertCount, mKeptVerts.data(), count * sizeof(C3DVertex));
+    for (size_t i = 0; i < mKeptBatches.size(); i++)
+    {
+        HudBatch b = mKeptBatches[i];
+        b.start += mVertCount;
+        mHudBatches.push_back(b);
+        if (b.tex)
+        {
+            if (b.tex->mEvictable && b.tex->mUsedFrame != mFrame)
+            {
+                LruRemove(b.tex);
+                LruAppend(b.tex);
+            }
+            b.tex->mUsedFrame = mFrame;
+        }
+        // A batch's scissor is its rule's slot.
+        for (s32 r = 0; r < mKeptGroup->count; r++)
+        {
+            if (!(mKeptGroup->rules[r].slot != b.scissor))
+            {
+                mHudPanels |= 1u << mKeptGroup->rules[r].panel;
+                break;
+            }
+        }
+        for (s32 v = b.start; b.scroll && v < b.start + b.count; v++)
+        {
+            const s32 y = (s32)mVerts[v].y;
+            mScrollTop = mScrollSeen && mScrollTop < y ? mScrollTop : y;
+            mScrollSeen = true;
+            mScrollSlotTop = b.scissor.y0;
+        }
+    }
+    mVertCount += count;
+    mBatchStart = mVertCount;
+    mFrameDrew = true;
+    return true;
 }
 
 // The FPS overlay over the top screen's corner, texel for pixel.
@@ -1598,6 +1695,7 @@ void C3DRenderer::Present(s32, s32)
     PORT_PROF(kPresent);
     // A frame without draws shows the targets again.
     mImpl->BeginFrame();
+    p->EndKeep();
     mImpl->Flush();
     if (p->mFrameDrew)
     {
@@ -1764,6 +1862,10 @@ void C3DRenderer::FreeTexture(RTexture* pTex)
             mImpl->Flush();
             p->mBatchTex = 0;
         }
+        for (size_t i = 0; i < p->mKeptBatches.size(); i++)
+        {
+            p->mKeptGroup = p->mKeptBatches[i].tex == pTex ? 0 : p->mKeptGroup;
+        }
         if (p->mBoundTex == &pTex->mTex)
         {
             // citro3d keeps the bound pointer: never leave it dangling.
@@ -1858,8 +1960,41 @@ bool C3DRenderer::SetHudGroup(s32 group)
         return false;
     }
     const bool hud = group > PortHudScreen::kWorld && group < PortHudScreen::kGroupCount;
+    p->EndKeep();
     p->mHudGroup = hud ? &p->mGroups[group] : 0;
     return hud;
+}
+
+bool C3DRenderer::KeepHudGroup(u32 key)
+{
+    Impl* p = mImpl;
+    if (!p || !p->mHudGroup)
+    {
+        return false;
+    }
+    p->EndKeep();
+    p->Flush();
+    if (p->mKeptGroup == p->mHudGroup && p->mKeptKey == key && p->DrawKept())
+    {
+        return true;
+    }
+    p->mKeptGroup = 0;
+    p->mKeepingGroup = p->mHudGroup;
+    p->mKeepingKey = key;
+    p->mKeepingVert = p->mVertCount;
+    p->mKeepingBatch = p->mHudBatches.size();
+    return false;
+}
+
+bool C3DRenderer::HudScreenDue()
+{
+    Impl* p = mImpl;
+    if (!p || !p->mBottom)
+    {
+        return true;
+    }
+    p->BeginFrame();
+    return p->BottomDue();
 }
 
 s32 C3DRenderer::HudScreenWidth() const

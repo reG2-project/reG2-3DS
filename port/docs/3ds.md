@@ -179,11 +179,14 @@ The game's headers and the renderer's clash, so `minimap_game.cpp` reads the gam
 `GTA2_3DS_MINIMAP=wide` gives the map the whole row while no brief shows; `off` leaves it out and gives the
 row to the brief.
 
-The bottom screen is drawn only when what it shows changed, at most every other frame (15 per second at
+The bottom screen is drawn only when what it shows changed, in every other frame at most (15 per second at
 30): a signature of the HUD's batches (vertices, textures and their uploads, states), its panels, the
 brief's scroll and the minimap's state (the player's position to the pixel, heading in 64 steps, gang and
 markers). citro3d transfers and swaps a screen only when its target was drawn on, so otherwise the screen
-keeps its last frame.
+keeps its last frame. The game leaves the bottom screen's HUD draws out of the frames in between
+(`PortHudScreen::Drawn`, `IRenderer::HudScreenDue`). The brief's text, drawn glyph by glyph (136 draws for a long
+one), is drawn by the game once: while its text stays the same, the renderer copies the vertices and batches it kept
+(`PortHudScreen::Keep`, `IRenderer::KeepHudGroup`), unless one of their textures changed.
 
 ## Build
 
@@ -366,8 +369,8 @@ AIM CAMERA is there on the New 3DS only, told apart at run time (`APT_CheckNew3D
 
 ## HOME, sleep and exit
 
-SDL's event pump calls `aptMainLoop` once per game frame (the game's `PeekMessage`), between citro3d
-frames: HOME and the power button open the HOME Menu there, closing the lid sleeps there, and the
+SDL's event pump calls `aptMainLoop` once per logic step in game (just before the step reads its inputs,
+`port_PumpForStep`) and at each of the game's `PeekMessage` elsewhere, between citro3d frames: HOME and the power button open the HOME Menu there, closing the lid sleeps there, and the
 suspend and sleep hooks of citro3d (GPU state) and ndsp (the DSP) do the rest. The port's own hook
 (`platform_3ds.cpp`, run there on the main thread) calls `port_Suspend` (`compat/src/kernel.cpp`): the
 game's clocks (`timeGetTime`, the frame loop's) leave out the time away and SDL's audio device pauses, so
@@ -476,7 +479,10 @@ it (an axis also at each pump until its first event: SDL takes its first value w
 key bindings only while a key is held. In ste, in a car then walking (`GTA2_3DS_FPS`'s CPU time): 61
 SDL reads a frame became 9, `svcArbitrateAddress` calls 187 became 42, input polling 4.0 ms became 0.75
 and the main thread 11.4 ms became 7.9. Most of it is Azahar's system call cost: on hardware perhaps
-0.35 to 0.7 ms a frame.
+0.35 to 0.7 ms a frame. The console then measured the pump at 0.7 to 0.8 ms a frame (`GTA2_3DS_PROF`,
+2.2 pumps a frame, 0.4 ms of it the pad's update): in game it now runs once per logic step, just before the step
+reads its inputs, and no longer after each draw and wait, which read none. In Azahar, bil driving: 3.0 pumps a
+frame became 1.0, and their time 0.85 ms became 0.28.
 Texture uploads went from up to six passes per texture to one per level, 2.5 to 3 times faster
 in Azahar (a 64x64 sprite 2.3 to 0.84 ms, a 128x128 one 9.2 to 3.1 ms; upload time in a frame of a
 long drive at most 7 to 10 ms instead of 19 to 29). Remaining leads: fewer draw calls (about 100 per frame) with a tile atlas. The system core runs the sound (see Sound).
@@ -511,6 +517,15 @@ frame now takes 127 ms the first time (20 ms of it the menu's first texture uplo
 setting's step 85 ms before, now under 40. Closing takes under 40 ms, or 76 to 82 ms when a setting
 changed (the one save). The frontend's OPTIONS page took 223 ms on its first frame, now 113 (55 ms of
 it uploads).
+
+The HUD (`draw.hud`) took 1.0 to 1.5 ms a frame on the console, and 4.6 ms in the blocks with a mission brief
+shown, at most 7.2 ms in a frame. Timed per element in Azahar (bil, at night): the brief 1.7 to 1.9 ms for its 136
+glyphs, each a primitive through the gbh_* layer and a batch of its own; the bottom screen's other parts (stats,
+clock, gang bars, health) about 0.5 ms for 32 primitives; the top screen's (arrows, zone and car names) under 0.1
+ms but while a name shows. All of it was drawn every frame for a bottom screen redrawn in every other frame at
+most, when it changed. The game now leaves the bottom screen's draws out of the frames between, and draws the
+brief's text once (see Renderer). Azahar, bil: standing with a long brief, 1.6 to 1.8 ms became 0.32 (at most
+3.3 ms in a frame, now 0.66); without it 0.37 became 0.21; driving 0.44 became 0.24 (at most 1.6, now 0.75).
 
 The bottom screen's CPU time per frame (`GTA2_3DS_STATS`, walking, Old 3DS mode): 0.38 to 0.42 ms
 (0.45 to 0.51 at most) when it was drawn every frame without a minimap; with the minimap and drawn only
