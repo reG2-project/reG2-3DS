@@ -229,7 +229,7 @@ the same buttons on foot and in a vehicle; SDL's 3DS mapping gives the buttons b
 
 | Button | On foot | In a vehicle |
 |---|---|---|
-| Circle pad | MODERN: walk that way (TWIN STICK's move); CLASSIC: the original's arrows | steer; CLASSIC: up and down also accelerate and brake |
+| Circle pad | MODERN: walk that way (TWIN STICK's move), pushed a little walks slowly; CLASSIC: the original's arrows | steer; CLASSIC: up and down also accelerate and brake |
 | R | attack; MODERN: held, the player keeps his facing (backs off while firing) | accelerate |
 | L | MODERN: held, the player keeps his facing without attacking | brake, reverse |
 | B | jump | handbrake |
@@ -248,7 +248,11 @@ facing stays the one he had at the press (`port_HoldFacing`), and the C-stick's 
 where he faces, without the original's lock on a ped near the line of fire (CLASSIC keeps it). CLASSIC reads
 the circle pad as the original's arrows by the way it points past the dead zone, an 8-way gate: up or down
 alone within 30 degrees of straight, left or right alone within 22.5, both in between, so a diagonal runs and
-turns (a threshold on each axis misses the diagonals of a round gate). Only the circle pad moves, in either style, so that the
+turns (a threshold on each axis misses the diagonals of a round gate). On foot, in either style, the circle
+pad pushed less than 0.55 of its range walks at the peds' walk speed, with their walk (`PortTwinStick::WalkSpeed`
+in `Char::UpdateWalking`), so the player can turn on the spot; further, he runs. The dead zone is 0.25, and the
+circle pad gives about 0.96 at the end of its travel, diagonals too (Azahar: 154 of the 160 that SDL's 3DS
+driver takes as full, 109 on each axis on a diagonal), so a run is reached a little past half way. Only the circle pad moves, in either style, so that the
 d-pad keeps the weapons. The original's SPECIAL 1 with left or right still turns a roof gun. In the menus B
 or START selects and A or SELECT goes back; the hints name the buttons as the console prints them
 (`PortPlatform::PadButtonName`).

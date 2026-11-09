@@ -3554,6 +3554,9 @@ void Char::UpdateWalking()
                         mFlags &= ~8;
                     }
                 }
+#if defined(GTA2_PORT)
+                PortTwinStick::WalkSpeed(this);
+#endif
             }
             else
             {

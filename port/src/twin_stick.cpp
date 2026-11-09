@@ -26,6 +26,9 @@ namespace
 {
 // The most the stick turns the ped per step, in Ang16 units (24 degrees); the mouse turns it at once.
 const s32 kTurnStep = 96;
+// Pushed less than this, the stick walks at the peds' walk speed (WalkSpeed). A circle pad pushed all the way
+// gives about 0.96, diagonals too (154 of the 160 that SDL's 3DS driver takes as full).
+const f32 kRunFrom = 0.55f;
 // In a jump, the original's turn keys turn the ped by this much more per step, up to the most
 // (kJumpTurnAccel and kMaxJumpTurnSpeed in Player::DoPedControlInputs).
 const s32 kJumpTurnAccel = 4;
@@ -50,6 +53,7 @@ const f32 kLookFollow = 0.12f;
 
 Char* spWalker; // the ped walking this step, along sMove
 s32 sMove;
+Char* spSlowWalker; // the ped walking at the walk speed this step
 s32 sJumpTurn;
 bool sMouse;
 s32 sAim;
@@ -115,6 +119,12 @@ Ped* OnFootPed()
     return pPed && pPed->mGameObject && !pPed->get_car() ? pPed : NULL;
 }
 
+// The stick out of its dead zone, short of kRunFrom.
+bool Slow(f32 x, f32 y)
+{
+    return (x || y) && x * x + y * y < kRunFrom * kRunFrom;
+}
+
 // The aim from pSprite this step, into sAim and sAimSteps: the mouse, the right stick, or the stick's last aim.
 void Aim(const Sprite* pSprite, f32 ax, f32 ay)
 {
@@ -170,18 +180,21 @@ void PedControls(Player* pPlayer, Ped* pPed)
 {
     spWalker = NULL;
 #if defined(GTA2_PORT_SDL)
+    f32 mx, my, ax, ay;
+    sMouse = port_TwinStickInput(&mx, &my, &ax, &ay);
     if (!pPed || pPed != OnFootPed())
     {
         sHolding = false;
+        // CLASSIC: the stick's forward arrow walks too.
+        spSlowWalker = pPed && Slow(mx, my) ? pPed->mGameObject : NULL;
         return;
     }
     Char* pChar = pPed->mGameObject;
-    f32 mx, my, ax, ay;
-    sMouse = port_TwinStickInput(&mx, &my, &ax, &ay);
     // The movement keys too: forward is up the screen.
     mx += pPlayer->mNowRightPressed - pPlayer->mNowLeftPressed;
     my += pPlayer->mNowDownPressed - pPlayer->mNowForwardPressed;
     const bool moving = mx * mx + my * my > 0.01f;
+    spSlowWalker = Slow(mx, my) ? pChar : NULL;
     const s32 move = moving ? WorldAngle(mx, my) : 0;
     Aim(pPed->GetSprite(), ax, ay);
     const s32 rotation = pChar->mRotation.rValue;
@@ -232,6 +245,14 @@ bool Walk(Char* pChar, Ang16* pFacing)
     *pFacing = Ang16(static_cast<s16>(pChar->mRotation.rValue + turn), 0);
     pChar->mRotation = Ang16(static_cast<s16>(sMove - turn), 0);
     return true;
+}
+
+void WalkSpeed(Char* pChar)
+{
+    if (pChar == spSlowWalker && pChar->mVelocity > pChar->mpPed->mWalkSpeed)
+    {
+        pChar->mVelocity = pChar->mpPed->mWalkSpeed;
+    }
 }
 
 void AimTurret(Car* pCar)

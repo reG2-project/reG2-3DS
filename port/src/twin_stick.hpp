@@ -17,6 +17,9 @@ namespace PortTwinStick
 void PedControls(Player* pPlayer, Ped* pPed);
 // At the start of Char::UpdateWalking: true if this step walks along the move, the facing to end with in *pFacing.
 bool Walk(Char* pChar, Ang16* pFacing);
+// In Char::UpdateWalking, after the player's speed forward: the stick pushed a little walks, as the peds do
+// (CLASSIC too), further it runs.
+void WalkSpeed(Char* pChar);
 // In Car::HandleUserInput, unless SPECIAL turns the roof gun: the player's fire truck, tank or gun jeep
 // turns its roof gun toward the aim, or as the console controls' d-pad turns it.
 void AimTurret(Car* pCar);
