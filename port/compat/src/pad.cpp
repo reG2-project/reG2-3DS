@@ -63,12 +63,18 @@ const SDL_GamepadButton kButtons[] = {SDL_GAMEPAD_BUTTON_SOUTH, SDL_GAMEPAD_BUTT
                                       SDL_GAMEPAD_BUTTON_START, SDL_GAMEPAD_BUTTON_LEFT_STICK,
                                       SDL_GAMEPAD_BUTTON_RIGHT_STICK};
 
-// While set (port_UpdatePad, where the pads cannot change), each button and axis is read from SDL once:
-// every read takes SDL's locks, system calls on the 3DS.
-bool sPadCache;
-Uint32 sButtonRead, sButtonDown, sAxisRead;
+// Each button and axis is read from SDL again only after a gamepad event for it: a read takes SDL's locks, system
+// calls on the 3DS. SDL takes an axis' first value without an event, so until then the axis is read at each pump.
+Uint32 sButtonRead, sButtonDown, sAxisRead, sAxisEvented;
 Sint16 sAxisValue[SDL_GAMEPAD_AXIS_COUNT];
 static_assert(SDL_GAMEPAD_BUTTON_COUNT <= 32, "one bit per button");
+
+void ReadPadsAgain()
+{
+    sButtonRead = 0;
+    sAxisRead = 0;
+    sAxisEvented = 0;
+}
 
 bool ReadButton(SDL_GamepadButton b)
 {
@@ -84,7 +90,7 @@ bool ReadButton(SDL_GamepadButton b)
 
 bool Button(SDL_GamepadButton b)
 {
-    if (!sPadCache || b < 0 || b >= SDL_GAMEPAD_BUTTON_COUNT)
+    if (b < 0 || b >= SDL_GAMEPAD_BUTTON_COUNT)
     {
         return ReadButton(b);
     }
@@ -99,7 +105,7 @@ bool Button(SDL_GamepadButton b)
 
 Sint16 Axis(SDL_GamepadAxis a)
 {
-    if (!sPadCache || a < 0 || a >= SDL_GAMEPAD_AXIS_COUNT)
+    if (a < 0 || a >= SDL_GAMEPAD_AXIS_COUNT)
     {
         return sActivePad ? SDL_GetGamepadAxis(sActivePad, a) : 0;
     }
@@ -119,6 +125,10 @@ bool PadInput(SDL_JoystickID id)
     {
         if (sGamepads[i] == pPad)
         {
+            if (sActivePad != pPad)
+            {
+                ReadPadsAgain();
+            }
             sActivePad = pPad;
             return true;
         }
@@ -437,6 +447,7 @@ void port_OpenGamepad()
             {
                 sGamepads[sNumGamepads++] = pPad;
                 sActivePad = sActivePad ? sActivePad : pPad;
+                ReadPadsAgain();
             }
         }
     }
@@ -603,11 +614,19 @@ void port_PadEvent(const SDL_Event& e)
                     sGamepads[i] = sGamepads[--sNumGamepads];
                     sActivePad = sActivePad == pPad ? (sNumGamepads ? sGamepads[0] : NULL) : sActivePad;
                     SDL_CloseGamepad(pPad);
+                    ReadPadsAgain();
                     break;
                 }
             }
             break;
+        case SDL_EVENT_GAMEPAD_REMAPPED:
+            ReadPadsAgain();
+            break;
+        case SDL_EVENT_GAMEPAD_BUTTON_UP:
+            sButtonRead &= ~(1u << e.gbutton.button);
+            break;
         case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+            sButtonRead &= ~(1u << e.gbutton.button);
             if (PadInput(e.gbutton.which))
             {
                 sMode = kPadMode;
@@ -620,6 +639,8 @@ void port_PadEvent(const SDL_Event& e)
                 sMode = kPadMode;
                 sMouseAims = false;
             }
+            sAxisRead &= ~(1u << e.gaxis.axis);
+            sAxisEvented |= SDL_GetGamepadFromID(e.gaxis.which) == sActivePad ? 1u << e.gaxis.axis : 0;
             break;
         case SDL_EVENT_MOUSE_MOTION:
             if (e.motion.xrel != 0 || e.motion.yrel != 0)
@@ -658,16 +679,7 @@ void port_PadEvent(const SDL_Event& e)
 
 void port_UpdatePad()
 {
-    struct PadCache
-    {
-        PadCache()
-        {
-            sPadCache = true;
-            sButtonRead = 0;
-            sAxisRead = 0;
-        }
-        ~PadCache() { sPadCache = false; }
-    } cache;
+    sAxisRead &= sAxisEvented;
     // New presses, for binding capture (Start stays the pause button).
     int codes[kNumControls + 4];
     int n = 0;
