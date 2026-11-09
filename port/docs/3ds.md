@@ -335,6 +335,18 @@ frontend's OPTIONS page drew at 3 frames per second because the port's menus che
 whether the language's `data/?.gxt` existed; each language is now looked up once, and the pause menu
 draws at the 30 fps limit.
 
+File access in single frames counts too (Azahar, Old 3DS mode, frame times from a measurement build).
+A request costs 17 to 33 ms, a case-insensitive directory scan (`data\audio` for `data/Audio`) 33 to
+56 ms, a registry save 35 to 55 ms. Opening the pause menu took 980 ms the first time and 510 ms after:
+it loaded `fstyle.sty` (250 ms), the first time the menu sounds (160 to 300 ms), and the game's FREEZE
+vocal took 120 to 190 ms to find. The frontend style and sounds now load with the city (3.7 MB of heap
+in game), `port_resolve_path` keeps the components and directory listings it found, the registry is not
+saved for a value written unchanged and, while a settings menu is open, only as it closes. The opening
+frame now takes 127 ms the first time (20 ms of it the menu's first texture uploads) and 68 ms after; a
+setting's step 85 ms before, now under 40. Closing takes under 40 ms, or 76 to 82 ms when a setting
+changed (the one save). The frontend's OPTIONS page took 223 ms on its first frame, now 113 (55 ms of
+it uploads).
+
 The bottom screen's CPU time per frame (`GTA2_3DS_STATS`, walking, Old 3DS mode): 0.38 to 0.42 ms
 (0.45 to 0.51 at most) when it was drawn every frame without a minimap; with the minimap and drawn only
 on a change, 0.05 ms standing (5 frames of 150 drawn, for the clock), 0.18 to 0.44 ms walking (up to 75

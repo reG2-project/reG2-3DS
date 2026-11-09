@@ -62,7 +62,8 @@ Eviction and frame times (frames from the city on; Azahar's 30 fps limit makes t
 At 8 MB most evicted textures never come back (34 evictions, 7 re-uploads per minute), and a re-upload
 costs what a first upload does (a 64x64 sprite with its mip levels about 0.8 ms). Even a 3 MB budget
 keeps the mean at 30 fps; its worst frames reach 50 ms. The slowest frames in every run, 480 to 530 ms
-each time the pause menu opens, do not come from textures (35 uploads, 9.4 ms).
+each time the pause menu opens, did not come from textures (35 uploads, 9.4 ms) but from file access
+(see Speed in `3ds.md`).
 
 Dropping the mip levels of sprites and remaps (keeping them for tiles) would save about 1.3 MB of the 8 in
 bil: eviction would start a few minutes later, but the resident set keeps growing with what is seen, so
