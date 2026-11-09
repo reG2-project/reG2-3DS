@@ -385,16 +385,22 @@ const HudGroupRules kHudGroups[PortHudScreen::kGroupCount] = {
 };
 #undef HUD_RULES
 
-const HudRule* PickRule(const HudGroupRules& group, const RVertex* pVerts, s32 count)
+// The corners of DrawFan's triangles.
+const u8 kFan[6] = {0, 1, 2, 0, 2, 3};
+
+// The rule for the centre of the triangles' vertices (a fan's as drawn).
+const HudRule* PickRule(const HudGroupRules& group, const RVertex* pVerts, s32 count, bool fan)
 {
+    const s32 n = fan ? (count == 4 ? 6 : 3) : count;
     f32 x = 0.0f, y = 0.0f;
-    for (s32 i = 0; i < count; i++)
+    for (s32 i = 0; i < n; i++)
     {
-        x += pVerts[i].x;
-        y += pVerts[i].y;
+        const RVertex& v = pVerts[fan ? kFan[i] : i];
+        x += v.x;
+        y += v.y;
     }
-    x /= count;
-    y /= count;
+    x /= n;
+    y /= n;
     for (s32 i = 0; i < group.count - 1; i++)
     {
         const ScreenRect& r = group.rules[i].from;
@@ -510,7 +516,9 @@ struct C3DRenderer::Impl : HudTheme::Sink
 
     ScreenRect ToScreen(f32 left, f32 top, f32 right, f32 bottom) const;
     void BeginFrame();
-    void Append(const RVertex* pVerts, s32 count, RTexture* pTex, u32 state, f32 offset, const ScreenRect& scissor, const HudRule* pRule);
+    void Append(const RVertex* pVerts, s32 count, RTexture* pTex, u32 state, f32 offset, const ScreenRect& scissor, const HudRule* pRule,
+                bool fan = false);
+    void DrawGame(const RVertex* pVerts, s32 count, RTexture* pTex, u32 state, bool fan);
     void Flush();
     void SetLights(const RLight* pLights, s32 count, const f32* pAmbient, f32 unlitAmbient);
     f32 ScrollOffset();
@@ -876,8 +884,11 @@ void C3DRenderer::Impl::BeginFrame()
     mBoundTex = 0;
 }
 
-void C3DRenderer::Impl::Append(const RVertex* pVerts, s32 count, RTexture* pTex, u32 state, f32 offset, const ScreenRect& scissor, const HudRule* pRule)
+// fan: pVerts is a triangle or a quad (DrawFan), drawn as one or two triangles.
+void C3DRenderer::Impl::Append(const RVertex* pVerts, s32 count, RTexture* pTex, u32 state, f32 offset, const ScreenRect& scissor, const HudRule* pRule,
+                               bool fan)
 {
+    const s32 n = fan ? (count == 4 ? 6 : 3) : count;
     if (pTex && pTex->mPremultiplied)
     {
         state |= kStatePremultiplied;
@@ -901,7 +912,7 @@ void C3DRenderer::Impl::Append(const RVertex* pVerts, s32 count, RTexture* pTex,
     {
         Flush();
     }
-    if (mVertCount + count > kMaxVerts)
+    if (mVertCount + n > kMaxVerts)
     {
         if (!mWarnedVerts)
         {
@@ -932,9 +943,9 @@ void C3DRenderer::Impl::Append(const RVertex* pVerts, s32 count, RTexture* pTex,
         pBind->mUsedFrame = mFrame;
     }
     C3DVertex* pDst = mVerts + mVertCount;
-    for (s32 i = 0; i < count; i++)
+    for (s32 i = 0; i < n; i++)
     {
-        const RVertex& s = pVerts[i];
+        const RVertex& s = pVerts[fan ? kFan[i] : i];
         pDst[i].x = s.x + dx;
         pDst[i].y = s.y + dy;
         pDst[i].rhw = s.rhw;
@@ -958,7 +969,7 @@ void C3DRenderer::Impl::Append(const RVertex* pVerts, s32 count, RTexture* pTex,
     }
     if (pRule && pRule->scroll)
     {
-        for (s32 i = 0; i < count; i++)
+        for (s32 i = 0; i < n; i++)
         {
             const s32 y = (s32)pDst[i].y;
             mScrollTop = mScrollSeen && mScrollTop < y ? mScrollTop : y;
@@ -966,7 +977,7 @@ void C3DRenderer::Impl::Append(const RVertex* pVerts, s32 count, RTexture* pTex,
         }
         mScrollSlotTop = pRule->slot.y0;
     }
-    mVertCount += count;
+    mVertCount += n;
 }
 
 // render.v.pica's uniforms; ambient[0] + c * ambient[1] is gbh_api.cpp's Ambient with its rounding.
@@ -1797,27 +1808,38 @@ void C3DRenderer::EndScene()
     }
 }
 
-void C3DRenderer::DrawTriangles(const RVertex* pVerts, s32 count, RTexture* pTex, u32 state)
+void C3DRenderer::Impl::DrawGame(const RVertex* pVerts, s32 count, RTexture* pTex, u32 state, bool fan)
 {
-    Impl* p = mImpl;
-    if (!p || !pVerts || count <= 0)
-    {
-        return;
-    }
     PORT_PROF(kPrimC3d);
     if (!pTex || !pTex->mValid || (state & RS_NO_TEXTURE))
     {
         pTex = 0;
         state |= RS_NO_TEXTURE;
     }
-    mImpl->BeginFrame();
-    const HudRule* pRule = p->mHudGroup ? PickRule(*p->mHudGroup, pVerts, count) : 0;
+    BeginFrame();
+    const HudRule* pRule = mHudGroup ? PickRule(*mHudGroup, pVerts, count, fan) : 0;
     // On the top screen, no offset puts the pixel centres where the game's 2x2 pixel blocks meet: on the texel
     // corners of its 1:1 quads, where bilinear filtering averages the 4 texels.
     const bool exact = (state & RS_PIXEL_EXACT) || !pRule;
     // There, a 1:1 quad samples its first level: on the texel corners, that is the exact average.
-    const u32 noMip = !pRule && OneToOne(pVerts, count, pTex) ? kStateNoMip : 0;
-    p->Append(pVerts, count, pTex, (state & kBatchStateMask) | noMip, exact ? 0.0f : kPixelOffset, pRule ? pRule->slot : p->mClip, pRule);
+    const u32 noMip = !pRule && pTex && pTex->mLevels && OneToOne(pVerts, count, pTex) ? kStateNoMip : 0;
+    Append(pVerts, count, pTex, (state & kBatchStateMask) | noMip, exact ? 0.0f : kPixelOffset, pRule ? pRule->slot : mClip, pRule, fan);
+}
+
+void C3DRenderer::DrawTriangles(const RVertex* pVerts, s32 count, RTexture* pTex, u32 state)
+{
+    if (mImpl && pVerts && count > 0)
+    {
+        mImpl->DrawGame(pVerts, count, pTex, state, false);
+    }
+}
+
+void C3DRenderer::DrawFan(const RVertex* pVerts, s32 count, RTexture* pTex, u32 state)
+{
+    if (mImpl && (count == 3 || count == 4))
+    {
+        mImpl->DrawGame(pVerts, count, pTex, state, true);
+    }
 }
 
 void C3DRenderer::SetLights(const RLight* pLights, s32 count, const f32* pAmbient, f32 unlitAmbient)

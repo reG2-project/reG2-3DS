@@ -806,7 +806,8 @@ void RenderVertsUnturned(u32 flags, STexture* pTexture, Vert* pVerts, s32 count,
     const bool shadowLit = softShadow && !fullAmbient;
     const bool perPixel = (lit || shadowLit) && gRenderer->Options().mPerPixelLighting;
     PORT_PROF_END();
-    u32 unlit[4];
+    // Static, as sFan below: -ftrivial-auto-var-init would clear a local array on every call.
+    static u32 sUnlit[4];
     bool shaderLit = false;
     if (lit || shadowLit)
     {
@@ -822,7 +823,7 @@ void RenderVertsUnturned(u32 flags, STexture* pTexture, Vert* pVerts, s32 count,
         {
             for (s32 i = 0; i < count; i++)
             {
-                unlit[i] = pVerts[i].diff;
+                sUnlit[i] = pVerts[i].diff;
                 if (!shaderLit)
                 {
                     pVerts[i].diff = LightVertex(pVerts[i + 4], shade, pVerts[i].diff, numNear);
@@ -835,7 +836,7 @@ void RenderVertsUnturned(u32 flags, STexture* pTexture, Vert* pVerts, s32 count,
             // the dark (per pixel in the shader).
             for (s32 i = 0; i < count; i++)
             {
-                unlit[i] = 0xFFFFFFFFu;
+                sUnlit[i] = 0xFFFFFFFFu;
                 if (!perPixel)
                 {
                     const u32 l = LightVertex(pVerts[i + 4], 255, 0xFFFFFFu, numNear);
@@ -879,43 +880,33 @@ void RenderVertsUnturned(u32 flags, STexture* pTexture, Vert* pVerts, s32 count,
 
     LogPrim(pVerts, count, state, pTexture, (flags & FLAG_INTERNAL_BLIT) != 0);
 
-    RVertex rv[4];
+    static RVertex sFan[4];
+    const bool vertexLights = perPixel || shaderLit;
     for (s32 i = 0; i < count; i++)
     {
-        rv[i].x = pVerts[i].x;
-        rv[i].y = pVerts[i].y;
-        rv[i].rhw = pVerts[i].z;
-        rv[i].rgba = ArgbToRgba(pVerts[i].diff);
-        rv[i].u = pVerts[i].u * scaleU;
-        rv[i].v = pVerts[i].v * scaleV;
-        if (perPixel || shaderLit)
+        RVertex& r = sFan[i];
+        r.x = pVerts[i].x;
+        r.y = pVerts[i].y;
+        r.rhw = pVerts[i].z;
+        r.rgba = ArgbToRgba(pVerts[i].diff);
+        r.u = pVerts[i].u * scaleU;
+        r.v = pVerts[i].v * scaleV;
+        if (vertexLights)
         {
-            rv[i].wx = pVerts[i + 4].x;
-            rv[i].wy = pVerts[i + 4].y;
-            rv[i].wz = pVerts[i + 4].z;
-            rv[i].unlit = ArgbToRgba(unlit[i]);
-            rv[i].shade = shade / 255.0f;
-            rv[i].lit = 1.0f;
+            r.wx = pVerts[i + 4].x;
+            r.wy = pVerts[i + 4].y;
+            r.wz = pVerts[i + 4].z;
+            r.unlit = ArgbToRgba(sUnlit[i]);
+            r.shade = shade / 255.0f;
+            r.lit = 1.0f;
         }
         else
         {
-            rv[i].wx = rv[i].wy = rv[i].wz = 0.0f;
-            rv[i].unlit = 0;
-            rv[i].shade = 0.0f;
-            rv[i].lit = 0.0f;
+            r.wx = r.wy = r.wz = 0.0f;
+            r.unlit = 0;
+            r.shade = 0.0f;
+            r.lit = 0.0f;
         }
-    }
-    RVertex tris[6];
-    s32 n = 3;
-    tris[0] = rv[0];
-    tris[1] = rv[1];
-    tris[2] = rv[2];
-    if (count == 4)
-    {
-        tris[3] = rv[0];
-        tris[4] = rv[2];
-        tris[5] = rv[3];
-        n = 6;
     }
     if (gTraceScene && gSceneCount == gTraceScene)
     {
@@ -923,7 +914,7 @@ void RenderVertsUnturned(u32 flags, STexture* pTexture, Vert* pVerts, s32 count,
                 pVerts[1].diff, pVerts[2].diff, count > 3 ? pVerts[3].diff : 0);
     }
     PORT_PROF_END();
-    gRenderer->DrawTriangles(tris, n, pTex, state);
+    gRenderer->DrawFan(sFan, count, pTex, state);
     gGlobals.mNumPolysDrawn += count - 2;
 }
 
