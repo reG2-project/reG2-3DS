@@ -24,6 +24,9 @@
 #include "CollisionSoundQueue.hpp"
 #include "block_face.hpp"
 #include "car_surface_type_more.hpp"
+#if defined(GTA2_PORT)
+#include "../port/src/map_cache.hpp"
+#endif
 
 DEFINE_GLOBAL(Map_0x370*, gMap_0x370, 0x6F6268);
 DEFINE_STATIC_MEMBER(gmp_block_info*, Map_0x370, sBlockInfo0, 0x6F5EB0);
@@ -4317,6 +4320,9 @@ s32 Map_0x370::CloneColumnWithoutBlock(u32 column_idx, s32 z, char_type bDropAbo
 MATCH_FUNC(0x4E8620)
 void Map_0x370::ChangeBlock(s32 x, s32 y, s32 z, s32 info_type_to_set, u16 info_value)
 {
+#if defined(GTA2_PORT)
+    PortMapCache::Invalidate(x, y);
+#endif
     s32 column_idx = Map_0x370::CloneOriginalColumn(*mpDmap->get_base(y, x));
     *mpDmap->get_base(y, x) = column_idx;
     mObj.AddOrUpdateDmapInfo(x, y, column_idx);
@@ -4359,6 +4365,9 @@ void Map_0x370::ChangeBlock(s32 x, s32 y, s32 z, s32 info_type_to_set, u16 info_
 MATCH_FUNC(0x4E87C0)
 void Map_0x370::AddNewBlock(s32 x, s32 y, s32 z, gmp_block_info* pBlockData)
 {
+#if defined(GTA2_PORT)
+    PortMapCache::Invalidate(x, y);
+#endif
     s32 column_idx = Map_0x370::CloneColumnExtendedToZ(*mpDmap->get_base(y, x), z);
     *mpDmap->get_base(y, x) = column_idx;
     mObj.AddOrUpdateDmapInfo(x, y, column_idx);
