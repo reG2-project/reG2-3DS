@@ -39,6 +39,8 @@ std::deque<MSG>& Queue()
 Window* sMainWindow;
 bool sFullscreen; // as asked: SDL reports the change later, after a resize event
 int sCursorCount;
+bool sSkipPump;
+bool sPumpSkipped;
 
 Window* W(HWND h)
 {
@@ -107,7 +109,42 @@ void Translate(const SDL_Event& e)
             break;
     }
 }
+
+// SDL's events, then the pad.
+void Pump()
+{
+    PORT_PROF(kPump);
+    PORT_PROF_COUNT(kPumps, 1);
+    sPumpSkipped = false;
+    port_InjectTestInput(port_FrameCount());
+    SDL_Event e;
+    while (SDL_PollEvent(&e))
+    {
+        PORT_PROF_COUNT(kEvents, 1);
+        port_OnInputEvent(e);
+        Translate(e);
+    }
+    PORT_PROF(kPumpPad);
+    port_UpdatePad();
+}
 } // namespace
+
+// On the 3DS a pump costs about 0.3 ms: in game the PeekMessageA after each frame loop action leaves it out, and
+// port_PumpForStep runs it just before a step reads its inputs (draws and waits read none).
+void port_SkipNextPump()
+{
+#if defined(__3DS__)
+    sSkipPump = true;
+#endif
+}
+
+void port_PumpForStep()
+{
+    if (sPumpSkipped)
+    {
+        Pump();
+    }
+}
 
 SDL_Window* port_GetSDLWindow(HWND h)
 {
@@ -218,18 +255,15 @@ BOOL WINAPI PeekMessageA(MSG* pMsg, HWND, UINT, UINT, UINT flags)
 {
     if (Queue().empty())
     {
-        PORT_PROF(kPump);
-        PORT_PROF_COUNT(kPumps, 1);
-        port_InjectTestInput(port_FrameCount());
-        SDL_Event e;
-        while (SDL_PollEvent(&e))
+        if (sSkipPump)
         {
-            PORT_PROF_COUNT(kEvents, 1);
-            port_OnInputEvent(e);
-            Translate(e);
+            sSkipPump = false;
+            sPumpSkipped = true;
         }
-        PORT_PROF(kPumpPad);
-        port_UpdatePad();
+        else
+        {
+            Pump();
+        }
     }
     if (Queue().empty())
     {

@@ -369,8 +369,8 @@ AIM CAMERA is there on the New 3DS only, told apart at run time (`APT_CheckNew3D
 
 ## HOME, sleep and exit
 
-SDL's event pump calls `aptMainLoop` once per game frame (the game's `PeekMessage`), between citro3d
-frames: HOME and the power button open the HOME Menu there, closing the lid sleeps there, and the
+SDL's event pump calls `aptMainLoop` once per logic step in game (just before the step reads its inputs,
+`port_PumpForStep`) and at each of the game's `PeekMessage` elsewhere, between citro3d frames: HOME and the power button open the HOME Menu there, closing the lid sleeps there, and the
 suspend and sleep hooks of citro3d (GPU state) and ndsp (the DSP) do the rest. The port's own hook
 (`platform_3ds.cpp`, run there on the main thread) calls `port_Suspend` (`compat/src/kernel.cpp`): the
 game's clocks (`timeGetTime`, the frame loop's) leave out the time away and SDL's audio device pauses, so
@@ -479,7 +479,10 @@ it (an axis also at each pump until its first event: SDL takes its first value w
 key bindings only while a key is held. In ste, in a car then walking (`GTA2_3DS_FPS`'s CPU time): 61
 SDL reads a frame became 9, `svcArbitrateAddress` calls 187 became 42, input polling 4.0 ms became 0.75
 and the main thread 11.4 ms became 7.9. Most of it is Azahar's system call cost: on hardware perhaps
-0.35 to 0.7 ms a frame.
+0.35 to 0.7 ms a frame. The console then measured the pump at 0.7 to 0.8 ms a frame (`GTA2_3DS_PROF`,
+2.2 pumps a frame, 0.4 ms of it the pad's update): in game it now runs once per logic step, just before the step
+reads its inputs, and no longer after each draw and wait, which read none. In Azahar, bil driving: 3.0 pumps a
+frame became 1.0, and their time 0.85 ms became 0.28.
 Texture uploads went from up to six passes per texture to one per level, 2.5 to 3 times faster
 in Azahar (a 64x64 sprite 2.3 to 0.84 ms, a 128x128 one 9.2 to 3.1 ms; upload time in a frame of a
 long drive at most 7 to 10 ms instead of 19 to 29). Remaining leads: fewer draw calls (about 100 per frame) with a tile atlas. The system core runs the sound (see Sound).

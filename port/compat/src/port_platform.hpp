@@ -24,6 +24,10 @@ unsigned port_FrameCount();
 // The full screen mode chosen in the settings, NULL for the desktop's.
 const SDL_DisplayMode* port_FullscreenMode();
 
+// In game, the event pump: left out of the PeekMessageA after each frame loop action, done before a step's inputs.
+void port_SkipNextPump();
+void port_PumpForStep();
+
 // Scripted key presses and exit (GTA2_INPUT, GTA2_EXIT_AT), checked as the message loop pumps.
 void port_InitTestInput();
 void port_InjectTestInput(unsigned frame);

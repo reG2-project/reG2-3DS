@@ -1458,6 +1458,14 @@ EXPORT void __stdcall do_network_and_local_inputs()
 }
 
 #if defined(GTA2_PORT)
+#if defined(GTA2_PORT_SDL)
+void port_SkipNextPump();
+void port_PumpForStep();
+#else
+static void port_SkipNextPump() {}
+static void port_PumpForStep() {}
+#endif
+
 // The original's order (inputs, step, draw) on the port's pacing; one action per call, so that the
 // message loop runs between them.
 static bool PortRunGameFrame()
@@ -1468,6 +1476,7 @@ static bool PortRunGameFrame()
     switch (PortFrameLoop::Next(gGame_0x40->GetFrameDurationMs(), sbForceGameUpdate, bSkip_draw))
     {
         case PortFrameLoop::kStep:
+            port_PumpForStep();
             if (sbInputsPending)
             {
                 PORT_PROF(kInputs);
@@ -1501,6 +1510,7 @@ static bool PortRunGameFrame()
         PORT_PROF(kLoopFps);
         gFpsCounter->UpdateFpsCounters(drew_frame, updated_logic);
     }
+    port_SkipNextPump();
     return exit_requested;
 }
 #endif
