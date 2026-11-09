@@ -1,5 +1,5 @@
-// The CD's files are installed in data (GTAudio for the music, Movie): a path on a drive letter that
-// does not exist is looked up there, so the game's probe of C: to Z: for the music finds it on C:.
+// The CD's files are installed in data (GTAudio for the music, Movie): a path on a drive letter is looked
+// up there too, so the game's probe of C: to Z: for the music finds it on C:.
 static bool IsDrivePath(const char* path)
 {
     return ((path[0] | 0x20) >= 'a' && (path[0] | 0x20) <= 'z') && path[1] == ':' && (path[2] == '\\' || path[2] == '/');
@@ -113,8 +113,9 @@ static bool FindInDirectory(const std::string& dir, const std::string& part, std
 }
 
 // Each component that does not exist as written is looked up in its directory without regard to case.
-// A missing last component keeps its spelling, so new files are created as the game names them.
-static const char* ResolveHostPath(const char* path, char* out)
+// A missing last component keeps its spelling, so new files are created as the game names them. True when
+// the path was found, now or before.
+static bool ResolveHostPath(const char* path, char* out)
 {
     std::string p(path);
     for (char& c : p)
@@ -132,6 +133,7 @@ static const char* ResolveHostPath(const char* path, char* out)
     std::string done = (!p.empty() && p[0] == '/') ? "/" : "";
     std::string asked = done;
     size_t pos = done.size();
+    bool exists = true;
     while (pos <= p.size())
     {
         size_t next = p.find('/', pos);
@@ -151,6 +153,7 @@ static const char* ResolveHostPath(const char* path, char* out)
         if (hit != ResolvedPrefixes().end())
         {
             candidate = hit->second;
+            exists = true;
         }
         else if (part != "..")
         {
@@ -165,6 +168,7 @@ static const char* ResolveHostPath(const char* path, char* out)
             {
                 ResolvedPrefixes()[asked] = candidate;
             }
+            exists = found;
         }
         done = candidate;
         if (pos <= p.size())
@@ -174,16 +178,16 @@ static const char* ResolveHostPath(const char* path, char* out)
         }
     }
     snprintf(out, PATH_MAX, "%s", done.empty() ? "." : done.c_str());
-    return out;
+    return exists;
 }
 
+// A drive path is looked up in data first: what the cache knows there costs no file system request, where
+// the drive's root would cost a few on each call (tens of milliseconds each on the 3DS).
 const char* port_resolve_path(const char* path, char* out)
 {
-    ResolveHostPath(path, out);
-    if (IsDrivePath(path) && access(out, F_OK) != 0)
+    if (!IsDrivePath(path) || !ResolveHostPath((std::string("data\\") + (path + 3)).c_str(), out))
     {
-        const std::string data = std::string("data\\") + (path + 3);
-        ResolveHostPath(data.c_str(), out);
+        ResolveHostPath(path, out);
     }
     return out;
 }
