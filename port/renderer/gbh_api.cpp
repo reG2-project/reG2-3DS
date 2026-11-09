@@ -1761,9 +1761,17 @@ IRenderer* port_MapCacheRenderer()
     return gViewTurn.mKind == kTurnOff ? gRenderer : 0;
 }
 
+// Null unless converted and in memory: converting a whole chunk's textures at once would stall the frame.
 RTexture* port_MapCacheTexture(STexture* pTexture, bool alpha)
 {
-    return Resolve(pTexture, alpha ? kAlpha : kOpaque);
+    TexData* pData = Data(pTexture);
+    const int variant = alpha ? kAlpha : kOpaque;
+    if (!pData || pData->mImage || !gRenderer || !pData->mTex[variant] || pData->mDirty[variant] ||
+        pData->mEpoch != gTextureEpoch || gRenderer->Evicted(pData->mTex[variant]))
+    {
+        return 0;
+    }
+    return pData->mTex[variant];
 }
 
 // Whether a draw with FLAG_LIGHTING is lit now, with the shader's lights uploaded if it is.

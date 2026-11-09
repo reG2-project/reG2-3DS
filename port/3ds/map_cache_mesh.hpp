@@ -40,7 +40,7 @@ struct TexturePlace
 
 // The frame begun if it had not; false when the renderer cannot take meshes (none, or the view turned).
 bool BeginFrame(uint32_t* pFrame);
-// gbh_api.cpp's texture for a tile, as gbh_DrawTile would resolve it.
+// gbh_api.cpp's texture for a tile, as gbh_DrawTile resolves it, or null when not converted yet.
 RTexture* TileTexture(STexture* pTexture, bool alpha);
 // False when the texture has no storage. Marks it drawn in this frame, so it is not evicted before the meshes.
 bool Texture(RTexture* pTex, TexturePlace* pPlace);
