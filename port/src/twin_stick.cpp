@@ -6,6 +6,7 @@
 #include "Ped.hpp"
 #include "Player.hpp"
 #include "char.hpp"
+#include "platform.hpp"
 #include "settings.hpp"
 #include "sprite.hpp"
 #include "view.hpp"
@@ -16,6 +17,8 @@ bool port_TwinStickInput(float* pMoveX, float* pMoveY, float* pAimX, float* pAim
 void port_MousePos(float* pX, float* pY);
 void port_DrawReticle(f32 x, f32 y, f32 size, f32 alpha);
 bool port_LookFurther();
+bool port_HoldFacing();
+int port_TurretInput();
 #endif
 
 namespace PortTwinStick
@@ -52,6 +55,8 @@ s32 sJumpTurn;
 bool sMouse;
 s32 sAim;
 s32 sAimSteps;
+bool sHolding; // port_HoldFacing: the facing kept, sHeldFacing
+s32 sHeldFacing;
 f32 sPadX; // the pad's reticle on screen from the ped, in pixels
 f32 sPadY;
 f32 sLookX; // in blocks
@@ -168,6 +173,7 @@ void PedControls(Player* pPlayer, Ped* pPed)
 #if defined(GTA2_PORT_SDL)
     if (!pPed || pPed != OnFootPed())
     {
+        sHolding = false;
         return;
     }
     Char* pChar = pPed->mGameObject;
@@ -179,9 +185,14 @@ void PedControls(Player* pPlayer, Ped* pPed)
     const bool moving = mx * mx + my * my > 0.01f;
     const s32 move = moving ? WorldAngle(mx, my) : 0;
     Aim(pPed->GetSprite(), ax, ay);
-    const bool aiming = sAimSteps > 0;
     const s32 rotation = pChar->mRotation.rValue;
-    s32 turn = aiming || moving ? Diff(aiming ? sAim : move, rotation) : 0;
+    // Held from the press: the player keeps facing that way, so he backs off while firing. A stick's aim comes first.
+    const bool hold = port_HoldFacing();
+    sHeldFacing = hold && !sHolding ? rotation : sHeldFacing;
+    sHolding = hold;
+    const bool aiming = sAimSteps > 0 || hold;
+    const s32 aim = sAimSteps > 0 ? sAim : sHeldFacing;
+    s32 turn = aiming || moving ? Diff(aiming ? aim : move, rotation) : 0;
     turn = sMouse ? turn : (turn > kTurnStep ? kTurnStep : (turn < -kTurnStep ? -kTurnStep : turn));
     const bool jumping = pChar->GetCharState() == Char_B4_state::Jumping_15;
     if (jumping && moving && pPlayer->mNowHandBrakeOrJumpPressed && pPlayer->mHandBrakeOrJumpChanged)
@@ -227,6 +238,15 @@ bool Walk(Char* pChar, Ang16* pFacing)
 void AimTurret(Car* pCar)
 {
 #if defined(GTA2_PORT_SDL)
+    const s32 dir = port_TurretInput();
+    if (dir && Turret(pCar))
+    {
+        // At the original's turn speed, and the stick's aim given up.
+        Turret(pCar)->mOffsetRot += Ang16(dir * kTurretStep);
+        pCar->mTurretRotated = true;
+        sAimSteps = 0;
+        return;
+    }
     AttachedSprite* pTurret = AimFrom() == pCar->mCarSprite ? Turret(pCar) : NULL;
     if (!pTurret)
     {
@@ -248,7 +268,8 @@ void AimTurret(Car* pCar)
 
 bool FreeAim(const Ped* pPed)
 {
-    return pPed == OnFootPed();
+    // The console controls keep the original's lock on a ped near the line of fire, but for a stick's aim.
+    return pPed == OnFootPed() && (sAimSteps > 0 || !PortPlatform::Has(PortPlatform::kConsoleControls));
 }
 
 void DrawReticle()
@@ -331,6 +352,13 @@ bool port_Driving()
 {
     Ped* pPed = PortTwinStick::ControlledPed();
     return pPed && pPed->get_car();
+}
+
+bool port_DrivingRoofGun()
+{
+    Ped* pPed = PortTwinStick::ControlledPed();
+    Car* pCar = pPed ? pPed->get_car() : NULL;
+    return pCar && PortTwinStick::Turret(pCar);
 }
 
 bool port_TwinStickAims()

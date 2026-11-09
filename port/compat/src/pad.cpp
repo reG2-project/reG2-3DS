@@ -299,6 +299,49 @@ float CarAnalog(bool full, Sint16 value, Sint16 deadZone)
     return full || value <= deadZone ? 1.0f : Beyond(value, deadZone);
 }
 
+// The console controls (PortPlatform::kConsoleControls): one layout on foot and in a vehicle, in either CONTROLS
+// style, without bindings. Its table is in port/docs/3ds.md (Buttons).
+bool Console()
+{
+    return PortPlatform::Has(PortPlatform::kConsoleControls);
+}
+
+// twin: port_TwinStick(), 0 for CLASSIC.
+bool ConsoleDown(int control, bool car, int twin, bool roofGun)
+{
+    const Sint16 x = Axis(SDL_GAMEPAD_AXIS_LEFTX);
+    const Sint16 y = Axis(SDL_GAMEPAD_AXIS_LEFTY);
+    const bool r = Button(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
+    const bool stickUp = twin == 0 && y < -kThreshold;
+    const bool stickDown = twin == 0 && y > kThreshold;
+    switch (control)
+    {
+        case 0:
+            return (car && r) || stickUp;
+        case 1:
+            return (car && Button(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)) || stickDown;
+        case 2:
+            return x < (car ? -kStickDeadZone : -kThreshold);
+        case 3:
+            return x > (car ? kStickDeadZone : kThreshold);
+        case 4:
+            return (car ? Button(SDL_GAMEPAD_BUTTON_DPAD_DOWN) : r) || CodeDown(11);
+        case 5:
+            return Button(SDL_GAMEPAD_BUTTON_EAST);
+        case 6:
+            return Button(SDL_GAMEPAD_BUTTON_SOUTH);
+        case 7:
+        case 8:
+            return !roofGun && Button(control == 7 ? SDL_GAMEPAD_BUTTON_DPAD_LEFT : SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
+        case 9:
+            return Button(SDL_GAMEPAD_BUTTON_WEST);
+        case 10:
+            return Button(SDL_GAMEPAD_BUTTON_NORTH);
+        default:
+            return Button(SDL_GAMEPAD_BUTTON_DPAD_UP);
+    }
+}
+
 // A stick within its dead zone (a quarter of its range) is centred.
 void Stick(SDL_GamepadAxis x, SDL_GamepadAxis y, float* pX, float* pY)
 {
@@ -315,9 +358,23 @@ bool port_TwinStickInput(float* pMoveX, float* pMoveY, float* pAimX, float* pAim
 {
     Stick(SDL_GAMEPAD_AXIS_LEFTX, SDL_GAMEPAD_AXIS_LEFTY, pMoveX, pMoveY);
     Stick(SDL_GAMEPAD_AXIS_RIGHTX, SDL_GAMEPAD_AXIS_RIGHTY, pAimX, pAimY);
-    *pMoveX += (Button(SDL_GAMEPAD_BUTTON_DPAD_RIGHT) || AltDown(3)) - (Button(SDL_GAMEPAD_BUTTON_DPAD_LEFT) || AltDown(2));
-    *pMoveY += (Button(SDL_GAMEPAD_BUTTON_DPAD_DOWN) || AltDown(1)) - (Button(SDL_GAMEPAD_BUTTON_DPAD_UP) || AltDown(0));
+    // The console controls' d-pad has other uses.
+    const bool dpad = !Console();
+    *pMoveX += ((dpad && Button(SDL_GAMEPAD_BUTTON_DPAD_RIGHT)) || AltDown(3)) - ((dpad && Button(SDL_GAMEPAD_BUTTON_DPAD_LEFT)) || AltDown(2));
+    *pMoveY += ((dpad && Button(SDL_GAMEPAD_BUTTON_DPAD_DOWN)) || AltDown(1)) - ((dpad && Button(SDL_GAMEPAD_BUTTON_DPAD_UP)) || AltDown(0));
     return sMouseAims;
+}
+
+bool port_HoldFacing()
+{
+    return Console() && port_TwinStick() == 1 && (Button(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER) || CodeDown(11));
+}
+
+int port_TurretInput()
+{
+    return Console() && port_DrivingRoofGun()
+        ? Button(SDL_GAMEPAD_BUTTON_DPAD_LEFT) - Button(SDL_GAMEPAD_BUTTON_DPAD_RIGHT)
+        : 0;
 }
 
 void port_PadVehicleInput(float* pForward, float* pBackward, float* pSteer)
@@ -330,7 +387,7 @@ void port_PadVehicleInput(float* pForward, float* pBackward, float* pSteer)
 // TWIN STICK on foot, with SPECIAL 2 on its default LT: LT looks further instead.
 static bool LtLooks()
 {
-    return port_TwinStick() == 1 && port_GetPadBinding(10) == 10;
+    return !Console() && port_TwinStick() == 1 && port_GetPadBinding(10) == 10;
 }
 
 bool port_LookFurther()
@@ -653,13 +710,15 @@ void port_UpdatePad()
     }
     const bool lt = LtLooks();
     // TWIN STICK in a vehicle with a roof gun: RB fires, so the thumb stays on the aiming stick.
-    const bool rbFires = twin == 2 && port_TwinStickAims() && port_GetPadBinding(8) == 5;
+    const bool console = Console();
+    const bool rbFires = !console && twin == 2 && port_TwinStickAims() && port_GetPadBinding(8) == 5;
     const auto key = [](int control) { return sKeyDown[KeyFor(control)] || AltDown(control); };
     const Sint16 x = Axis(SDL_GAMEPAD_AXIS_LEFTX);
-    const bool steerFull = key(2) || key(3) || Button(SDL_GAMEPAD_BUTTON_DPAD_LEFT) || Button(SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
+    const bool steerFull = key(2) || key(3) || (!console && (Button(SDL_GAMEPAD_BUTTON_DPAD_LEFT) || Button(SDL_GAMEPAD_BUTTON_DPAD_RIGHT)));
     const float steer = CarAnalog(steerFull, x < 0 ? static_cast<Sint16>(-(x + 1)) : x, kStickDeadZone);
-    sCarForward = CarAnalog(!car || key(0) || Button(SDL_GAMEPAD_BUTTON_DPAD_UP), Axis(SDL_GAMEPAD_AXIS_RIGHT_TRIGGER), kTriggerDeadZone);
-    sCarBackward = CarAnalog(!car || key(1) || Button(SDL_GAMEPAD_BUTTON_DPAD_DOWN), Axis(SDL_GAMEPAD_AXIS_LEFT_TRIGGER), kTriggerDeadZone);
+    // The console's R and L are buttons: all the way.
+    sCarForward = CarAnalog(console || !car || key(0) || Button(SDL_GAMEPAD_BUTTON_DPAD_UP), Axis(SDL_GAMEPAD_AXIS_RIGHT_TRIGGER), kTriggerDeadZone);
+    sCarBackward = CarAnalog(console || !car || key(1) || Button(SDL_GAMEPAD_BUTTON_DPAD_DOWN), Axis(SDL_GAMEPAD_AXIS_LEFT_TRIGGER), kTriggerDeadZone);
     // From three fifths of the wheels' turn: less, a car at town speeds slides sideways without turning.
     sCarSteer = car && steer < 1.0f ? 0.6f + 0.4f * steer : 1.0f;
     for (int i = 0; i < kNumControls; i++)
@@ -669,7 +728,9 @@ void port_UpdatePad()
         const bool move = twin == 1 && i < 4;
         const bool pad = (car ? CarPadDown(i, code, l3Free) : CodeDown(code) && !(twin == 1 && (code == 11 || (code == 10 && lt)))) &&
             !(rbFires && code == 5);
-        const bool down = !move && (pad || AltDown(i) || (twin == 1 && i == 4 && CodeDown(11)) || (rbFires && i == 4 && CodeDown(5)));
+        const bool down = !move &&
+            (console ? ConsoleDown(i, port_Driving(), twin, port_DrivingRoofGun())
+                     : pad || AltDown(i) || (twin == 1 && i == 4 && CodeDown(11)) || (rbFires && i == 4 && CodeDown(5)));
         Press(i, inGame && !quitShown && !sGameBlocked && down);
     }
     if (inGame)

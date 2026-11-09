@@ -164,6 +164,7 @@ const Translation kTranslations[] = {
     {L"CONTROLS", NULL, {L"COMMANDES", L"STEUERUNG", L"COMANDI", L"CONTROLES"}},
     {L"AIM CAMERA", NULL, {L"CAMERA DE VISEE", L"ZIELKAMERA", L"CAMERA DI MIRA", L"CÁMARA DE MIRA"}},
     {L"TWIN STICK", NULL, {L"DOUBLE STICK", L"TWIN-STICK", L"DOPPIO STICK", L"DOBLE STICK"}},
+    {L"MODERN", NULL, {L"MODERNE", L"MODERN", L"MODERNO", L"MODERNO"}},
     {L"DEFAULT KEYS", NULL, {L"CONTROLES PAR DEFAUT", L"STANDARDSTEUERUNG", L"COMANDI PREDEFINITI", L"CONTROLES PREDETERMINADOS"}},
     {L"KEYBOARD", NULL, {L"CLAVIER", L"TASTATUR", L"TASTIERA", L"TECLADO"}},
     {L"GAMEPAD", NULL, {L"MANETTE", L"GAMEPAD", L"GAMEPAD", L"MANDO"}},
@@ -295,7 +296,8 @@ const char* ScreenName(Id id)
         case kClock:
             return "day_clock";
         case kControls:
-            return "port_controls";
+            // CLASSIC or MODERN there, MODERN by default, not a PC registry's CLASSIC or TWIN STICK.
+            return PortPlatform::Has(PortPlatform::kConsoleControls) ? "port_console_controls" : "port_controls";
         case kAimCamera:
             return "port_aim_camera";
         default:
@@ -338,6 +340,10 @@ s32 ScreenDefault(Id id)
     if (id == kLightEffects)
     {
         return !Available(kPerPixelLighting);
+    }
+    if (id == kControls)
+    {
+        return PortPlatform::Has(PortPlatform::kConsoleControls);
     }
     return id == kLighting || id == kExplodingScores || id == kVsync || id == kClock || id == kAimCamera ? 1 : 0;
 }
@@ -588,6 +594,7 @@ bool Available(Id id)
         case kHeadlights:
             return P::Has(P::kRendererOptions);
         case kControls:
+            return P::Has(P::kTwinStick) || P::Has(P::kConsoleControls);
         case kAimCamera:
             return P::Has(P::kTwinStick);
         case kCamera:
@@ -633,7 +640,7 @@ Id Requirement(Id id)
     {
         return kLighting;
     }
-    return id == kAimCamera ? kControls : kCount;
+    return id == kAimCamera && Available(kControls) ? kControls : kCount;
 }
 
 bool Enabled(Id id)
@@ -716,7 +723,7 @@ bool TwinStick()
 }
 bool AimCamera()
 {
-    return TwinStick() && Screen(kAimCamera) != 0;
+    return Available(kAimCamera) && TwinStick() && Screen(kAimCamera) != 0;
 }
 // The menus ask every frame, and an open costs milliseconds on the 3DS's SD card: looked up once per code.
 bool LanguageInstalled(char code)
@@ -883,7 +890,7 @@ void Value(Id id, wchar_t* pOut)
             wcscpy(pOut, Translate(CameraFollows() ? L"FOLLOW" : L"STREETS"));
             break;
         case kControls:
-            wcscpy(pOut, Translate(TwinStick() ? L"TWIN STICK" : L"CLASSIC"));
+            wcscpy(pOut, Translate(!TwinStick() ? L"CLASSIC" : (PortPlatform::Has(PortPlatform::kConsoleControls) ? L"MODERN" : L"TWIN STICK")));
             break;
         case kBloom:
             if (Screen(id))

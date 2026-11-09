@@ -310,7 +310,7 @@ bool Has(Feature feature)
         APT_CheckNew3DS(&isNew);
         sNew3ds = isNew;
     }
-    return feature == kTwinStick && sNew3ds;
+    return feature == kConsoleControls || (feature == kTwinStick && sNew3ds);
 }
 
 const wchar_t* PadButtonName(int code)

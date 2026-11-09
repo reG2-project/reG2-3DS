@@ -17,6 +17,7 @@ enum Feature
     kHudScale, // a HUD drawn over the world, at a scale to choose
     kKeyboard,
     kTwinStick, // a second stick to aim with
+    kConsoleControls, // the console's own pad layout (compat/src/pad.cpp), CONTROLS CLASSIC or MODERN
 };
 
 bool Has(Feature feature);

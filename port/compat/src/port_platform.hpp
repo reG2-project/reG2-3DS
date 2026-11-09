@@ -67,6 +67,10 @@ void port_UpdatePad();
 // TWIN STICK on foot: the left stick, d-pad and movement second keys as a move, the right stick as an aim,
 // both screen-relative, y down, 0 within the dead zones. True if the mouse aims (it was used after the pad).
 bool port_TwinStickInput(float* pMoveX, float* pMoveY, float* pAimX, float* pAimY);
+// The console controls (pad.cpp): R or ZR held on foot keeps the player's facing; the d-pad's left and right
+// turn a roof gun, positive to the left (as SPECIAL with LEFT), 0 when nothing turns it.
+bool port_HoldFacing();
+int port_TurretInput();
 // AIM CAMERA looks further: left Shift, R3 unless a control is bound to it, or LT on foot (pad.cpp).
 bool port_LookFurther();
 
@@ -99,6 +103,8 @@ int port_TwinStick();
 bool port_TwinStickAims();
 // The local player with the controls on, in a vehicle, in either CONTROLS style.
 bool port_Driving();
+// The same, in a fire truck, tank or gun jeep.
+bool port_DrivingRoofGun();
 // Tests (GTA2_TEST_CAR): a car of that model at that offset from the player, in blocks, who then gets in.
 void port_TestCar(int model, float dx, float dy);
 // The player's vehicle: how far RT, LT and the stick press FORWARD, BACKWARD and the steering, 0 to 1, 1 for

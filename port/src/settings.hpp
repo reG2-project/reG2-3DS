@@ -100,7 +100,7 @@ s32 CameraTurnSpeed();
 // ROTATION: STREETS turns the CHINATOWN camera to the street the vehicle has taken, FOLLOW after its heading.
 bool CameraFollows();
 
-// CONTROLS: TWIN STICK moves and aims apart on foot (twin_stick.hpp).
+// CONTROLS: TWIN STICK (MODERN with the console controls) moves and aims apart on foot (twin_stick.hpp).
 bool TwinStick();
 // AIM CAMERA: with TWIN STICK, the view looks ahead toward the aim.
 bool AimCamera();
