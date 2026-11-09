@@ -1510,7 +1510,11 @@ static bool PortRunGameFrame()
         PORT_PROF(kLoopFps);
         gFpsCounter->UpdateFpsCounters(drew_frame, updated_logic);
     }
-    port_SkipNextPump();
+    // Not after the game's last step: the frontend would read the pad as the game left it, the button that quit held.
+    if (!exit_requested)
+    {
+        port_SkipNextPump();
+    }
     return exit_requested;
 }
 #endif
