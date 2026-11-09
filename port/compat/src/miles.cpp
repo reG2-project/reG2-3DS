@@ -26,6 +26,13 @@ std::recursive_mutex& Lock()
     return sLock;
 }
 
+// Held while the audio thread decodes streams without Lock(): what closes one takes it first, then Lock().
+std::mutex& IoLock()
+{
+    static std::mutex sLock;
+    return sLock;
+}
+
 struct Sample
 {
     const u8* mData = NULL;
@@ -45,7 +52,12 @@ struct Sample
     std::vector<u8> mOwned;    // a fading copy's own frames, mData pointing here
 };
 
-// A WAV file read block by block on the audio thread.
+// The frames a stream keeps decoded ahead (0.37 s at 22050 Hz), and the bytes it reads from its file at once.
+const u32 kQueueFrames = 8192;
+const u32 kRawBytes = 32768;
+
+// A WAV file that the audio thread reads in large blocks and decodes ahead into a queue of frames, outside
+// the game's lock (Prefetch), so the game never waits for the file system.
 struct Stream
 {
     FILE* mFile = NULL;
@@ -62,17 +74,24 @@ struct Stream
     S32 mPlayRate = 0;
     S32 mLoopCount = 1;
     U32 mStatus = SMP_DONE;
-
-    std::vector<s16> mBuf; // decoded frames, interleaved
-    u32 mBufFirst = 0;     // frame index of mBuf[0]
-    double mPos = 0;       // frame position
     float mGain = -1;
     int mFade = -1;
 
-    // The frames on each side of the position, for the interpolation.
-    u32 mCurFrame = UINT_MAX;
-    float mCur[2] = {};
-    float mNext[2] = {};
+    // Stereo frames from the play position on, in a ring.
+    std::vector<s16> mQueue = std::vector<s16>(kQueueFrames * 2);
+    u32 mQueueHead = 0;
+    u32 mQueued = 0;
+    u32 mPos = 0;     // the file's frame at the head
+    double mFrac = 0; // the position between the head and the next frame
+    // Where decoding goes on: the file's frame, the plays left (0 for ever), and whether it reached the end.
+    u32 mDecodeFrame = 0;
+    S32 mDecodeLoops = 1;
+    bool mDecodeEnd = true;
+    u32 mSeeks = 0; // a start or a seek drops what a decode under way brings
+
+    // The audio thread's alone: the data chunk's bytes from mRawOffset on.
+    std::vector<u8> mRaw;
+    u32 mRawOffset = 0;
 };
 
 struct Driver
@@ -214,109 +233,152 @@ bool OpenWav(Stream* s, const char* path)
     return false;
 }
 
-// Decodes the block holding frame f into mBuf.
-bool FillStream(Stream* s, u32 f)
+// The data chunk's bytes [offset, offset + size), read with the ones after them in one request.
+const u8* RawBytes(Stream* s, u32 offset, u32 size)
 {
-    if (f >= s->mTotalFrames)
+    if (offset < s->mRawOffset || offset + size > s->mRawOffset + s->mRaw.size())
     {
-        return false;
+        s->mRaw.resize(SDL_min(SDL_max(size, kRawBytes), s->mDataSize - offset));
+        fseek(s->mFile, s->mDataStart + (long)offset, SEEK_SET);
+        s->mRaw.resize(fread(s->mRaw.data(), 1, s->mRaw.size(), s->mFile));
+        s->mRawOffset = offset;
+        if (s->mRaw.size() < size)
+        {
+            return NULL;
+        }
     }
+    return &s->mRaw[offset - s->mRawOffset];
+}
+
+// Decodes stereo frames from frame f on, at most max and not past f's ADPCM block; 0 when the file ends short.
+u32 Decode(Stream* s, u32 f, s16* out, u32 max)
+{
     const int ch = s->mChannels;
     if (s->mFormatTag == 1)
     {
-        const u32 chunkFrames = 4096;
-        const u32 first = f / chunkFrames * chunkFrames;
-        const u32 count = SDL_min(chunkFrames, s->mTotalFrames - first);
-        const int bytes = s->mBits / 8;
-        std::vector<u8> raw(count * ch * bytes);
-        fseek(s->mFile, s->mDataStart + (long)(first * ch * bytes), SEEK_SET);
-        const size_t got = fread(raw.data(), 1, raw.size(), s->mFile) / (ch * bytes);
-        s->mBuf.resize(got * ch);
-        for (size_t i = 0; i < got * ch; i++)
+        const u32 bytes = s->mBits / 8;
+        const u32 count = SDL_min(SDL_min(max, s->mTotalFrames - f), kRawBytes / (ch * bytes));
+        const u8* p = RawBytes(s, f * ch * bytes, count * ch * bytes);
+        if (!p)
         {
-            s->mBuf[i] = bytes == 2 ? (s16)Rd16(&raw[i * 2]) : (s16)((raw[i] - 128) << 8);
+            return 0;
         }
-        s->mBufFirst = first;
-        return got > 0;
+        for (u32 i = 0; i < count * 2; i++)
+        {
+            const u32 k = i / 2 * ch + (ch == 2 ? i % 2 : 0);
+            out[i] = bytes == 2 ? (s16)Rd16(p + k * 2) : (s16)((p[k] - 128) << 8);
+        }
+        return count;
     }
     const u32 block = f / s->mFramesPerBlock;
-    std::vector<u8> raw(s->mBlockAlign);
-    fseek(s->mFile, s->mDataStart + (long)block * s->mBlockAlign, SEEK_SET);
-    if (fread(raw.data(), 1, raw.size(), s->mFile) != raw.size())
+    const u8* p = RawBytes(s, block * s->mBlockAlign, s->mBlockAlign);
+    if (!p)
     {
-        return false;
+        return 0;
     }
-    s->mBuf.assign((size_t)s->mFramesPerBlock * ch, 0);
+    static std::vector<s16> sBlock; // the audio thread's alone
+    sBlock.assign((size_t)s->mFramesPerBlock * 2, 0);
     int pred[2];
     int index[2];
     for (int c = 0; c < ch; c++)
     {
-        pred[c] = (s16)Rd16(&raw[c * 4]);
-        index[c] = SDL_min(raw[c * 4 + 2], 88);
-        s->mBuf[c] = (s16)pred[c];
+        pred[c] = (s16)Rd16(p + c * 4);
+        index[c] = SDL_min(p[c * 4 + 2], 88);
+        sBlock[c] = (s16)pred[c];
     }
     // After the headers, 4 bytes (8 nibbles) per channel in turn.
-    const u8* p = &raw[4 * ch];
-    const u8* end = raw.data() + raw.size();
+    const u8* q = p + 4 * ch;
+    const u8* end = p + s->mBlockAlign;
     int frame = 1;
-    while (p + 4 * ch <= end && frame < s->mFramesPerBlock)
+    while (q + 4 * ch <= end && frame < s->mFramesPerBlock)
     {
         for (int c = 0; c < ch; c++)
         {
             for (int k = 0; k < 8 && frame + k < s->mFramesPerBlock; k++)
             {
-                const int nibble = (p[k >> 1] >> ((k & 1) * 4)) & 15;
-                s->mBuf[(frame + k) * ch + c] = ImaNibble(nibble, pred[c], index[c]);
+                const int nibble = (q[k >> 1] >> ((k & 1) * 4)) & 15;
+                sBlock[(frame + k) * 2 + c] = ImaNibble(nibble, pred[c], index[c]);
             }
-            p += 4;
+            q += 4;
         }
         frame += 8;
     }
-    s->mBufFirst = block * s->mFramesPerBlock;
-    return true;
+    const u32 first = f - block * s->mFramesPerBlock;
+    const u32 count = SDL_min(max, s->mFramesPerBlock - first);
+    for (u32 i = 0; i < count; i++)
+    {
+        out[i * 2] = sBlock[(first + i) * 2];
+        out[i * 2 + 1] = sBlock[(first + i) * 2 + ch - 1];
+    }
+    return count;
 }
 
-bool StreamFrame(Stream* s, u32 f, float* pL, float* pR);
-
-// Frames f and f + 1; moving on by one frame reads only the new one, so a block is not read again.
-bool StreamFrames(Stream* s, u32 f)
+// Tops the queue up by a quarter at most (whole ADPCM blocks, one file read at most), without the game's
+// lock: only the audio thread decodes, and IoLock keeps the stream open meanwhile.
+void Prefetch(Stream* s)
 {
-    if (f == s->mCurFrame)
+    static std::vector<s16> sOut(kQueueFrames / 4 * 2); // the audio thread's alone
+    u32 seeks;
+    u32 frame;
+    S32 loops;
+    u32 room;
     {
-        return true;
-    }
-    if (s->mCurFrame != UINT_MAX && f == s->mCurFrame + 1)
-    {
-        s->mCur[0] = s->mNext[0];
-        s->mCur[1] = s->mNext[1];
-    }
-    else if (!StreamFrame(s, f, &s->mCur[0], &s->mCur[1]))
-    {
-        return false;
-    }
-    s->mCurFrame = f;
-    const u32 next = f + 1 < s->mTotalFrames ? f + 1 : (s->mLoopCount == 1 ? f : 0);
-    if (!StreamFrame(s, next, &s->mNext[0], &s->mNext[1]))
-    {
-        s->mNext[0] = s->mCur[0];
-        s->mNext[1] = s->mCur[1];
-    }
-    return true;
-}
-
-bool StreamFrame(Stream* s, u32 f, float* pL, float* pR)
-{
-    if (f < s->mBufFirst || f >= s->mBufFirst + s->mBuf.size() / s->mChannels)
-    {
-        if (!FillStream(s, f))
+        std::lock_guard<std::recursive_mutex> lock(Lock());
+        if (s->mStatus != SMP_PLAYING || s->mDecodeEnd || kQueueFrames - s->mQueued < kQueueFrames / 4)
         {
-            return false;
+            return;
         }
+        room = kQueueFrames / 4;
+        seeks = s->mSeeks;
+        frame = s->mDecodeFrame;
+        loops = s->mDecodeLoops;
     }
-    const s16* p = &s->mBuf[(f - s->mBufFirst) * s->mChannels];
-    *pL = p[0] / 32768.0f;
-    *pR = p[s->mChannels - 1] / 32768.0f;
-    return true;
+    u32 done = 0;
+    bool end = false;
+    const u32 unit = s->mFormatTag == 1 ? 1 : SDL_min((u32)s->mFramesPerBlock, room);
+    while (room - done >= unit && !end)
+    {
+        if (frame >= s->mTotalFrames)
+        {
+            if (loops == 1)
+            {
+                end = true;
+                break;
+            }
+            loops -= loops > 1;
+            frame = 0;
+        }
+        const u32 n = Decode(s, frame, &sOut[done * 2], room - done);
+        end = n == 0;
+        frame += n;
+        done += n;
+    }
+    std::lock_guard<std::recursive_mutex> lock(Lock());
+    if (seeks != s->mSeeks)
+    {
+        return;
+    }
+    for (u32 i = 0; i < done; i++)
+    {
+        const u32 at = (s->mQueueHead + s->mQueued + i) % kQueueFrames;
+        s->mQueue[at * 2] = sOut[i * 2];
+        s->mQueue[at * 2 + 1] = sOut[i * 2 + 1];
+    }
+    s->mQueued += done;
+    s->mDecodeFrame = frame;
+    s->mDecodeLoops = loops;
+    s->mDecodeEnd = end;
+}
+
+// Plays on from that frame, decoded again from there.
+void Seek(Stream* s, u32 frame)
+{
+    s->mSeeks++;
+    s->mQueued = 0;
+    s->mFrac = 0;
+    s->mPos = frame;
+    s->mDecodeFrame = frame;
+    s->mDecodeEnd = false;
 }
 
 // The value at a data index: 16-bit signed, or 8-bit with flip8 0x80 for unsigned data.
@@ -440,8 +502,18 @@ void MixStream(Stream* s, float* out, int frames)
 {
     const double step = (double)(s->mPlayRate ? s->mPlayRate : s->mRate) / kOutRate;
     const float vol = s->mVolume / 127.0f * sDriver->mMasterVolume / 127.0f;
+    const s16* q = s->mQueue.data();
     for (int i = 0; i < frames; i++)
     {
+        // Short of frames: the end, a fade-out the queue does not cover, or the decoding late (it waits).
+        if (s->mQueued < 2)
+        {
+            if (s->mDecodeEnd || s->mFade >= 0)
+            {
+                s->mStatus = SMP_DONE;
+            }
+            return;
+        }
         float fade;
         if (!FadeStep(&s->mFade, &fade))
         {
@@ -449,31 +521,18 @@ void MixStream(Stream* s, float* out, int frames)
             return;
         }
         s->mGain = Ramp(s->mGain, vol);
-        u32 f = (u32)s->mPos;
-        if (f >= s->mTotalFrames)
+        const u32 a = s->mQueueHead * 2;
+        const u32 b = (s->mQueueHead + 1) % kQueueFrames * 2;
+        const float t = (float)s->mFrac;
+        const float gain = s->mGain * fade / 32768.0f;
+        out[i * 2] += (q[a] * (1 - t) + q[b] * t) * gain;
+        out[i * 2 + 1] += (q[a + 1] * (1 - t) + q[b + 1] * t) * gain;
+        for (s->mFrac += step; s->mFrac >= 1 && s->mQueued; s->mFrac -= 1)
         {
-            if (s->mLoopCount == 1)
-            {
-                s->mStatus = SMP_DONE;
-                return;
-            }
-            if (s->mLoopCount > 1)
-            {
-                s->mLoopCount--;
-            }
-            s->mPos = 0;
-            f = 0;
+            s->mQueueHead = (s->mQueueHead + 1) % kQueueFrames;
+            s->mQueued--;
+            s->mPos = s->mPos + 1 < s->mTotalFrames ? s->mPos + 1 : 0;
         }
-        if (!StreamFrames(s, f))
-        {
-            s->mStatus = SMP_DONE;
-            return;
-        }
-        const float t = (float)(s->mPos - f);
-        const float gain = s->mGain * fade;
-        out[i * 2] += (s->mCur[0] * (1 - t) + s->mNext[0] * t) * gain;
-        out[i * 2 + 1] += (s->mCur[1] * (1 - t) + s->mNext[1] * t) * gain;
-        s->mPos += step;
     }
 }
 
@@ -532,6 +591,22 @@ void SDLCALL AudioCallback(void*, SDL_AudioStream* stream, int additional, int)
     if (frames <= 0)
     {
         return;
+    }
+    {
+        std::lock_guard<std::mutex> io(IoLock());
+        static std::vector<Stream*> sStreams; // the audio thread's alone
+        {
+            std::lock_guard<std::recursive_mutex> lock(Lock());
+            sStreams.clear();
+            if (sDriver)
+            {
+                sStreams = sDriver->mStreams;
+            }
+        }
+        for (Stream* s : sStreams)
+        {
+            Prefetch(s);
+        }
     }
     std::vector<float> mix((size_t)frames * 2, 0.0f);
     {
@@ -748,6 +823,7 @@ DXDEC S32 AILCALL AIL_waveOutOpen(HDIGDRIVER FAR* drvr, LPHWAVEOUT FAR*, S32, LP
 
 DXDEC void AILCALL AIL_waveOutClose(HDIGDRIVER)
 {
+    std::lock_guard<std::mutex> io(IoLock());
     LOCK;
     DropFading();
     delete sDriver;
@@ -901,6 +977,7 @@ DXDEC HSTREAM AILCALL AIL_open_stream(HDIGDRIVER, char FAR* filename, S32)
 
 DXDEC void AILCALL AIL_close_stream(HSTREAM h)
 {
+    std::lock_guard<std::mutex> io(IoLock());
     LOCK;
     if (sDriver && h)
     {
@@ -919,9 +996,9 @@ DXDEC void AILCALL AIL_close_stream(HSTREAM h)
 DXDEC void AILCALL AIL_start_stream(HSTREAM h)
 {
     LOCK;
-    St(h)->mPos = 0;
+    Seek(St(h), 0);
+    St(h)->mDecodeLoops = St(h)->mLoopCount;
     St(h)->mGain = -1;
-    St(h)->mCurFrame = UINT_MAX;
     St(h)->mStatus = SMP_PLAYING;
 }
 
@@ -953,6 +1030,7 @@ DXDEC void AILCALL AIL_set_stream_loop_count(HSTREAM h, S32 count)
 {
     LOCK;
     St(h)->mLoopCount = count;
+    St(h)->mDecodeLoops = count;
 }
 
 DXDEC S32 AILCALL AIL_stream_status(HSTREAM h)
@@ -965,8 +1043,7 @@ DXDEC void AILCALL AIL_set_stream_ms_position(HSTREAM h, S32 milliseconds)
 {
     LOCK;
     Stream* s = St(h);
-    s->mPos = SDL_min((double)milliseconds * s->mRate / 1000.0, (double)s->mTotalFrames);
-    s->mCurFrame = UINT_MAX;
+    Seek(s, (u32)SDL_min((double)milliseconds * s->mRate / 1000.0, (double)s->mTotalFrames));
 }
 
 DXDEC void AILCALL AIL_stream_ms_position(HSTREAM h, S32 FAR* total_milliseconds, S32 FAR* current_milliseconds)
@@ -979,6 +1056,6 @@ DXDEC void AILCALL AIL_stream_ms_position(HSTREAM h, S32 FAR* total_milliseconds
     }
     if (current_milliseconds)
     {
-        *current_milliseconds = (S32)(s->mPos * 1000 / s->mRate);
+        *current_milliseconds = (S32)((long long)s->mPos * 1000 / s->mRate);
     }
 }
