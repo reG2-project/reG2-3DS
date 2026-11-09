@@ -245,7 +245,10 @@ CONTROLS (pause menu or OPTIONS) chooses MODERN, the default, or CLASSIC, the or
 choice is `port_console_controls` in the registry, apart from the PC's `port_controls`. MODERN is TWIN STICK
 (`port/src/twin_stick.cpp`): without an aim the player turns to the way he walks; while R, ZR or L is held his
 facing stays the one he had at the press (`port_HoldFacing`), and the C-stick's aim comes first. Shots go
-where he faces, without the original's lock on a ped near the line of fire (CLASSIC keeps it). Only the circle pad moves, in either style, so that the
+where he faces, without the original's lock on a ped near the line of fire (CLASSIC keeps it). CLASSIC reads
+the circle pad as the original's arrows by the way it points past the dead zone, an 8-way gate: up or down
+alone within 30 degrees of straight, left or right alone within 22.5, both in between, so a diagonal runs and
+turns (a threshold on each axis misses the diagonals of a round gate). Only the circle pad moves, in either style, so that the
 d-pad keeps the weapons. The original's SPECIAL 1 with left or right still turns a roof gun. In the menus B
 or START selects and A or SELECT goes back; the hints name the buttons as the console prints them
 (`PortPlatform::PadButtonName`).

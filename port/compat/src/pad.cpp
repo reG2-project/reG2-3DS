@@ -9,6 +9,7 @@
 #include <windows.h>
 #include <dinput.h>
 #include <SDL3/SDL.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -306,24 +307,45 @@ bool Console()
     return PortPlatform::Has(PortPlatform::kConsoleControls);
 }
 
+// A stick within its dead zone (a quarter of its range) is centred.
+void Stick(SDL_GamepadAxis x, SDL_GamepadAxis y, float* pX, float* pY)
+{
+    *pX = Axis(x) / 32768.0f;
+    *pY = Axis(y) / 32768.0f;
+    if (*pX * *pX + *pY * *pY < 0.25f * 0.25f)
+    {
+        *pX = *pY = 0.0f;
+    }
+}
+
+// CLASSIC: the stick as the original's arrows by the way it points, an 8-way gate: up or down alone within 30
+// degrees of straight, left or right alone within 22.5, both in between. control: 0 to 3, up, down, left, right.
+bool StickArrow(int control)
+{
+    float x, y;
+    Stick(SDL_GAMEPAD_AXIS_LEFTX, SDL_GAMEPAD_AXIS_LEFTY, &x, &y);
+    // tan(22.5) and tan(30).
+    const bool vertical = fabsf(y) > fabsf(x) * 0.4142f;
+    const bool side = fabsf(x) > fabsf(y) * 0.5774f;
+    const float v = control < 2 ? y : x;
+    return (control < 2 ? vertical : side) && (control & 1 ? v > 0.0f : v < 0.0f);
+}
+
 // twin: port_TwinStick(), 0 for CLASSIC.
 bool ConsoleDown(int control, bool car, int twin, bool roofGun)
 {
     const Sint16 x = Axis(SDL_GAMEPAD_AXIS_LEFTX);
-    const Sint16 y = Axis(SDL_GAMEPAD_AXIS_LEFTY);
     const bool r = Button(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
-    const bool stickUp = twin == 0 && y < -kThreshold;
-    const bool stickDown = twin == 0 && y > kThreshold;
     switch (control)
     {
         case 0:
-            return (car && r) || stickUp;
+            return (car && r) || (twin == 0 && StickArrow(0));
         case 1:
-            return (car && Button(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)) || stickDown;
+            return (car && Button(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)) || (twin == 0 && StickArrow(1));
         case 2:
-            return x < (car ? -kStickDeadZone : -kThreshold);
+            return car ? x < -kStickDeadZone : StickArrow(2);
         case 3:
-            return x > (car ? kStickDeadZone : kThreshold);
+            return car ? x > kStickDeadZone : StickArrow(3);
         case 4:
             return (car ? Button(SDL_GAMEPAD_BUTTON_DPAD_DOWN) : r) || CodeDown(11);
         case 5:
@@ -339,17 +361,6 @@ bool ConsoleDown(int control, bool car, int twin, bool roofGun)
             return Button(SDL_GAMEPAD_BUTTON_NORTH);
         default:
             return Button(SDL_GAMEPAD_BUTTON_DPAD_UP);
-    }
-}
-
-// A stick within its dead zone (a quarter of its range) is centred.
-void Stick(SDL_GamepadAxis x, SDL_GamepadAxis y, float* pX, float* pY)
-{
-    *pX = Axis(x) / 32768.0f;
-    *pY = Axis(y) / 32768.0f;
-    if (*pX * *pX + *pY * *pY < 0.25f * 0.25f)
-    {
-        *pX = *pY = 0.0f;
     }
 }
 } // namespace
