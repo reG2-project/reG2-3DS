@@ -693,9 +693,11 @@ void port_UpdatePad()
     const bool start = Button(SDL_GAMEPAD_BUTTON_START);
     const bool a = Button(SDL_GAMEPAD_BUTTON_SOUTH);
     const bool b = Button(SDL_GAMEPAD_BUTTON_EAST);
+    const bool select = Button(SDL_GAMEPAD_BUTTON_BACK);
     static bool sPrevStart;
     static bool sPrevA;
     static bool sPrevB;
+    static bool sPrevSelect;
 
     const bool inGame = port_GameRunning();
     static bool sWasInGame;
@@ -770,6 +772,11 @@ void port_UpdatePad()
         {
             Tap(DIK_ESCAPE);
         }
+        // The console's SELECT in a vehicle: the next radio station, the original's F1.
+        if (console && !quitShown && port_Driving() && select && !sPrevSelect)
+        {
+            Tap(DIK_F1);
+        }
         // The pause menu's navigation.
         static bool sPrevDir[4];
         const int dirs[4] = {kPadUp, kPadDown, kPadLeft, kPadRight};
@@ -787,4 +794,5 @@ void port_UpdatePad()
     sPrevStart = start;
     sPrevA = a;
     sPrevB = b;
+    sPrevSelect = select;
 }

@@ -242,7 +242,8 @@ the same buttons on foot and in a vehicle; SDL's 3DS mapping gives the buttons b
 | Y, X | specials 1 and 2 | specials 1 (horn, siren) and 2 |
 | D-pad left, right | previous, next weapon | the roof gun's turn (fire truck, tank, gun jeep), else the weapons |
 | D-pad up, down | special 3, nothing | special 3, attack |
-| START, SELECT | pause menu, back in menus | |
+| START | pause menu | |
+| SELECT | back in menus | the next radio station (the PC's F1) |
 | ZR, ZL (New 3DS) | attack, nothing | attack, nothing |
 | C-stick (New 3DS) | MODERN: aims (TWIN STICK's aim) | MODERN: turns the roof gun |
 
