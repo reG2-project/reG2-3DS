@@ -276,6 +276,9 @@ bool port_PrepareGameFolder(bool)
 {
     if (sHasData)
     {
+        // Folders the game writes to and does not create, as the PC setup makes them.
+        mkdir("player", 0777);
+        mkdir("test", 0777);
         char cwd[256];
         fprintf(stderr, "gta2: started from %s, game folder %s\n", __system_argc > 0 && __system_argv[0] ? __system_argv[0] : "(no path)",
                 getcwd(cwd, sizeof(cwd)) ? cwd : "?");
