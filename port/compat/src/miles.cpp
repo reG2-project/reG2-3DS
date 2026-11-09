@@ -481,6 +481,11 @@ void MixStream(Stream* s, float* out, int frames)
 class Limiter
 {
   public:
+    Limiter()
+    {
+        std::fill(mNeeded, mNeeded + kLookahead, 1.0f);
+    }
+
     void Process(float* pMix, int frames)
     {
         const float kCeiling = 0.99f;
@@ -512,9 +517,9 @@ class Limiter
   private:
     static const int kLookahead = 64;
     float mDelay[kLookahead * 2] = {};
-    float mNeeded[kLookahead] = {};
+    float mNeeded[kLookahead];
     int mPos = 0;
-    int mLoud = kLookahead; // entries of mNeeded below 1: without any, the gain only rises
+    int mLoud = 0; // entries of mNeeded below 1: without any, the gain only rises
     float mGain = 1.0f;
 };
 
