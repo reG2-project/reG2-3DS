@@ -42,6 +42,7 @@ struct Sample
     double mPos = 0; // in frames
     float mGain[2] = {-1, -1}; // left and right as mixed, -1 until the first frame
     int mFade = -1;            // frames left in a fade-out, -1 when not stopping
+    std::vector<u8> mOwned;    // a fading copy's own frames, mData pointing here
 };
 
 // A WAV file read block by block on the audio thread.
@@ -592,12 +593,22 @@ Sample* S(HSAMPLE h)
     return reinterpret_cast<Sample*>(h);
 }
 
-// Stops the sample at once for the game, while a copy of it fades out.
+// Stops the sample at once for the game, while a copy of it fades out. The copy keeps the frames the fade
+// reads, as the game may free the sample's data or load other sounds over it.
 void StopSample(Sample* s)
 {
-    if (sDriver && s->mStatus == SMP_PLAYING && s->mFade < 0)
+    const u32 first = (u32)s->mPos;
+    if (sDriver && s->mStatus == SMP_PLAYING && s->mFade < 0 && s->mData && first < SampleFrames(s))
     {
+        const u32 frameBytes = s->mLen / SampleFrames(s);
+        const u32 frames = SDL_min((u32)(kRampFrames * (double)s->mRate / kOutRate) + 2, SampleFrames(s) - first);
         Sample* pCopy = new Sample(*s);
+        pCopy->mOwned.assign(s->mData + first * frameBytes, s->mData + (first + frames) * frameBytes);
+        pCopy->mData = pCopy->mOwned.data();
+        pCopy->mLen = frames * frameBytes;
+        pCopy->mPos -= first;
+        pCopy->mLoopCount = 1;
+        pCopy->mLoopEnd = -1;
         pCopy->mFade = kRampFrames;
         sDriver->mFadingSamples.push_back(pCopy);
     }
@@ -638,10 +649,23 @@ DXDEC void FAR* AILCALL AIL_mem_alloc_lock(U32 size)
 
 DXDEC void AILCALL AIL_mem_free_lock(void FAR* ptr)
 {
-    // The fading copies of samples may point into it.
-    LOCK;
-    DropFading();
     free(ptr);
+}
+
+void port_StopSamplesIn(const void* p, size_t len)
+{
+    LOCK;
+    if (!sDriver)
+    {
+        return;
+    }
+    for (Sample* s : sDriver->mSamples)
+    {
+        if (s->mData >= static_cast<const u8*>(p) && s->mData < static_cast<const u8*>(p) + len)
+        {
+            StopSample(s);
+        }
+    }
 }
 
 DXDEC S32 AILCALL AIL_startup(void)

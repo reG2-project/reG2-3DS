@@ -122,6 +122,8 @@ void port_Suspend(bool suspended);
 // SDL_GetTicksNS without the time suspended: timeGetTime and the frame loop's clock.
 unsigned long long port_GameTicksNs();
 void port_SuspendSound(bool suspended); // miles.cpp
+// Stops the 2D samples playing from that memory, before the game loads other sounds over it (miles.cpp).
+void port_StopSamplesIn(const void* p, size_t len);
 
 #include "../../renderer/port_exports.hpp"
 

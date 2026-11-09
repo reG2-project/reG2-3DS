@@ -5,6 +5,10 @@
 
 DEFINE_GLOBAL(cSampleManager, gSampManager, 0x6FFF00);
 
+#if defined(GTA2_PORT_SDL)
+void port_StopSamplesIn(const void* p, size_t len);
+#endif
+
 struct voc_name
 {
     char_type mStr[30]; // 0x0
@@ -1144,6 +1148,10 @@ bool cSampleManager::LoadWavSdtData(const char_type* pRawOrSdtName)
     }
 
     rewind(hRawFile);
+#if defined(GTA2_PORT_SDL)
+    // The port mixes from the bank as the samples play: those still playing would play the new bank.
+    port_StopSamplesIn(mpAudioBuffer1, 6100000);
+#endif
     fread(mpAudioBuffer1, 1u, rawFileSize, hRawFile);
     fclose(hRawFile);
     FILE* hSdtFile = fopen(sdtName, "rb");
