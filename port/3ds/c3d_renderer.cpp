@@ -942,26 +942,27 @@ void C3DRenderer::Impl::Append(const RVertex* pVerts, s32 count, RTexture* pTex,
         pTex->mUsedFrame = mFrame;
         pBind->mUsedFrame = mFrame;
     }
+    const f32 lx = mLightOriginX, ly = mLightOriginY;
     C3DVertex* pDst = mVerts + mVertCount;
     for (s32 i = 0; i < n; i++)
     {
         const RVertex& s = pVerts[fan ? kFan[i] : i];
-        pDst[i].x = s.x + dx;
-        pDst[i].y = s.y + dy;
-        pDst[i].rhw = s.rhw;
-        pDst[i].rgba = s.rgba;
-        pDst[i].u = s.u * su + ou;
-        pDst[i].v = ov - s.v * sv;
-        pDst[i].wx = s.wx - mLightOriginX;
-        pDst[i].wy = s.wy - mLightOriginY;
-        pDst[i].wz = s.wz;
-        pDst[i].shade = -1.0f;
-        if (s.lit != 0.0f)
-        {
-            pDst[i].rgba = s.unlit;
-            pDst[i].shade = s.shade;
-            mBatchLit = true;
-        }
+        // lit != 0.0f, without a float compare: the VFP's flags take a while to reach the ARM core.
+        u32 litBits;
+        memcpy(&litBits, &s.lit, 4);
+        const bool lit = (litBits & 0x7FFFFFFFu) != 0;
+        C3DVertex& d = pDst[i];
+        d.x = s.x + dx;
+        d.y = s.y + dy;
+        d.rhw = s.rhw;
+        d.rgba = lit ? s.unlit : s.rgba;
+        d.u = s.u * su + ou;
+        d.v = ov - s.v * sv;
+        d.wx = s.wx - lx;
+        d.wy = s.wy - ly;
+        d.wz = s.wz;
+        d.shade = lit ? s.shade : -1.0f;
+        mBatchLit |= lit;
     }
     if (pRule)
     {
