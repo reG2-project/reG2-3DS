@@ -2,9 +2,9 @@
 #include "Camera.hpp"
 #include "Game.hpp"
 #include "Player.hpp"
+#include "collide.hpp"
 #include "sprite.hpp"
 #include <string.h>
-#include <vector>
 
 namespace PortInterp
 {
@@ -17,8 +17,12 @@ const s32 kMaxCameraStepMove = 4 * 16384;
 // Ang16 units: 1440 a turn. A sprite turning more than this in one step snapped round.
 const s32 kMaxStepTurn = 360;
 const s32 kTurn = 1440;
+// Grid cells around the last drawn view whose sprites are kept: what one step can bring into view.
+const s32 kMargin = (kMaxStepMove + kMaxCameraStepMove) / 16384 + 2;
 
 const s32 kNumSprites = sizeof(gSpritePool->mPool.mPool) / sizeof(gSpritePool->mPool.mPool[0]);
+// Past this many, the sprites are drawn where they are.
+const s32 kMaxKept = 512;
 
 struct Pose
 {
@@ -57,6 +61,12 @@ struct Shape
     }
 };
 
+struct Prev
+{
+    Sprite* mpSprite;
+    Pose mPose;
+};
+
 struct Saved
 {
     Sprite* mpSprite;
@@ -66,12 +76,17 @@ struct Saved
     Shape mCollision;
 };
 
-Pose sPoses[kNumSprites];
+Prev sPrev[kMaxKept];
+s32 sNumPrev;
+bool sTaken[kNumSprites];
+WorldRect sDrawn;
+bool sDrawnValid;
 Camera* spCamera;
 CameraPos sCameraPos;
 bool sValid;
 
-std::vector<Saved> sSaved;
+Saved sSaved[kMaxKept];
+s32 sNumSaved;
 u32 sMoved;
 u32 sJumped;
 u32 sSnapped;
@@ -136,13 +151,12 @@ void ApplySprite(Sprite& sprite, const Pose& prev, f32 alpha)
     }
     sMoved++;
 
-    Saved saved;
+    Saved& saved = sSaved[sNumSaved++];
     saved.mpSprite = &sprite;
     saved.mPose = cur;
     saved.mZCol = sprite.mZCol;
     saved.mVisual.Save(sprite.mpVisualShape);
     saved.mCollision.Save(sprite.mpCollisionShape != sprite.mpVisualShape ? sprite.mpCollisionShape : NULL);
-    sSaved.push_back(saved);
 
     sprite.mXy.x.mValue = Lerp(prev.mX, cur.mX, alpha);
     sprite.mXy.y.mValue = Lerp(prev.mY, cur.mY, alpha);
@@ -183,6 +197,35 @@ void RestoreSprite(const Saved& saved)
         sprite.ComputeZLayer();
     }
 }
+
+s32 Cell(Fix16 v, s32 margin)
+{
+    const s32 cell = v.ToInt() + margin;
+    return cell < 0 ? 0 : (cell > 255 ? 255 : cell);
+}
+
+// The sprites a draw would take from this grid in the rect, each once.
+void KeepGrid(const SpriteGrid* pGrid, s32 left, s32 right, s32 top, s32 bottom)
+{
+    for (s32 y = top; pGrid && y <= bottom; y++)
+    {
+        for (const GridCell* pCell = pGrid->Row(y); pCell && pCell->mX <= right; pCell = pCell->mpNext)
+        {
+            for (const GridSpriteLink* pLink = pCell->mX >= left ? pCell->mpSpriteLinks : NULL; pLink; pLink = pLink->mpNext)
+            {
+                Sprite* pSprite = pLink->mpSprite;
+                const s32 i = static_cast<s32>(pSprite - gSpritePool->mPool.mPool);
+                if (i >= 0 && i < kNumSprites && !sTaken[i] && pSprite->IsTypeAbove1() && sNumPrev < kMaxKept)
+                {
+                    sTaken[i] = true;
+                    sPrev[sNumPrev].mpSprite = pSprite;
+                    sPrev[sNumPrev].mPose = PoseOf(*pSprite);
+                    sNumPrev++;
+                }
+            }
+        }
+    }
+}
 } // namespace
 
 void Snapshot()
@@ -192,30 +235,48 @@ void Snapshot()
     {
         return;
     }
-    for (s32 i = 0; i < kNumSprites; i++)
-    {
-        sPoses[i] = PoseOf(gSpritePool->mPool.mPool[i]);
-    }
     spCamera = ViewCamera();
     sCameraPos = spCamera->mCurPos;
+
+    WorldRect rect = spCamera->mViewBounds;
+    if (sDrawnValid)
+    {
+        rect.mLeft = sDrawn.mLeft < rect.mLeft ? sDrawn.mLeft : rect.mLeft;
+        rect.mRight = sDrawn.mRight > rect.mRight ? sDrawn.mRight : rect.mRight;
+        rect.mTop = sDrawn.mTop < rect.mTop ? sDrawn.mTop : rect.mTop;
+        rect.mBottom = sDrawn.mBottom > rect.mBottom ? sDrawn.mBottom : rect.mBottom;
+    }
+    const s32 left = Cell(rect.mLeft, -kMargin);
+    const s32 right = Cell(rect.mRight, kMargin);
+    const s32 top = Cell(rect.mTop, -kMargin);
+    const s32 bottom = Cell(rect.mBottom, kMargin);
+    sNumPrev = 0;
+    KeepGrid(gSpriteGrid_1, left, right, top, bottom);
+    KeepGrid(gSpriteGrid_2, left, right, top, bottom);
+    KeepGrid(gSpriteGrid_3, left, right, top, bottom);
+    for (s32 i = 0; i < sNumPrev; i++)
+    {
+        sTaken[sPrev[i].mpSprite - gSpritePool->mPool.mPool] = false;
+    }
 }
 
 void Clear()
 {
     sValid = false;
+    sDrawnValid = false;
 }
 
 void Apply(f32 alpha)
 {
-    sSaved.clear();
+    sNumSaved = 0;
     spAppliedCamera = NULL;
     if (!sValid || !gSpritePool || ViewCamera() != spCamera)
     {
         return;
     }
-    for (s32 i = 0; i < kNumSprites; i++)
+    for (s32 i = 0; i < sNumPrev; i++)
     {
-        ApplySprite(gSpritePool->mPool.mPool[i], sPoses[i], alpha);
+        ApplySprite(*sPrev[i].mpSprite, sPrev[i].mPose, alpha);
     }
 
     Camera* pCamera = spCamera;
@@ -234,6 +295,13 @@ void Apply(f32 alpha)
     }
 }
 
+void Drawn()
+{
+    const Camera* pCamera = ViewCamera();
+    sDrawnValid = pCamera != NULL;
+    sDrawn = pCamera ? pCamera->mViewBounds : sDrawn;
+}
+
 void Restore()
 {
     if (spAppliedCamera)
@@ -241,11 +309,11 @@ void Restore()
         memcpy(spAppliedCamera, sCameraBytes, sizeof(Camera));
         spAppliedCamera = NULL;
     }
-    for (size_t i = sSaved.size(); i-- > 0;)
+    for (s32 i = sNumSaved; i-- > 0;)
     {
         RestoreSprite(sSaved[i]);
     }
-    sSaved.clear();
+    sNumSaved = 0;
 }
 
 void TakeCounts(u32* pMoved, u32* pJumped, u32* pSnapped)

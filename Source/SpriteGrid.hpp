@@ -102,6 +102,13 @@ class SpriteGrid
     EXPORT void AddToDrawList(s32 left, s32 right, s32 top, s32 bottom);
     EXPORT void DoRemove(s32 x_pos, s32 y_pos, Sprite* pSprite);
 
+#if defined(GTA2_PORT)
+    const GridCell* Row(s32 y_pos) const
+    {
+        return mRows[y_pos];
+    }
+#endif
+
   private:
     EXPORT void RemoveFromRowBuckets(s32 y_pos, Sprite* pSprite);
     EXPORT void AddToSingleBucketAt(s32 x_pos, s32 y_pos, Sprite* pSprite);

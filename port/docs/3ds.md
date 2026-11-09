@@ -494,6 +494,12 @@ frontend's OPTIONS page drew at 3 frames per second because the port's menus che
 whether the language's `data/?.gxt` existed; each language is now looked up once, and the pause menu
 draws at the 30 fps limit.
 
+The frame loop's snapshot before each step (`loop.beforestep`, `port/src/interpolation.cpp`) walked all
+5031 sprites of the pool: 3.2 ms per frame of a night drive on an Old 3DS (0.29 in Azahar). At FRAME LIMIT
+30 nothing is drawn between two steps, so no snapshot is taken (0.00 ms); above it, only the sprites of
+the sprite grids around the drawn view are kept (Azahar uncapped: 0.29 to 0.04 ms a step, the frame's
+interpolation 0.63 to 0.09 ms).
+
 File access in single frames counts too (Azahar, Old 3DS mode, frame times from a measurement build).
 A request costs 17 to 33 ms, a case-insensitive directory scan (`data\audio` for `data/Audio`) 33 to
 56 ms, a registry save 35 to 55 ms. Opening the pause menu took 980 ms the first time and 510 ms after:
