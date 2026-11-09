@@ -52,7 +52,8 @@ Each is small and makes sense on `port/m0` too:
   devkitARM's GCC links, with newlib, libstdc++ and libctru. The image of `port/3ds/Dockerfile` is the
   official `devkitpro/devkitarm` with `clang-22` and its linker plugin (`llvm-22-linker-tools`) added.
 - ARM code (not Thumb) for the ARM11 MPCore with VFPv2 (`-mcpu=mpcore -mfpu=vfpv2`), -O2
-  (RelWithDebInfo), unaligned loads and stores as devkitARM's GCC makes them (`-munaligned-access`), and
+  (RelWithDebInfo), strict alignment (with `-munaligned-access` clang merged stores into an STRD at an odd
+  address, which the ARM11 faults on; Azahar does not check), and
   full link time optimisation: the objects are LLVM bitcode, which devkitARM's ld compiles through
   clang's plugin (`LLVMgold.so`). See Old 3DS, Speed.
 - GCC for ARM uses short enums, clang int-sized ones: SDL3 is built with `-fno-short-enums`
@@ -423,7 +424,7 @@ long drive at most 7 to 10 ms instead of 19 to 29). Remaining leads: fewer draw 
 
 Build options, the same walk, three runs each (main thread CPU per frame, logic step): 7.91 and 3.43 ms
 without them; 7.80 and 3.30 with unaligned access (clang's bare metal default goes byte by byte where it
-cannot prove alignment); 7.33 and 2.90 with full LTO (ThinLTO 7.38 and 2.96); 7.25 and 2.81 with both,
+cannot prove alignment, left out: see Toolchain); 7.33 and 2.90 with full LTO (ThinLTO 7.38 and 2.96),
 the build kept. The draw time with its wait for the GPU stays at 12.4 ms, and the `.3dsx` grows from
 2.69 to 2.78 MB with the inlining across files. Azahar has no cache model, so the larger code may cost
 more on hardware than it shows here: the options are worth checking on a console (`GTA2_LOOP_STATS`).
