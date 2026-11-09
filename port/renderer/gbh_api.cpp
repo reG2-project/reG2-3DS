@@ -56,6 +56,12 @@ struct TexData
 // What every texel of a 16-bit TGA image is, as ImageTexel expands it: opaque, 5-6-5 bits by replication.
 const u32 kImageTexels = RTX_KNOWN | RTX_OPAQUE | RTX_BINARY | RTX_565;
 
+#if defined(__3DS__)
+const s32 kImageShift = 1; // the top screen shows the 640x480 frontend at half size, so images are kept at that size
+#else
+const s32 kImageShift = 0;
+#endif
+
 // An X1R5G5B5 texel of a TGA image as RGBA. Green goes 5 -> 6 bits by a shift, as the original's 555 to 565
 // conversion.
 u32 ImageTexel(u32 p)
@@ -263,7 +269,7 @@ RTexture* Resolve(STexture* pTexture, int variant)
             {
                 rgba[i] = ImageTexel(pData->mPixels[i]);
             }
-            gRenderer->UploadTexture(pData->mTex[variant], w, h, &rgba[0], RMIP_NONE, kImageTexels);
+            gRenderer->UploadTexture(pData->mTex[variant], w >> kImageShift, h >> kImageShift, &rgba[0], RMIP_NONE, kImageTexels);
         }
         else if (pTexture->field_14_original_pixel_data_ptr && pTexture->field_18_pPaltData && w > 0 && h > 0)
         {
@@ -1494,13 +1500,26 @@ GBH_EXPORT s32 GTA2_CC gbh_LoadImage(SImage* pImage)
     }
     TexData* pData = Data(pTexture);
     pData->mImage = true;
-    pData->mPixels.resize((size_t)w * h);
+    const s32 n = 1 << kImageShift;
+    const s32 keptW = w >> kImageShift;
+    pData->mPixels.resize((size_t)keptW * (h >> kImageShift));
     const u16* src = (const u16*)((const u8*)pImage + offsetof(SImage, field_12) + pImage->field_0_id_len);
     const bool topDown = (pImage->field_11_descriptor & 0x20) != 0;
-    for (s32 y = 0; y < h; y++)
+    for (size_t k = 0; k < pData->mPixels.size(); k++)
     {
-        const u16* row = src + (size_t)(topDown ? y : (h - 1 - y)) * w;
-        memcpy(&pData->mPixels[(size_t)y * w], row, (size_t)w * sizeof(u16));
+        // The average of an n x n block, red and blue summed apart from green so that no channel overflows.
+        u32 rb = 0, g = 0;
+        for (s32 j = 0; j < n; j++)
+        {
+            const s32 y = (s32)(k / keptW) * n + j;
+            const u16* row = src + (size_t)(topDown ? y : (h - 1 - y)) * w + (k % keptW) * n;
+            for (s32 i = 0; i < n; i++)
+            {
+                rb += row[i] & 0x7C1F;
+                g += row[i] & 0x03E0;
+            }
+        }
+        pData->mPixels[k] = (u16)(((rb >> 2 * kImageShift) & 0x7C1F) | ((g >> 2 * kImageShift) & 0x03E0));
     }
     gImages[slot].mLoaded = 1;
     gImages[slot].mWidth = w;
