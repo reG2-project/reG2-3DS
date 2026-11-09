@@ -21,6 +21,7 @@ enum MarkKind
     kMissionPhone,
     kInfoPhone,
     kTerritory, // a gang's nearest block, while the player is in no gang's territory
+    kSavePoint, // a church where the player saves: a DO_SAVE_GAME command's area
 };
 
 struct Mark
@@ -52,4 +53,6 @@ void ReadOwners(const u8* pArrows, u8* pOwners);
 u32 ArrowColour(s32 arrow);
 // The style's user sprite `n` as RGBA, rows of *pW texels; false when it is missing or over maxTexels.
 bool ReadUserSprite(s32 n, u32* pRgba, s32 maxTexels, s32* pW, s32* pH);
+// The pause menu font's glyph for `c`, as ReadUserSprite.
+bool ReadPauseFontGlyph(char c, u32* pRgba, s32 maxTexels, s32* pW, s32* pH);
 } // namespace MinimapGame
