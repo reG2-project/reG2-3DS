@@ -512,6 +512,15 @@ setting's step 85 ms before, now under 40. Closing takes under 40 ms, or 76 to 8
 changed (the one save). The frontend's OPTIONS page took 223 ms on its first frame, now 113 (55 ms of
 it uploads).
 
+The HUD (`draw.hud`) took 1.0 to 1.5 ms a frame on the console, and 4.6 ms in the blocks with a mission brief
+shown, at most 7.2 ms in a frame. Timed per element in Azahar (bil, at night): the brief 1.7 to 1.9 ms for its 136
+glyphs, each a primitive through the gbh_* layer and a batch of its own; the bottom screen's other parts (stats,
+clock, gang bars, health) about 0.5 ms for 32 primitives; the top screen's (arrows, zone and car names) under 0.1
+ms but while a name shows. All of it was drawn every frame for a bottom screen redrawn in every other frame at
+most, when it changed. The game now leaves the bottom screen's draws out of the frames between, and draws the
+brief's text once (see Renderer). Azahar, bil: standing with a long brief, 1.6 to 1.8 ms became 0.32 (at most
+3.3 ms in a frame, now 0.66); without it 0.37 became 0.21; driving 0.44 became 0.24 (at most 1.6, now 0.75).
+
 The bottom screen's CPU time per frame (`GTA2_3DS_STATS`, walking, Old 3DS mode): 0.38 to 0.42 ms
 (0.45 to 0.51 at most) when it was drawn every frame without a minimap; with the minimap and drawn only
 on a change, 0.05 ms standing (5 frames of 150 drawn, for the clock), 0.18 to 0.44 ms walking (up to 75
