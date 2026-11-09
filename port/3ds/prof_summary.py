@@ -20,6 +20,8 @@ VALUE = re.compile(r"(\S+)=([-\d.]+)/([-\d.]+)(?:/([-\d.]+)/([-\d.]+))?")
 NOTES = {
     "frame": "wall time between frames",
     "idle": "sleeps until the next step or frame",
+    "loop.next": "the frame loop's pacing, idle included",
+    "log": "this log's lines, and its writes to the SD card",
     "wait.vsync": "C3D_FrameSync, in the frame's first draw",
     "wait.gpu": "C3D_FrameBegin's wait for the GPU",
     "gpu": "C3D_GetDrawingTime, previous frame",
@@ -29,10 +31,16 @@ NOTES = {
     "collide": "sprite grid collisions, inside cars and peds",
     "prim": "1 in N timed, inside the draw.* parts",
     "flush": "inside prim.c3d and present",
+    "prim.uv": "gbh_DrawTile's UV turns and flips",
+    "prim.turn": "the view's turn of the corners",
+    "prim.clip": "the window test, soft shadows",
+    "prim.resolve": "the texture's lookup",
+    "prim.setup": "fit to texture, depth, diffuse",
+    "prim.verts": "render state, RVertex and triangles",
 }
 
 
-def parse(path, keep_first):
+def parse(path, keep_first, writes):
     blocks = []
     block = None
     skip = False
@@ -45,6 +53,9 @@ def parse(path, keep_first):
             m = re.match(r"prof: (\d+) frames, (\d+) steps", line)
             if m:
                 timers = re.search(r"\(([\d.]+) ms\)", line)
+                write = re.search(r"last log write (\d+) bytes in ([\d.]+) ms", line)
+                if write and int(write.group(1)):
+                    writes.append((int(write.group(1)), float(write.group(2))))
                 block = {"frames": int(m.group(1)), "steps": int(m.group(2)), "step": {}, "frame": {}, "count": {},
                          "timers": float(timers.group(1)) if timers else 0.0}
                 continue
@@ -116,13 +127,16 @@ def main():
     ap.add_argument("--keep-first", action="store_true", help="keep the first block after a game start")
     ap.add_argument("--blocks", action="store_true", help="list each block too")
     args = ap.parse_args()
-    blocks = parse(args.log, args.keep_first)
+    writes = []
+    blocks = parse(args.log, args.keep_first, writes)
     if not blocks:
         sys.exit("no GTA2_3DS_PROF blocks in %s" % args.log)
     for line in open(args.log, errors="replace"):
         if line.startswith("prof: every"):
             print(line.strip())
             break
+    if writes:
+        print("log writes: %s" % ", ".join("%d bytes in %.1f ms" % w for w in sorted(set(writes))))
     g = lambda d, k: d.get(k, [0])[0]
     if args.blocks:
         cols = ["step", "draw", "draw.map", "prim", "prim.light", "pump.pad", "wait.vsync", "wait.gpu", "gpu"]
@@ -145,8 +159,15 @@ def main():
         budget = [("logic", logic), ("draw", avg("frame", "draw")),
                   ("wait.vsync", avg("frame", "wait.vsync")), ("wait.gpu", avg("frame", "wait.gpu")),
                   ("tex", avg("frame", "tex.convert") + avg("frame", "tex.upload")), ("pump", avg("frame", "pump")),
-                  ("inputs", avg("frame", "inputs")), ("idle", avg("frame", "idle")),
-                  ("timers", sum(b["timers"] for b in bs) / len(bs))]
+                  ("inputs", avg("frame", "inputs"))]
+        if any("loop.next" in b["frame"] for b in bs):
+            # loop.next holds the idle sleeps.
+            budget += [(k[5:], avg("frame", k)) for k in ("loop.next", "loop.beforestep", "loop.afterstep",
+                                                           "loop.begindraw", "loop.enddraw", "loop.fps")]
+            budget += [("log", avg("frame", "log"))]
+        else:
+            budget += [("idle", avg("frame", "idle"))]
+        budget += [("timers", sum(b["timers"] for b in bs) / len(bs))]
         rest = avg("frame", "frame") - sum(v for _, v in budget)
         print("frame %.2f ms = %s + rest %.2f" % (avg("frame", "frame"), " + ".join("%s %.2f" % x for x in budget), rest))
         table("logic, per step", bs, "step")
