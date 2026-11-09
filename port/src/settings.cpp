@@ -1,5 +1,6 @@
 #include "settings.hpp"
 #include "frame_loop.hpp"
+#include "platform.hpp"
 #include "Camera.hpp"
 #include "Frontend.hpp"
 #include "Function.hpp"
@@ -555,6 +556,41 @@ const wchar_t* Translate(const wchar_t* pEnglish)
     return pEnglish;
 }
 
+bool Available(Id id)
+{
+    namespace P = PortPlatform;
+    switch (id)
+    {
+        case kDisplay:
+        case kDisplayMode:
+        case kVsync:
+            return P::Has(P::kWindow);
+        case kFrameLimit:
+            return P::Has(P::kFastFrames);
+        case kBrightness:
+            return P::Has(P::kGamma);
+        case kSafeArea:
+            return P::Has(P::kSafeArea);
+        case k3dSound:
+            return P::Has(P::k3dSound);
+        case kPreset:
+        case kTrueColour:
+        case kBloom:
+        case kPerPixelLighting:
+        case kTextureFilter:
+        case kAntiAliasing:
+        case kShadows:
+        case kHeadlights:
+        case kLightEffects:
+            return P::Has(P::kRendererOptions);
+        case kControls:
+        case kAimCamera:
+            return P::Has(P::kTwinStick);
+        default:
+            return true;
+    }
+}
+
 const wchar_t* Name(Id id)
 {
     return kNames[id];
@@ -567,7 +603,7 @@ f32 HudScale()
 
 f32 SafeArea()
 {
-    return SafeAreaPercent() / 100.0f;
+    return Available(kSafeArea) ? SafeAreaPercent() / 100.0f : 0.0f;
 }
 
 Id Requirement(Id id)
@@ -660,7 +696,7 @@ bool TwinStick()
 #if defined(GTA2_PORT_SDL)
     if (sTwinStick < 0)
     {
-        sTwinStick = Screen(kControls) != 0;
+        sTwinStick = Available(kControls) && Screen(kControls) != 0;
     }
     return sTwinStick != 0;
 #else
@@ -691,18 +727,18 @@ bool LanguageInstalled(char code)
 }
 bool Headlights()
 {
-    return Enabled(kHeadlights) && Screen(kHeadlights) != 0;
+    return Available(kHeadlights) && Enabled(kHeadlights) && Screen(kHeadlights) != 0;
 }
 
 bool LightEffects()
 {
-    return Enabled(kLightEffects) && Screen(kLightEffects) != 0;
+    return Available(kLightEffects) && Enabled(kLightEffects) && Screen(kLightEffects) != 0;
 }
 
 // The original's max_frame_rate is not read: off, it ran the game as fast as the machine.
 s32 MaxFps()
 {
-    const s32 fps = Screen(kFrameLimit);
+    const s32 fps = Available(kFrameLimit) ? Screen(kFrameLimit) : 30;
     for (s32 i = 0; i < kNumMaxFpsValues; i++)
     {
         if (kMaxFpsValues[i] == fps)

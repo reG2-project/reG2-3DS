@@ -3,6 +3,7 @@
 #include "Globals.hpp"
 #include "SoundObject.hpp"
 #include "menu.hpp"
+#include "platform.hpp"
 #include "settings.hpp"
 #include <string.h>
 
@@ -248,13 +249,13 @@ void PadKeyHint(u8 hint, wchar_t* pText)
     switch (hint)
     {
         case 0: // ESC
-            wcscpy(pText, L"B");
+            wcscpy(pText, PortPlatform::PadButtonName(1));
             break;
         case 1: // DEL
-            wcscpy(pText, L"X");
+            wcscpy(pText, PortPlatform::PadButtonName(2));
             break;
         case 2: // ENTER
-            wcscpy(pText, L"A");
+            wcscpy(pText, PortPlatform::PadButtonName(0));
             break;
         case 3: // BACKSPACE
             wcscpy(pText, L"LEFT");

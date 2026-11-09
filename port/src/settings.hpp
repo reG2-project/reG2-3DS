@@ -60,6 +60,10 @@ const wchar_t* Translate(const wchar_t* pEnglish);
 // data\<code>.gxt is there: the 2004 freeware has only English and Spanish.
 bool LanguageInstalled(char code);
 
+// False where the platform lacks what the setting needs (platform.hpp): the menus leave it out, and the
+// setting's getter gives its default.
+bool Available(Id id);
+
 // In English, as the key to Translate.
 const wchar_t* Name(Id id);
 void Value(Id id, wchar_t* pOut);

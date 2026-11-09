@@ -1,0 +1,18 @@
+#include "platform.hpp"
+
+// The 3DS answers in port/3ds/platform_3ds.cpp.
+#if !defined(__3DS__)
+namespace PortPlatform
+{
+bool Has(Feature)
+{
+    return true;
+}
+
+const wchar_t* PadButtonName(int code)
+{
+    static const wchar_t* const kNames[12] = {L"A", L"B", L"X", L"Y", L"LB", L"RB", L"BACK", L"START", L"L3", L"R3", L"LT", L"RT"};
+    return code >= 0 && code < 12 ? kNames[code] : L"-";
+}
+} // namespace PortPlatform
+#endif

@@ -203,14 +203,28 @@ no arguments, so the game folder there is always `sdmc:/3ds/gta2/`. The start
 to the first city frame takes about 15 seconds there.
 
 Tests: `test/pad_input.txt` presses buttons, one `<first frame> <last frame> <hex KEY_* mask>` per line
-(frames as `port_FrameCount` counts them), for example `150 170 8` for START.
+(frames as `port_FrameCount` counts them), for example `150 170 8` for START; the `KEY_CPAD_*` and
+`KEY_CSTICK_*` bits push the circle pad and the C-stick all the way. `GTA2_TEST_CAR=<frame>:<model>[:<dx>:<dy>]`
+puts a car of that model (54 the tank) beside the player at that frame, who then gets in.
 
 ## Buttons
 
 SDL3's 3DS gamepad mapping and the port's default pad bindings give, by position: B attack, A jump,
 X enter or exit, Y special 1, L and R the weapons, START the pause menu, SELECT back, the d-pad and the
-circle pad move; ZL and ZR (New 3DS) are specials 2 and 3, and brake and accelerate in vehicles. Tested
-in Azahar with scripted presses: the d-pad walks and START pauses. The menus show the Xbox glyphs.
+circle pad move; ZL and ZR (New 3DS) are specials 2 and 3, and brake and accelerate in vehicles. In the
+fire truck, the tank and the gun jeep, Y held with left or right turns the roof gun (the original's
+SPECIAL 1 with a turn). In the menus B or START selects and A or SELECT goes back, and the hints name
+the buttons as the console prints them (`PortPlatform::PadButtonName`).
+
+The settings menu leaves out what the 3DS lacks (`PortPlatform::Has` in `port/src/platform.hpp`, answered
+in `platform_3ds.cpp`): the window, display modes and vsync, frame limits above 30, BRIGHTNESS (the
+renderer has no gamma), SAFE AREA, the GRAPHICS page (the OpenGL renderer's options and added lights), 3D
+SOUND (no OpenAL Soft) and the bindings: the pad keeps its default bindings, stored ones are ignored.
+CONTROLS is there on the New 3DS only, told apart at run time (`APT_CheckNew3DS`): TWIN STICK moves with
+the circle pad and aims with the C-stick (SDL's right stick), which also turns a roof gun, and ZR attacks,
+as the PC's right stick and RT; CLASSIC stays the default. The Old 3DS, without a second stick, has
+CLASSIC only. Tested in Azahar with scripted presses: the pause menu's pages, Y with left turning the
+tank's gun, and on the New 3DS TWIN STICK set in the menu and the C-stick turning it.
 
 ## HOME, sleep and exit
 
@@ -321,7 +335,7 @@ that draws it against 0.59 to 0.66.
 - HUD: the zone and car name banners, pickup texts and big messages on the bottom screen too; a
   second pager; multiplayer scores; bonus stages.
 - Menus: the port's own menus (pause, options) with a larger font scale on the 3DS, or on the bottom
-  screen at 1:1; 3DS button glyphs instead of the Xbox ones.
+  screen at 1:1.
 - Sound on hardware: OpenDSP's DSP load and sleep, the Old 3DS's audio thread on the system core.
 - Real Old 3DS timings: Azahar's are optimistic for memory bound code (no cache model). If the
   hardware is short, the next candidates are the per-vertex lighting at night and SDL's pad reads.

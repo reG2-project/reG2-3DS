@@ -99,6 +99,8 @@ int port_TwinStick();
 bool port_TwinStickAims();
 // The local player with the controls on, in a vehicle, in either CONTROLS style.
 bool port_Driving();
+// Tests (GTA2_TEST_CAR): a car of that model at that offset from the player, in blocks, who then gets in.
+void port_TestCar(int model, float dx, float dy);
 // The player's vehicle: how far RT, LT and the stick press FORWARD, BACKWARD and the steering, 0 to 1, 1 for
 // a key or the d-pad (pad.cpp).
 void port_PadVehicleInput(float* pForward, float* pBackward, float* pSteer);

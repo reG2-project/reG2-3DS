@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "port_platform.hpp"
+#include "../../src/platform.hpp"
 
 namespace
 {
@@ -365,7 +366,7 @@ void port_OpenGamepad()
 
 bool port_PadMode()
 {
-    return sMode == kPadMode;
+    return sMode == kPadMode || !PortPlatform::Has(PortPlatform::kKeyboard);
 }
 
 bool port_MouseMode()
@@ -382,9 +383,11 @@ int port_GetPadBinding(int control)
             MigrateBindings();
         }
         sPadRead = true;
+        // Without rebinding, the defaults: stored bindings (a PC registry, an older build) are ignored.
+        const bool rebinding = PortPlatform::Has(PortPlatform::kRebinding);
         for (int i = 0; i < kNumControls; i++)
         {
-            sPad[i] = static_cast<int>(ReadControl("pad_%d", i, static_cast<DWORD>(kDefaultPad[i])));
+            sPad[i] = rebinding ? static_cast<int>(ReadControl("pad_%d", i, static_cast<DWORD>(kDefaultPad[i]))) : kDefaultPad[i];
         }
     }
     return sPad[control];
@@ -622,16 +625,24 @@ void port_UpdatePad()
         sMenuBlocked = true;
     }
     sWasInGame = inGame;
-    if (sMenuBlocked)
+    const auto anyDown = [&]()
     {
-        bool anyDown = false;
+        bool down = false;
         for (int i = 0; i < n; i++)
         {
-            anyDown |= CodeDown(codes[i]);
+            down |= CodeDown(codes[i]);
         }
-        sMenuBlocked = anyDown;
-    }
+        return down;
+    };
+    sMenuBlocked = sMenuBlocked && anyDown();
     const bool quitShown = inGame && port_QuitMessageShown();
+    // Back in game from the pause menu or the quit message: the button that closed it stays out of the game
+    // until released.
+    static bool sWasQuitShown;
+    static bool sGameBlocked;
+    sGameBlocked = sGameBlocked || (sWasQuitShown && !quitShown);
+    sWasQuitShown = quitShown;
+    sGameBlocked = sGameBlocked && anyDown();
     const int twin = inGame && !quitShown ? port_TwinStick() : 0;
     // The vehicle's triggers, unless FORWARD or BACKWARD has a pad input of the player's choice.
     const bool car = inGame && !quitShown && port_Driving() && port_GetPadBinding(0) == kPadUp && port_GetPadBinding(1) == kPadDown;
@@ -659,7 +670,7 @@ void port_UpdatePad()
         const bool pad = (car ? CarPadDown(i, code, l3Free) : CodeDown(code) && !(twin == 1 && (code == 11 || (code == 10 && lt)))) &&
             !(rbFires && code == 5);
         const bool down = !move && (pad || AltDown(i) || (twin == 1 && i == 4 && CodeDown(11)) || (rbFires && i == 4 && CodeDown(5)));
-        Press(i, inGame && !quitShown && down);
+        Press(i, inGame && !quitShown && !sGameBlocked && down);
     }
     if (inGame)
     {

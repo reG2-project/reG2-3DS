@@ -1,5 +1,6 @@
 // 3DS start-up: the game folder on the SD card, the log and the environment, in place of port/setup.
 #include "../setup/setup.hpp"
+#include "../src/platform.hpp"
 #include <3ds.h>
 #include <SDL3/SDL_log.h>
 #include <SDL3/SDL_messagebox.h>
@@ -295,3 +296,27 @@ bool port_PrepareGameFolder(bool)
     ShowError(text.c_str());
     return false;
 }
+
+namespace PortPlatform
+{
+bool Has(Feature feature)
+{
+    // Two fixed screens, the citro3d renderer's classic look and the console's own buttons; the New 3DS's
+    // C-stick aims.
+    static int sNew3ds = -1;
+    if (sNew3ds < 0)
+    {
+        bool isNew = false;
+        APT_CheckNew3DS(&isNew);
+        sNew3ds = isNew;
+    }
+    return feature == kTwinStick && sNew3ds;
+}
+
+const wchar_t* PadButtonName(int code)
+{
+    // The console's labels at SDL's positions: B is the bottom button, A the right one. No stick presses.
+    static const wchar_t* const kNames[12] = {L"B", L"A", L"Y", L"X", L"L", L"R", L"SELECT", L"START", L"-", L"-", L"ZL", L"ZR"};
+    return code >= 0 && code < 12 ? kNames[code] : L"-";
+}
+} // namespace PortPlatform
