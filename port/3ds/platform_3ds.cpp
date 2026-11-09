@@ -19,9 +19,9 @@
 // The main thread's stack (libctru's default is 32 KB): the game has large locals.
 extern "C" u32 __stacksize__ = 2 * 1024 * 1024;
 // Fixed sizes within the Old 3DS's 64 MB (with the 3 MB image and the stack), so the emulator holds the
-// game to them in either mode. The game peaks near 22 MB of heap (frontend) and 7 MB of linear heap.
-extern "C" u32 __ctru_heap_size = 40 * 1024 * 1024;
-extern "C" u32 __ctru_linear_heap_size = 16 * 1024 * 1024;
+// game to them in either mode. The linear heap holds the sound bank (6.1 MB), which the DSP plays from.
+extern "C" u32 __ctru_heap_size = 34 * 1024 * 1024;
+extern "C" u32 __ctru_linear_heap_size = 22 * 1024 * 1024;
 
 extern "C" u32 __ctru_heap;
 extern "C" u32 __ctru_linear_heap;
@@ -106,8 +106,8 @@ static void LoadEnvironment()
 }
 
 #ifdef GTA2_OPENDSP
-// Loads OpenDSP's firmware, linked in, in place of the console's dspfirm.cdc. SDL's n3ds audio calls
-// ndspInit and ndspExit itself, which then only count references.
+// Loads OpenDSP's firmware, linked in, in place of the console's dspfirm.cdc. The later ndspInit and
+// ndspExit calls (dsp_voices.cpp, or SDL's n3ds audio) then only count references.
 static void StartDsp()
 {
     const char* driver = getenv("GTA2_AUDIO_DRIVER");
@@ -118,7 +118,7 @@ static void StartDsp()
     const Result rc = opendspInit();
     if (R_FAILED(rc))
     {
-        // SDL then tries dspfirm.cdc.
+        // ndspInit then tries dspfirm.cdc.
         fprintf(stderr, "OpenDSP: error 0x%08lX\n", rc);
         ndspUseComponent(NULL, 0, 0, 0);
         return;
