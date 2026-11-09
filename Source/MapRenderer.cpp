@@ -4,6 +4,7 @@
 #include "../port/src/frame_loop.hpp"
 #include "../port/src/lights.hpp"
 #include "../port/src/day_night.hpp"
+#include "../port/src/map_cache.hpp"
 #endif
 #include "winmain.hpp"
 #include "gbh_graphics.hpp"
@@ -3412,7 +3413,11 @@ void MapRenderer::RenderFlatBlock()
             MapRenderer::draw_bottom(sBlockBottom);
         }
     }
+#if defined(GTA2_PORT)
+    if (sLidType && !PortMapCache::TakeLid(sLidType))
+#else
     if (sLidType)
+#endif
     {
         MapRenderer::draw_lid();
     }
@@ -3654,6 +3659,9 @@ void MapRenderer::Draw()
 #endif
             }
 
+#if defined(GTA2_PORT)
+            PortMapCache::BeginLayer(zLayer, min_x, min_y, max_x, max_y);
+#endif
             // Reset the size of draw layer size
             ResetCount();
 
@@ -3681,6 +3689,9 @@ void MapRenderer::Draw()
                 j--;
                 pIter--;
             }
+#if defined(GTA2_PORT)
+            PortMapCache::EndLayer(zLayer);
+#endif
         }
     }
     gSpriteRenderer->Draw(7);    // draw all sprites on the highest layer

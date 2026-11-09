@@ -36,6 +36,12 @@ add_custom_command(OUTPUT ${shbin}.o
     COMMAND ${DEVKITPRO}/tools/bin/picasso -o ${shbin} ${CMAKE_CURRENT_LIST_DIR}/render.v.pica
     COMMAND sh -c "${DEVKITPRO}/tools/bin/bin2s -a 4 ${shbin} | ${DEVKITARM}/bin/arm-none-eabi-as -o ${shbin}.o"
     DEPENDS ${CMAKE_CURRENT_LIST_DIR}/render.v.pica VERBATIM)
+# The map cache's vertex shader (C3DRenderer::DrawMeshes), as map_cache_shbin[].
+set(map_shbin ${CMAKE_CURRENT_BINARY_DIR}/map_cache.shbin)
+add_custom_command(OUTPUT ${map_shbin}.o
+    COMMAND ${DEVKITPRO}/tools/bin/picasso -o ${map_shbin} ${CMAKE_CURRENT_LIST_DIR}/map_cache.v.pica
+    COMMAND sh -c "${DEVKITPRO}/tools/bin/bin2s -a 4 ${map_shbin} | ${DEVKITARM}/bin/arm-none-eabi-as -o ${map_shbin}.o"
+    DEPENDS ${CMAKE_CURRENT_LIST_DIR}/map_cache.v.pica VERBATIM)
 
 # The minimap's frame and markers (port/docs/minimap/assets, original art) as C arrays.
 set(minimap_assets ${PORT}/docs/minimap/assets)
@@ -47,7 +53,7 @@ add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/minimap_assets.h
     DEPENDS ${CMAKE_CURRENT_LIST_DIR}/embed_png.py ${minimap_png_files} VERBATIM)
 
 add_executable(gta2 ${lib_src} ${ROOT}/test.cpp ${ROOT}/StdAfx.cpp ${ROOT}/Source/3rdParty/bink.cpp
-    ${port_src} ${ctr_src} ${shbin}.o ${CMAKE_CURRENT_BINARY_DIR}/minimap_assets.h)
+    ${port_src} ${ctr_src} ${shbin}.o ${map_shbin}.o ${CMAKE_CURRENT_BINARY_DIR}/minimap_assets.h)
 set_target_properties(gta2 PROPERTIES SUFFIX .elf)
 set_source_files_properties(${PORT}/compat/src/miles.cpp ${PORT}/compat/src/miles3d.cpp PROPERTIES COMPILE_DEFINITIONS BUILD_MSS)
 set_source_files_properties(${ROOT}/Source/3rdParty/bink.cpp PROPERTIES COMPILE_DEFINITIONS BUILD_BINK)

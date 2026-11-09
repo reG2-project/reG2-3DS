@@ -1784,3 +1784,51 @@ const PortExport kGbhExports[] = {
     {"gbh_DrawTile", reinterpret_cast<void*>(&gbh_DrawTile)},
 };
 const int kGbhExportCount = sizeof(kGbhExports) / sizeof(kGbhExports[0]);
+
+// The 3DS map cache (port/3ds/map_cache.cpp) draws tiles it built once, as gbh_DrawTile would draw them now.
+IRenderer* port_MapCacheRenderer()
+{
+    return gViewTurn.mKind == kTurnOff ? gRenderer : 0;
+}
+
+// Null unless converted and in memory: converting a whole chunk's textures at once would stall the frame.
+RTexture* port_MapCacheTexture(STexture* pTexture, bool alpha)
+{
+    TexData* pData = Data(pTexture);
+    const int variant = alpha ? kAlpha : kOpaque;
+    if (!pData || pData->mImage || !gRenderer || !pData->mTex[variant] || pData->mDirty[variant] ||
+        pData->mEpoch != gTextureEpoch || gRenderer->Evicted(pData->mTex[variant]))
+    {
+        return 0;
+    }
+    return pData->mTex[variant];
+}
+
+// Whether a draw with FLAG_LIGHTING is lit now, with the shader's lights uploaded if it is.
+bool port_MapCacheLit()
+{
+    const bool fullAmbient = gAmbient[0] == 255.0f && gAmbient[1] == 255.0f && gAmbient[2] == 255.0f;
+    if (fullAmbient || !gRenderer)
+    {
+        return false;
+    }
+    if (gLightsDirty && !gRenderer->Options().mPerPixelLighting && gRenderer->MaxShaderLights() >= 0)
+    {
+        UploadLights();
+    }
+    return true;
+}
+
+// Whether the shader cannot light the world box as RenderVertsUnturned would: no shader lights, or a light past them reaches it.
+bool port_MapCacheNeedsCpuLight(f32 x0, f32 y0, f32 z0, f32 x1, f32 y1, f32 z1)
+{
+    if (!gShaderLights || !gRenderer || gRenderer->Options().mPerPixelLighting)
+    {
+        return true;
+    }
+    Vert box[2];
+    memset(box, 0, sizeof(box));
+    box[0].x = x0, box[0].y = y0, box[0].z = z0;
+    box[1].x = x1, box[1].y = y1, box[1].z = z1;
+    return NearLights(box, 2, gShaderLightsEnd) != 0;
+}
