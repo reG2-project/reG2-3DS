@@ -60,7 +60,10 @@ Each is small and makes sense on `port/m0` too:
 ## Renderer
 
 `C3DRenderer` implements `GLRenderer`'s interface with citro3d, the classic look only (no per-pixel
-lighting, shadows or bloom). The game's vertices are in logical pixels with 1/w; the vertex shader
+lighting, shadows or bloom). The game's lights and the port's lamps (`port/src/lights.cpp`) light the
+vertices, at the blocks' corners, in the gbh_* layer; a headlight's beam is a point light a third of its range
+ahead there, as narrow beams would flicker on and off the corners. In bil at dusk, driving through traffic in
+Azahar's Old 3DS mode, the lamps cost 1.3 ms per frame (draw 14.3 to 15.6 ms). The game's vertices are in logical pixels with 1/w; the vertex shader
 outputs `(x*w, y*w, z*w, w)` so the PICA200 interpolates textures with perspective. Textures arrive
 as RGBA8 from the gbh_* layer and are stored in the smallest exact PICA format (RGB565, RGBA4,
 RGB5A1, else RGBA8), padded to a power of two. The gbh_* layer tells the format from each palette
@@ -194,7 +197,11 @@ The port's log is `gta2_log.txt` there (stderr and SDL's log).
 memory and renderer times every 150 frames, `GTA2_LOOP_STATS=1` steps, frames and their times,
 `GTA2_3DS_FPS=1` shows frames and logic steps per second, the main thread's CPU time per frame
 (without its waits for the GPU and its sleeps) and the heap and linear memory in use in the top screen's corner,
-over the last second and refreshed 4 times per second, `GTA2_AUDIO_DRIVER=dummy` runs the sound without the DSP, `GTA2_3DS_MINIMAP=wide` or `off` sets the
+over the last second and refreshed 4 times per second, `GTA2_UNCAPPED=1` draws as fast as it can (the logic
+keeps its 30.3 steps per second, citro3d does not wait for the screens' refresh) to measure the headroom
+(Azahar, bil: about 185 frames per second walking at noon, 165 driving through traffic, 100 driving at dusk
+with the lamps, the same in New 3DS mode, which runs the same clock; Azahar leaves out the GPU's time),
+`GTA2_AUDIO_DRIVER=dummy` runs the sound without the DSP, `GTA2_3DS_MINIMAP=wide` or `off` sets the
 minimap's place (see Renderer). To boot into a city, the registry's `Debug` keys
 `skip_frontend`, `mapname`, `stylename` and `scriptname` (see `Source/debug.cpp`).
 
@@ -218,8 +225,10 @@ the buttons as the console prints them (`PortPlatform::PadButtonName`).
 
 The settings menu leaves out what the 3DS lacks (`PortPlatform::Has` in `port/src/platform.hpp`, answered
 in `platform_3ds.cpp`): the window, display modes and vsync, frame limits above 30, BRIGHTNESS (the
-renderer has no gamma), SAFE AREA, the GRAPHICS page (the OpenGL renderer's options and added lights), 3D
-SOUND (no OpenAL Soft) and the bindings: the pad keeps its default bindings, stored ones are ignored.
+renderer has no gamma), SAFE AREA, the OpenGL renderer's options, the CHINATOWN camera with its rotation and
+tilt, HUD SCALE (the HUD has its own screen), 3D SOUND (no OpenAL Soft) and the bindings: the pad keeps its
+default bindings, stored ones are ignored. VIEW keeps CAMERA ZOOM, GRAPHICS CAR HEADLIGHTS and LIGHT
+EFFECTS, on by default: the port's lamps are lit per vertex (see Renderer).
 CONTROLS is there on the New 3DS only, told apart at run time (`APT_CheckNew3DS`): TWIN STICK moves with
 the circle pad and aims with the C-stick (SDL's right stick), which also turns a roof gun, and ZR attacks,
 as the PC's right stick and RT; CLASSIC stays the default. The Old 3DS, without a second stick, has
