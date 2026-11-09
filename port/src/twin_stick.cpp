@@ -6,7 +6,6 @@
 #include "Ped.hpp"
 #include "Player.hpp"
 #include "char.hpp"
-#include "platform.hpp"
 #include "settings.hpp"
 #include "sprite.hpp"
 #include "view.hpp"
@@ -268,8 +267,7 @@ void AimTurret(Car* pCar)
 
 bool FreeAim(const Ped* pPed)
 {
-    // The console controls keep the original's lock on a ped near the line of fire, but for a stick's aim.
-    return pPed == OnFootPed() && (sAimSteps > 0 || !PortPlatform::Has(PortPlatform::kConsoleControls));
+    return pPed == OnFootPed();
 }
 
 void DrawReticle()
