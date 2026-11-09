@@ -179,11 +179,12 @@ The game's headers and the renderer's clash, so `minimap_game.cpp` reads the gam
 `GTA2_3DS_MINIMAP=wide` gives the map the whole row while no brief shows; `off` leaves it out and gives the
 row to the brief.
 
-The bottom screen is drawn only when what it shows changed, at most every other frame (15 per second at
+The bottom screen is drawn only when what it shows changed, in every other frame at most (15 per second at
 30): a signature of the HUD's batches (vertices, textures and their uploads, states), its panels, the
 brief's scroll and the minimap's state (the player's position to the pixel, heading in 64 steps, gang and
 markers). citro3d transfers and swaps a screen only when its target was drawn on, so otherwise the screen
-keeps its last frame.
+keeps its last frame. The game leaves the bottom screen's HUD draws out of the frames in between
+(`PortHudScreen::Drawn`, `IRenderer::HudScreenDue`).
 
 ## Build
 

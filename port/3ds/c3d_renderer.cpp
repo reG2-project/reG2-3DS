@@ -63,7 +63,8 @@ const s32 kScreenH = 240;
 const s32 kBottomW = 320;
 const s32 kBottomH = 240;
 const s32 kMaxTexSize = 1024;
-// The bottom screen is drawn at most every that many frames, and only when what it shows changed.
+// The bottom screen is drawn in one frame of that many (the game leaves its HUD draws out of the others), and only
+// when what it shows changed.
 const u32 kBottomEvery = 2;
 // GLRenderer's default vertex offset: D3D pixel centres are on integers, the PICA's on halves.
 const f32 kPixelOffset = 0.5f - 1.0f / 2048.0f;
@@ -515,6 +516,7 @@ struct C3DRenderer::Impl : HudTheme::Sink
     void SetLights(const RLight* pLights, s32 count, const f32* pAmbient, f32 unlitAmbient);
     f32 ScrollOffset();
     u32 BottomSignature(f32 scroll, u32 minimap) const;
+    bool BottomDue() const { return !mBottomFrame || mFrame % kBottomEvery == 0; }
     void DrawHud();
     void DrawOverlay();
     void DrawQuads(const HudTheme::Quad* pQuads, s32 count, RTexture* pTex, u32 state) override;
@@ -1079,23 +1081,30 @@ u32 C3DRenderer::Impl::BottomSignature(f32 scroll, u32 minimap) const
     return h;
 }
 
-// The bottom screen, after the top one: cleared, with the HUD's batches of the frame. When nothing on it changed,
-// or it was drawn less than kBottomEvery frames ago, it is left alone and keeps showing its last frame.
+// The bottom screen, after the top one: cleared, with the HUD's batches of the frame. In a frame that is not
+// BottomDue, or when nothing on it changed, it is left alone and keeps showing its last frame.
 void C3DRenderer::Impl::DrawHud()
 {
     PORT_PROF(kPresentBottom);
     const u64 t0 = svcGetSystemTick();
-    const f32 scroll = ScrollOffset();
     if (!mBottom)
     {
         mHudBatches.clear();
         return;
     }
+    if (!BottomDue())
+    {
+        mHudBatches.clear();
+        mHudPanels = 0;
+        Stats3DS_AddBottom(svcGetSystemTick() - t0, false);
+        return;
+    }
+    const f32 scroll = ScrollOffset();
     // The minimap shows with the HUD, in game only.
     const u32 minimap = mHudPanels && mMinimap != kMinimapOff ? Minimap::Update(*mOwner) : 0;
     const bool wide = mMinimap == kMinimapWide && !(mHudPanels & (1u << HudTheme::kBrief));
     const u32 sig = BottomSignature(scroll, minimap ^ wide);
-    if (mBottomFrame && (sig == mBottomSig || mFrame - mBottomFrame < kBottomEvery))
+    if (mBottomFrame && sig == mBottomSig)
     {
         mHudBatches.clear();
         mHudPanels = 0;
@@ -1860,6 +1869,17 @@ bool C3DRenderer::SetHudGroup(s32 group)
     const bool hud = group > PortHudScreen::kWorld && group < PortHudScreen::kGroupCount;
     p->mHudGroup = hud ? &p->mGroups[group] : 0;
     return hud;
+}
+
+bool C3DRenderer::HudScreenDue()
+{
+    Impl* p = mImpl;
+    if (!p || !p->mBottom)
+    {
+        return true;
+    }
+    p->BeginFrame();
+    return p->BottomDue();
 }
 
 s32 C3DRenderer::HudScreenWidth() const

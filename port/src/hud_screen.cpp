@@ -3,6 +3,7 @@
 
 #if defined(GTA2_PORT_SDL)
 bool port_SetHudGroup(s32 group);
+bool port_HudScreenDue();
 s32 port_HudScreenWidth();
 #endif
 
@@ -15,6 +16,7 @@ const s32 kBriefTextX = 64;
 const s32 kBriefRightMargin = 4;
 
 bool sLayoutPixels;
+bool sDrawn = true;
 Fix16 sUiScale;
 } // namespace
 
@@ -22,6 +24,7 @@ void SetGroup(Group group)
 {
 #if defined(GTA2_PORT_SDL)
     const bool taken = port_SetHudGroup(group);
+    sDrawn = !taken || port_HudScreenDue();
 #else
     const bool taken = false;
 #endif
@@ -45,6 +48,11 @@ void SetGroup(Group group)
 bool LayoutPixels()
 {
     return sLayoutPixels;
+}
+
+bool Drawn()
+{
+    return sDrawn;
 }
 
 s32 BriefLineWidth(s32 width)

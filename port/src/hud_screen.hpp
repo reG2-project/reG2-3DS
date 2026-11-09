@@ -22,6 +22,8 @@ enum Group
 void SetGroup(Group group);
 // True while the group being drawn is on the HUD screen: positions are the layout's, at scale 1.
 bool LayoutPixels();
+// False while the group goes to a HUD screen that keeps its last picture in this frame: its draws can be left out.
+bool Drawn();
 // The brief's line width in layout pixels: the original's, or less to fit the HUD screen.
 s32 BriefLineWidth(s32 width);
 } // namespace PortHudScreen
