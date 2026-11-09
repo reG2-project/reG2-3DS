@@ -228,7 +228,15 @@ void BeforeStep()
 {
     PORT_PROF(kLoopBeforeStep);
     sStatsT0 = sStats ? port_NowNs() : 0;
-    PortInterp::Snapshot();
+    // The original pacing draws only right after a step: no frame in between to interpolate.
+    if (Original())
+    {
+        PortInterp::Clear();
+    }
+    else
+    {
+        PortInterp::Snapshot();
+    }
     PortView::Snapshot();
 }
 
