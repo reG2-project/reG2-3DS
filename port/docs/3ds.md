@@ -227,7 +227,7 @@ the same buttons on foot and in a vehicle; SDL's 3DS mapping gives the buttons b
 |---|---|---|
 | Circle pad | MODERN: walk that way (TWIN STICK's move); CLASSIC: the original's arrows | steer; CLASSIC: up and down also accelerate and brake |
 | R | attack; MODERN: held, the player keeps his facing (backs off while firing) | accelerate |
-| L | | brake, reverse |
+| L | MODERN: held, the player keeps his facing without attacking | brake, reverse |
 | B | jump | handbrake |
 | A | get in | get out |
 | Y, X | specials 1 and 2 | specials 1 (horn, siren) and 2 |
@@ -239,7 +239,7 @@ the same buttons on foot and in a vehicle; SDL's 3DS mapping gives the buttons b
 
 CONTROLS (pause menu or OPTIONS) chooses MODERN, the default, or CLASSIC, the original's tank movement; the
 choice is `port_console_controls` in the registry, apart from the PC's `port_controls`. MODERN is TWIN STICK
-(`port/src/twin_stick.cpp`): without an aim the player turns to the way he walks; while R or ZR is held his
+(`port/src/twin_stick.cpp`): without an aim the player turns to the way he walks; while R, ZR or L is held his
 facing stays the one he had at the press (`port_HoldFacing`), the original's lock on a ped near the line of
 fire still applies, and the C-stick's aim comes first. Only the circle pad moves, in either style, so that the
 d-pad keeps the weapons. The original's SPECIAL 1 with left or right still turns a roof gun. In the menus B

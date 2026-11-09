@@ -67,7 +67,7 @@ void port_UpdatePad();
 // TWIN STICK on foot: the left stick, d-pad and movement second keys as a move, the right stick as an aim,
 // both screen-relative, y down, 0 within the dead zones. True if the mouse aims (it was used after the pad).
 bool port_TwinStickInput(float* pMoveX, float* pMoveY, float* pAimX, float* pAimY);
-// The console controls (pad.cpp): R or ZR held on foot keeps the player's facing; the d-pad's left and right
+// The console controls (pad.cpp): R, L or ZR held on foot keeps the player's facing; the d-pad's left and right
 // turn a roof gun, positive to the left (as SPECIAL with LEFT), 0 when nothing turns it.
 bool port_HoldFacing();
 int port_TurretInput();
