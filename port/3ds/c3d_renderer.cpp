@@ -963,14 +963,24 @@ void C3DRenderer::Impl::Append(const RVertex* pVerts, s32 count, RTexture* pTex,
         d.x = s.x + dx;
         d.y = s.y + dy;
         d.rhw = s.rhw;
-        d.rgba = lit ? s.unlit : s.rgba;
         d.u = s.u * su + ou;
         d.v = ov - s.v * sv;
-        d.wx = s.wx - lx;
-        d.wy = s.wy - ly;
-        d.wz = s.wz;
-        d.shade = lit ? s.shade : -1.0f;
-        mBatchLit |= lit;
+        if (lit)
+        {
+            d.rgba = s.unlit;
+            d.wx = s.wx - lx;
+            d.wy = s.wy - ly;
+            d.wz = s.wz;
+            d.shade = s.shade;
+            mBatchLit = true;
+        }
+        else
+        {
+            // The shader reads no world position without a shade.
+            d.rgba = s.rgba;
+            d.wx = d.wy = d.wz = 0.0f;
+            d.shade = -1.0f;
+        }
     }
     if (pRule)
     {
