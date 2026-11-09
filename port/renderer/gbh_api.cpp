@@ -175,6 +175,7 @@ bool gLightsDirty = true;
 bool gShaderLights;
 u32 gShaderLightsEnd;
 std::vector<u32> gConvertBuffer;
+std::vector<STexture*> gPreload;
 
 // The original keeps textures in square cache slots of 8..256 texels (0xe107e0), with the last column
 // and row repeated once; UVs are normalised by the slot size. Same here, so UVs match bit for bit.
@@ -1110,6 +1111,11 @@ GBH_EXPORT void GTA2_CC gbh_BeginScene()
     gSceneCount++;
     PORT_PROF_COUNT(kAmbient, (u32)gAmbient[0]);
     SyncOptions();
+    for (size_t i = 0; i < gPreload.size(); i++)
+    {
+        Resolve(gPreload[i], kAlpha);
+    }
+    gPreload.clear();
 #if defined(__i386__)
     if (gTraceScene && gSceneCount == gTraceScene)
     {
@@ -1275,6 +1281,13 @@ GBH_EXPORT void GTA2_CC gbh_FreeTexture(STexture* pTexture)
     {
         return;
     }
+    for (size_t i = 0; i < gPreload.size(); i++)
+    {
+        if (gPreload[i] == pTexture)
+        {
+            gPreload.erase(gPreload.begin() + i--);
+        }
+    }
     TexData* pData = Data(pTexture);
     if (pData)
     {
@@ -1378,6 +1391,13 @@ void port_SetAmbient(f32 r, f32 g, f32 b, f32 lights)
     gAmbient[2] = b * 255.0f;
     gLightScale = lights;
     gLightsDirty = true;
+}
+
+// Converted at the next scene rather than on its first draw, as draws with alpha take it: the render options may
+// reach the renderer only then, and a change would convert it again.
+void port_PreloadTexture(STexture* pTexture)
+{
+    gPreload.push_back(pTexture);
 }
 
 // The HUD's groups (port/src/hud_screen.hpp), for a renderer with a screen of its own for the HUD.
