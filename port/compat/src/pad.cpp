@@ -359,7 +359,8 @@ bool ConsoleDown(int control, bool car, int twin, bool roofGun, bool dpad)
         case 3:
             return dpad ? Button(SDL_GAMEPAD_BUTTON_DPAD_RIGHT) : (car ? x > kStickDeadZone : StickArrow(3));
         case 4:
-            return (car ? Button(SDL_GAMEPAD_BUTTON_DPAD_DOWN) : r) || CodeDown(11);
+            // R also accelerates: held while getting in, it does not fire.
+            return (car ? Button(SDL_GAMEPAD_BUTTON_DPAD_DOWN) : r && !port_EnteringCar()) || CodeDown(11);
         case 5:
             return Button(SDL_GAMEPAD_BUTTON_EAST);
         case 6:

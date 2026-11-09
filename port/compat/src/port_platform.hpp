@@ -107,6 +107,8 @@ bool port_TwinStickAims();
 bool port_Driving();
 // The same, in a fire truck, tank or gun jeep.
 bool port_DrivingRoofGun();
+// The local player on his way into a vehicle (walking to it or getting in).
+bool port_EnteringCar();
 // Tests (GTA2_TEST_CAR): a car of that model at that offset from the player, in blocks, who then gets in.
 void port_TestCar(int model, float dx, float dy);
 // The player's vehicle: how far RT, LT and the stick press FORWARD, BACKWARD and the steering, 0 to 1, 1 for
