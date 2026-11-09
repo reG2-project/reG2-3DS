@@ -478,7 +478,8 @@ struct C3DRenderer::Impl : HudTheme::Sink
     void DrawOverlay();
     void DrawQuads(const HudTheme::Quad* pQuads, s32 count, RTexture* pTex, u32 state) override;
     void DrawTriangles(const RVertex* pVerts, s32 count, RTexture* pTex, u32 state) override;
-    void ApplyState(RTexture* pTex, u32 state, const ScreenRect& scissor);
+    void ApplyState(u32 state, const ScreenRect& scissor);
+    void Draw(RTexture* pTex, u32 state, const ScreenRect& scissor, s32 first, s32 count);
     bool Allocate(RTexture* pTex, s32 tw, s32 th, GPU_TEXCOLOR fmt, s32 levels, bool clear);
     void Release(RTexture* pTex);
     void LruRemove(RTexture* pTex);
@@ -804,6 +805,7 @@ void C3DRenderer::Impl::SetLights(const RLight* pLights, s32 count, const f32* p
             pDst[2 * i + 1] = FVec4_New(l.r * r, l.g * r, l.b * r, l.ceiling * 2.5f);
         }
     }
+    mStateValid = false;
 }
 
 void C3DRenderer::Impl::Flush()
@@ -832,13 +834,8 @@ void C3DRenderer::Impl::Flush()
         mBatchStart = mVertCount;
         return;
     }
-    ApplyState(mBatchTex, mBatchState, mBatchScissor);
-    C3D_DrawArrays(GPU_TRIANGLES, mBatchStart, n);
+    Draw(mBatchTex, mBatchState, mBatchScissor, mBatchStart, n);
     mBatchStart = mVertCount;
-    mOwner->mDrawCalls++;
-    mOwner->mVertices += (u32)n;
-    PORT_PROF_COUNT(kDrawCalls, 1);
-    PORT_PROF_COUNT(kVertices, (u32)n);
 }
 
 // How far down the scrolling part is drawn this frame: from all of its overflow (its top shown) to none.
@@ -944,13 +941,9 @@ void C3DRenderer::Impl::DrawHud()
         {
             C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, mUniProjection, b.scroll ? &scrolled : &mBottomProjection);
             inScroll = b.scroll;
+            mStateValid = false;
         }
-        ApplyState(b.tex, b.state, b.scissor);
-        C3D_DrawArrays(GPU_TRIANGLES, b.start, b.count);
-        mOwner->mDrawCalls++;
-        mOwner->mVertices += (u32)b.count;
-        PORT_PROF_COUNT(kDrawCalls, 1);
-        PORT_PROF_COUNT(kVertices, (u32)b.count);
+        Draw(b.tex, b.state, b.scissor, b.start, b.count);
     }
     mHudBatches.clear();
     Stats3DS_AddBottom(svcGetSystemTick() - t0, true);
@@ -1037,7 +1030,7 @@ void C3DRenderer::Impl::DrawTriangles(const RVertex* pVerts, s32 count, RTexture
     }
 }
 
-void C3DRenderer::Impl::ApplyState(RTexture* pTex, u32 state, const ScreenRect& scissor)
+void C3DRenderer::Impl::ApplyState(u32 state, const ScreenRect& scissor)
 {
     PORT_PROF_COUNT(kStates, 1);
     if (!mStateValid || scissor != mAppliedScissor)
@@ -1096,20 +1089,68 @@ void C3DRenderer::Impl::ApplyState(RTexture* pTex, u32 state, const ScreenRect& 
         mAppliedState = state;
     }
     mStateValid = true;
+}
+
+// A batch's draw. When only its texture differs from the last draw's, that texture's registers and the draw go
+// straight into the command buffer, as citro3d writes them; C3D_DrawArrays would also go through every uniform.
+void C3DRenderer::Impl::Draw(RTexture* pTex, u32 state, const ScreenRect& scissor, s32 first, s32 count)
+{
+    const bool sameState = mStateValid && state == mAppliedState && !(scissor != mAppliedScissor);
+    if (!sameState)
+    {
+        ApplyState(state, scissor);
+    }
     // Untextured draws keep a valid texture bound: citro3d reads the bound one whenever it is dirty.
     RTexture* pBind = pTex ? pTex : mWhite;
+    C3D_Tex* pTex3 = &pBind->mTex;
     const GPU_TEXTURE_FILTER_PARAM filter = (state & RS_FILTER_LINEAR) ? GPU_LINEAR : GPU_NEAREST;
-    C3D_TexSetFilter(&pBind->mTex, filter, filter);
-    C3D_TexSetFilterMipmap(&pBind->mTex, GPU_LINEAR);
-    pBind->mTex.maxLevel = (state & kStateNoMip) ? 0 : pBind->mLevels;
-    if (mBoundTex != &pBind->mTex || mBoundParam != pBind->mTex.param || mBoundLod != pBind->mTex.lodParam)
+    C3D_TexSetFilter(pTex3, filter, filter);
+    C3D_TexSetFilterMipmap(pTex3, GPU_LINEAR);
+    pTex3->maxLevel = (state & kStateNoMip) ? 0 : pBind->mLevels;
+    const bool rebind = mBoundTex != pTex3 || mBoundParam != pTex3->param || mBoundLod != pTex3->lodParam;
+    if (rebind)
     {
-        C3D_TexBind(0, &pBind->mTex);
+        C3D_TexBind(0, pTex3);
         PORT_PROF_COUNT(kBinds, 1);
-        mBoundTex = &pBind->mTex;
-        mBoundParam = pBind->mTex.param;
-        mBoundLod = pBind->mTex.lodParam;
+        mBoundTex = pTex3;
+        mBoundParam = pTex3->param;
+        mBoundLod = pTex3->lodParam;
     }
+    mOwner->mDrawCalls++;
+    mOwner->mVertices += (u32)count;
+    PORT_PROF_COUNT(kDrawCalls, 1);
+    PORT_PROF_COUNT(kVertices, (u32)count);
+    if (!sameState)
+    {
+        C3D_DrawArrays(GPU_TRIANGLES, first, count);
+        return;
+    }
+    // Texture unit 0 as C3Di_SetTex sets it, its cache cleared, then C3D_DrawArrays' commands.
+    u32 cmds[32];
+    u32* p = cmds;
+    if (rebind)
+    {
+        const u32 tex[] = {pTex3->border, GPUCMD_HEADER(1, 0xF, GPUREG_TEXUNIT0_BORDER_COLOR) | (4 << 20),
+                           pTex3->dim, pTex3->param, pTex3->lodParam, osConvertVirtToPhys(pTex3->data) >> 3,
+                           (u32)pTex3->fmt, GPUCMD_HEADER(0, 0xF, GPUREG_TEXUNIT0_TYPE),
+                           0x10000, GPUCMD_HEADER(0, 0x4, GPUREG_TEXUNIT_CONFIG)};
+        memcpy(p, tex, sizeof(tex));
+        p += sizeof(tex) / 4;
+    }
+    const u32 draw[] = {GPU_TRIANGLES, GPUCMD_HEADER(0, 0x2, GPUREG_PRIMITIVE_CONFIG),
+                        1, GPUCMD_HEADER(0, 0xF, GPUREG_RESTART_PRIMITIVE),
+                        0x80000000, GPUCMD_HEADER(0, 0xF, GPUREG_INDEXBUFFER_CONFIG),
+                        (u32)count, GPUCMD_HEADER(0, 0xF, GPUREG_NUMVERTICES),
+                        (u32)first, GPUCMD_HEADER(0, 0xF, GPUREG_VERTEX_OFFSET),
+                        1, GPUCMD_HEADER(0, 0x1, GPUREG_GEOSTAGE_CONFIG2),
+                        0, GPUCMD_HEADER(0, 0x1, GPUREG_START_DRAW_FUNC0),
+                        1, GPUCMD_HEADER(0, 0xF, GPUREG_DRAWARRAYS),
+                        1, GPUCMD_HEADER(0, 0x1, GPUREG_START_DRAW_FUNC0),
+                        0, GPUCMD_HEADER(0, 0x1, GPUREG_GEOSTAGE_CONFIG2),
+                        1, GPUCMD_HEADER(0, 0xF, GPUREG_VTX_FUNC)};
+    memcpy(p, draw, sizeof(draw));
+    p += sizeof(draw) / 4;
+    GPUCMD_AddRawCommands(cmds, (u32)(p - cmds));
 }
 
 C3DRenderer::C3DRenderer() : mImpl(0), mLogicalW(640), mLogicalH(480), mDrawCalls(0), mUploads(0), mVertices(0)
@@ -1250,6 +1291,7 @@ void C3DRenderer::SetLogicalSize(s32 width, s32 height)
     if (p->mInFrame)
     {
         C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, p->mUniProjection, &p->mProjection);
+        p->mStateValid = false;
     }
 }
 
@@ -1517,6 +1559,7 @@ void C3DRenderer::FreeTexture(RTexture* pTex)
                 C3D_TexBind(0, &p->mWhite->mTex);
                 p->mBoundTex = &p->mWhite->mTex;
                 p->mBoundParam = p->mWhite->mTex.param;
+                p->mStateValid = false;
             }
         }
         p->Release(pTex);
