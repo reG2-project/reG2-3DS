@@ -124,6 +124,8 @@ unsigned long long port_GameTicksNs();
 void port_SuspendSound(bool suspended); // miles.cpp
 // Stops the 2D samples playing from that memory, before the game loads other sounds over it (miles.cpp).
 void port_StopSamplesIn(const void* p, size_t len);
+// After sounds were loaded there, from AIL_mem_alloc_lock (miles.cpp).
+void port_SoundDataLoaded(const void* p, size_t len);
 
 #include "../../renderer/port_exports.hpp"
 

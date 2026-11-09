@@ -15,9 +15,10 @@
 #include "registry.hpp"
 #include "settings.hpp"
 #include <stdio.h>
-#include <vector>
 
 EXTERN_GLOBAL(s16, word_7064D8);
+
+void port_SoundDataLoaded(const void* p, size_t len);
 
 namespace PortPauseMenu
 {
@@ -121,7 +122,7 @@ void FreeStyle()
 // The frontend's menu sounds, fstyle's samples 0 to 11: a left and a right one for each result up to
 // kWentBack. The game's sound bank is the level's, so they play on sample handles of their own.
 SdtEntry sSoundEntries[12];
-std::vector<u8> sSoundData;
+u8* sSoundData; // AIL_mem_alloc_lock's, which the 3DS's DSP plays from
 s32 sSoundFirst;
 // Pairs used in turn: like the frontend's, a sound plays to its end over the next ones (about a
 // second), as cutting it short clicks.
@@ -143,8 +144,13 @@ bool LoadSoundData()
             sSoundFirst = entry.mOffset < sSoundFirst ? entry.mOffset : sSoundFirst;
             end = entry.mOffset + entry.mSampleLength > end ? entry.mOffset + entry.mSampleLength : end;
         }
-        sSoundData.resize(end - sSoundFirst);
-        ok = fseek(pRaw, sSoundFirst, SEEK_SET) == 0 && fread(sSoundData.data(), 1, sSoundData.size(), pRaw) == sSoundData.size();
+        const size_t size = end - sSoundFirst;
+        sSoundData = static_cast<u8*>(AIL_mem_alloc_lock(size));
+        ok = sSoundData && fseek(pRaw, sSoundFirst, SEEK_SET) == 0 && fread(sSoundData, 1, size, pRaw) == size;
+        if (ok)
+        {
+            port_SoundDataLoaded(sSoundData, size);
+        }
     }
     if (pSdt)
     {
@@ -156,14 +162,15 @@ bool LoadSoundData()
     }
     if (!ok)
     {
-        sSoundData.clear();
+        AIL_mem_free_lock(sSoundData);
+        sSoundData = NULL;
     }
     return ok;
 }
 
 void OpenSounds()
 {
-    if (!gSampManager.mhDriver || (sSoundData.empty() && !LoadSoundData()))
+    if (!gSampManager.mhDriver || (!sSoundData && !LoadSoundData()))
     {
         return;
     }
@@ -253,7 +260,7 @@ void Preload()
     {
         LoadStyle();
     }
-    if (gSampManager.mhDriver && sSoundData.empty())
+    if (gSampManager.mhDriver && !sSoundData)
     {
         LoadSoundData();
     }

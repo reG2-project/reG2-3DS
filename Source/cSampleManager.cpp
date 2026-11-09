@@ -7,6 +7,7 @@ DEFINE_GLOBAL(cSampleManager, gSampManager, 0x6FFF00);
 
 #if defined(GTA2_PORT_SDL)
 void port_StopSamplesIn(const void* p, size_t len);
+void port_SoundDataLoaded(const void* p, size_t len);
 #endif
 
 struct voc_name
@@ -1153,6 +1154,9 @@ bool cSampleManager::LoadWavSdtData(const char_type* pRawOrSdtName)
     port_StopSamplesIn(mpAudioBuffer1, 6100000);
 #endif
     fread(mpAudioBuffer1, 1u, rawFileSize, hRawFile);
+#if defined(GTA2_PORT_SDL)
+    port_SoundDataLoaded(mpAudioBuffer1, rawFileSize);
+#endif
     fclose(hRawFile);
     FILE* hSdtFile = fopen(sdtName, "rb");
     if (!hSdtFile)

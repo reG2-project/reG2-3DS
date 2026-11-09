@@ -1,10 +1,13 @@
 // Miles Sound System (the AIL_* subset GTA2 uses) on SDL3 audio: 2D samples from the game's sound
 // banks, and WAV streams (radio stations, voices) decoded while they play, PCM or IMA ADPCM.
-// The 3D provider is in miles3d.cpp.
+// The 3D provider is in miles3d.cpp. On the 3DS the DSP's channels play the 2D samples and streams instead.
 #include "types.hpp"
 #include "3rdParty/mss.h"
 #include "miles3d.hpp"
 #include "port_platform.hpp"
+#ifdef __3DS__
+#include "../../3ds/dsp_voices.hpp"
+#endif
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -50,6 +53,7 @@ struct Sample
     float mGain[2] = {-1, -1}; // left and right as mixed, -1 until the first frame
     int mFade = -1;            // frames left in a fade-out, -1 when not stopping
     std::vector<u8> mOwned;    // a fading copy's own frames, mData pointing here
+    s32 mVoice = -1;           // its DSP channel (3DS)
 };
 
 // The frames a stream keeps decoded ahead (0.37 s at 22050 Hz), and the bytes it reads from its file at once.
@@ -92,6 +96,9 @@ struct Stream
     // The audio thread's alone: the data chunk's bytes from mRawOffset on.
     std::vector<u8> mRaw;
     u32 mRawOffset = 0;
+
+    s32 mVoice = -1;   // its DSP channel (3DS)
+    u32 mFedSeeks = 0; // mSeeks as the DSP's buffers start
 };
 
 struct Driver
@@ -126,6 +133,14 @@ bool FadeStep(int* pFade, float* pGain)
 }
 
 Driver* sDriver;
+
+#ifdef __3DS__
+// The DSP plays the sounds, unless the CPU mixer below was asked for. It has no limiter: the game's mix
+// passes full scale rarely and by little (1.3 at most, crashes and explosions), which its soft clipping takes.
+bool sDsp;
+#else
+const bool sDsp = false;
+#endif
 
 const int kImaSteps[89] = {7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45, 50, 55, 60, 66, 73, 80,
     88, 97, 107, 118, 130, 143, 157, 173, 190, 209, 230, 253, 279, 307, 337, 371, 408, 449, 494, 544, 598, 658, 724, 796, 876,
@@ -585,6 +600,24 @@ class Limiter
 
 Limiter sLimiter;
 
+void PrefetchStreams()
+{
+    std::lock_guard<std::mutex> io(IoLock());
+    static std::vector<Stream*> sStreams; // the audio thread's alone
+    {
+        std::lock_guard<std::recursive_mutex> lock(Lock());
+        sStreams.clear();
+        if (sDriver)
+        {
+            sStreams = sDriver->mStreams;
+        }
+    }
+    for (Stream* s : sStreams)
+    {
+        Prefetch(s);
+    }
+}
+
 void SDLCALL AudioCallback(void*, SDL_AudioStream* stream, int additional, int)
 {
     const int frames = additional / (int)(2 * sizeof(float));
@@ -592,22 +625,7 @@ void SDLCALL AudioCallback(void*, SDL_AudioStream* stream, int additional, int)
     {
         return;
     }
-    {
-        std::lock_guard<std::mutex> io(IoLock());
-        static std::vector<Stream*> sStreams; // the audio thread's alone
-        {
-            std::lock_guard<std::recursive_mutex> lock(Lock());
-            sStreams.clear();
-            if (sDriver)
-            {
-                sStreams = sDriver->mStreams;
-            }
-        }
-        for (Stream* s : sStreams)
-        {
-            Prefetch(s);
-        }
-    }
+    PrefetchStreams();
     std::vector<float> mix((size_t)frames * 2, 0.0f);
     {
         std::lock_guard<std::recursive_mutex> lock(Lock());
@@ -663,6 +681,118 @@ void SDLCALL AudioCallback(void*, SDL_AudioStream* stream, int additional, int)
     SDL_PutAudioStreamData(stream, mix.data(), (int)(mix.size() * sizeof(float)));
 }
 
+#ifdef __3DS__
+void SampleGains(const Sample* s, float* pLeft, float* pRight)
+{
+    const float vol = s->mVolume / 127.0f;
+    *pLeft = vol * SDL_min(1.0f, (127 - s->mPan) / 63.5f);
+    *pRight = vol * SDL_min(1.0f, s->mPan / 63.5f);
+}
+
+void DspPlay(Sample* s)
+{
+    const u32 total = SampleFrames(s);
+    const bool stereo = (s->mFormat & DIG_F_STEREO_MASK) != 0;
+    const bool b16 = (s->mFormat & DIG_F_16BITS_MASK) != 0;
+    const int frameBytes = (stereo ? 2 : 1) * (b16 ? 2 : 1);
+    const u32 loopStart = SDL_min((u32)SDL_max(s->mLoopStart, 0) / frameBytes, total);
+    const u32 loopEnd = s->mLoopEnd < 0 ? total : SDL_min((u32)s->mLoopEnd / frameBytes, total);
+    const DspSound sound = {s->mData, stereo, b16, s->mSigned8, loopStart, loopEnd, s->mLoopCount};
+    float left;
+    float right;
+    SampleGains(s, &left, &right);
+    s->mVoice = s->mData ? DspVoices_Play(sound, (float)s->mRate, left, right) : -1;
+    s->mStatus = s->mVoice >= 0 ? SMP_PLAYING : SMP_DONE;
+}
+
+void DspSet(Sample* s)
+{
+    if (s->mVoice >= 0)
+    {
+        float left;
+        float right;
+        SampleGains(s, &left, &right);
+        DspVoices_Set(s->mVoice, (float)s->mRate, left, right);
+    }
+}
+
+void DspSet(Stream* s)
+{
+    if (s->mVoice >= 0)
+    {
+        const float gain = s->mVolume / 127.0f;
+        DspVoices_Set(s->mVoice, (float)(s->mPlayRate ? s->mPlayRate : s->mRate), gain, gain);
+    }
+}
+
+// Hands the stream's decoded frames to its voice in whole buffers, but for the last.
+void FeedStream(Stream* s)
+{
+    if (s->mFedSeeks != s->mSeeks)
+    {
+        DspVoices_Flush(s->mVoice);
+        s->mFedSeeks = s->mSeeks;
+    }
+    u32 room;
+    s16* pOut;
+    while (s->mQueued && (pOut = DspVoices_Buffer(s->mVoice, &room)) && (s->mQueued >= room || s->mDecodeEnd))
+    {
+        const u32 n = SDL_min(room, s->mQueued);
+        for (u32 i = 0; i < n; i++)
+        {
+            const u32 at = (s->mQueueHead + i) % kQueueFrames;
+            pOut[i * 2] = s->mQueue[at * 2];
+            pOut[i * 2 + 1] = s->mQueue[at * 2 + 1];
+        }
+        DspVoices_Submit(s->mVoice, n);
+        s->mQueueHead = (s->mQueueHead + n) % kQueueFrames;
+        s->mQueued -= n;
+        s->mPos = (s->mPos + n) % s->mTotalFrames;
+    }
+    if (s->mDecodeEnd && !s->mQueued && !DspVoices_Playing(s->mVoice))
+    {
+        s->mStatus = SMP_DONE;
+    }
+}
+
+// Every few milliseconds on the system core: decodes the streams ahead, feeds their voices and notes the
+// sounds that ended.
+void FeedDsp()
+{
+    PrefetchStreams();
+    std::lock_guard<std::recursive_mutex> lock(Lock());
+    DspVoices_Update();
+    if (!sDriver)
+    {
+        return;
+    }
+    for (Sample* s : sDriver->mSamples)
+    {
+        if (s->mVoice >= 0 && !DspVoices_Playing(s->mVoice))
+        {
+            DspVoices_Stop(s->mVoice, true);
+            s->mVoice = -1;
+            s->mStatus = SMP_DONE;
+        }
+    }
+    for (Stream* s : sDriver->mStreams)
+    {
+        if (s->mStatus == SMP_PLAYING)
+        {
+            FeedStream(s);
+        }
+    }
+}
+#else
+void DspSet(Sample*)
+{
+}
+
+void DspSet(Stream*)
+{
+}
+#endif
+
 Sample* S(HSAMPLE h)
 {
     return reinterpret_cast<Sample*>(h);
@@ -672,8 +802,15 @@ Sample* S(HSAMPLE h)
 // reads, as the game may free the sample's data or load other sounds over it.
 void StopSample(Sample* s)
 {
+#ifdef __3DS__
+    if (s->mVoice >= 0)
+    {
+        DspVoices_Stop(s->mVoice, false);
+        s->mVoice = -1;
+    }
+#endif
     const u32 first = (u32)s->mPos;
-    if (sDriver && s->mStatus == SMP_PLAYING && s->mFade < 0 && s->mData && first < SampleFrames(s))
+    if (!sDsp && sDriver && s->mStatus == SMP_PLAYING && s->mFade < 0 && s->mData && first < SampleFrames(s))
     {
         const u32 frameBytes = s->mLen / SampleFrames(s);
         const u32 frames = SDL_min((u32)(kRampFrames * (double)s->mRate / kOutRate) + 2, SampleFrames(s) - first);
@@ -717,14 +854,30 @@ Stream* St(HSTREAM h)
 
 #define LOCK std::lock_guard<std::recursive_mutex> lock(Lock())
 
+// The memory the game loads its sound banks into: on the 3DS, memory the DSP plays from.
 DXDEC void FAR* AILCALL AIL_mem_alloc_lock(U32 size)
 {
+#ifdef __3DS__
+    return DspVoices_Alloc(size);
+#else
     return calloc(1, size);
+#endif
 }
 
 DXDEC void AILCALL AIL_mem_free_lock(void FAR* ptr)
 {
+#ifdef __3DS__
+    DspVoices_Free(ptr);
+#else
     free(ptr);
+#endif
+}
+
+void port_SoundDataLoaded(const void* p, size_t len)
+{
+#ifdef __3DS__
+    DspVoices_Written(p, len);
+#endif
 }
 
 void port_StopSamplesIn(const void* p, size_t len)
@@ -741,6 +894,12 @@ void port_StopSamplesIn(const void* p, size_t len)
             StopSample(s);
         }
     }
+#ifdef __3DS__
+    if (sDsp)
+    {
+        DspVoices_StopIn(p, len);
+    }
+#endif
 }
 
 DXDEC S32 AILCALL AIL_startup(void)
@@ -777,6 +936,12 @@ static bool sSuspended;
 
 static void UpdatePause()
 {
+#ifdef __3DS__
+    if (sDsp)
+    {
+        DspVoices_Pause(sReleased || sSuspended);
+    }
+#endif
     if (sDevice)
     {
         if (sReleased || sSuspended)
@@ -803,7 +968,25 @@ DXDEC S32 AILCALL AIL_waveOutOpen(HDIGDRIVER FAR* drvr, LPHWAVEOUT FAR*, S32, LP
     {
         return -1;
     }
-    if (!sDevice)
+#ifdef __3DS__
+    static bool sChosen;
+    if (!sChosen)
+    {
+        sChosen = true;
+        // SDL's other drivers (dummy, disk) and GTA2_3DS_CPU_MIX=1 take the CPU mixer.
+        const char* driver = getenv("GTA2_AUDIO_DRIVER");
+        sDsp = !getenv("GTA2_3DS_CPU_MIX") && (!driver || !strcmp(driver, "n3ds")) && DspVoices_Open(FeedDsp);
+        if (sDsp)
+        {
+            SDL_Log("Audio: the DSP's channels");
+        }
+    }
+    if (sDsp)
+    {
+        DspVoices_SetMasterVolume(1.0f);
+    }
+#endif
+    if (!sDsp && !sDevice)
     {
         const SDL_AudioSpec spec = {SDL_AUDIO_F32, 2, kOutRate};
         sDevice = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, AudioCallback, NULL);
@@ -825,6 +1008,21 @@ DXDEC void AILCALL AIL_waveOutClose(HDIGDRIVER)
 {
     std::lock_guard<std::mutex> io(IoLock());
     LOCK;
+#ifdef __3DS__
+    for (size_t i = 0; sDriver && i < sDriver->mSamples.size(); i++)
+    {
+        StopSample(sDriver->mSamples[i]);
+    }
+    for (size_t i = 0; sDriver && i < sDriver->mStreams.size(); i++)
+    {
+        Stream* s = sDriver->mStreams[i];
+        if (s->mVoice >= 0)
+        {
+            DspVoices_Stop(s->mVoice, false);
+            s->mVoice = -1;
+        }
+    }
+#endif
     DropFading();
     delete sDriver;
     sDriver = NULL;
@@ -903,6 +1101,12 @@ DXDEC void AILCALL AIL_start_sample(HSAMPLE h)
     S(h)->mPos = 0;
     S(h)->mGain[0] = S(h)->mGain[1] = -1;
     S(h)->mStatus = SMP_PLAYING;
+#ifdef __3DS__
+    if (sDsp)
+    {
+        DspPlay(S(h));
+    }
+#endif
 }
 
 DXDEC void AILCALL AIL_end_sample(HSAMPLE h)
@@ -915,18 +1119,21 @@ DXDEC void AILCALL AIL_set_sample_playback_rate(HSAMPLE h, S32 playback_rate)
 {
     LOCK;
     S(h)->mRate = playback_rate > 0 ? playback_rate : 1;
+    DspSet(S(h));
 }
 
 DXDEC void AILCALL AIL_set_sample_volume(HSAMPLE h, S32 volume)
 {
     LOCK;
     S(h)->mVolume = SDL_clamp(volume, 0, 127);
+    DspSet(S(h));
 }
 
 DXDEC void AILCALL AIL_set_sample_pan(HSAMPLE h, S32 pan)
 {
     LOCK;
     S(h)->mPan = SDL_clamp(pan, 0, 127);
+    DspSet(S(h));
 }
 
 DXDEC void AILCALL AIL_set_sample_loop_count(HSAMPLE h, S32 loop_count)
@@ -956,6 +1163,12 @@ DXDEC void AILCALL AIL_set_digital_master_volume(HDIGDRIVER, S32 master_volume)
         sDriver->mMasterVolume = SDL_clamp(master_volume, 0, 127);
     }
     Miles3D_SetMasterVolume(SDL_clamp(master_volume, 0, 127));
+#ifdef __3DS__
+    if (sDsp)
+    {
+        DspVoices_SetMasterVolume(SDL_clamp(master_volume, 0, 127) / 127.0f);
+    }
+#endif
 }
 
 DXDEC HSTREAM AILCALL AIL_open_stream(HDIGDRIVER, char FAR* filename, S32)
@@ -982,6 +1195,13 @@ DXDEC void AILCALL AIL_close_stream(HSTREAM h)
     if (sDriver && h)
     {
         sDriver->mStreams.erase(std::find(sDriver->mStreams.begin(), sDriver->mStreams.end(), St(h)));
+#ifdef __3DS__
+        if (St(h)->mVoice >= 0)
+        {
+            DspVoices_Stop(St(h)->mVoice, false);
+            St(h)->mStatus = SMP_DONE;
+        }
+#endif
         if (St(h)->mStatus == SMP_PLAYING)
         {
             St(h)->mFade = kRampFrames;
@@ -1000,12 +1220,24 @@ DXDEC void AILCALL AIL_start_stream(HSTREAM h)
     St(h)->mDecodeLoops = St(h)->mLoopCount;
     St(h)->mGain = -1;
     St(h)->mStatus = SMP_PLAYING;
+#ifdef __3DS__
+    if (sDsp)
+    {
+        if (St(h)->mVoice < 0)
+        {
+            St(h)->mVoice = DspVoices_OpenStream();
+        }
+        DspSet(St(h));
+        St(h)->mStatus = St(h)->mVoice >= 0 ? SMP_PLAYING : SMP_DONE;
+    }
+#endif
 }
 
 DXDEC void AILCALL AIL_set_stream_volume(HSTREAM h, S32 volume)
 {
     LOCK;
     St(h)->mVolume = SDL_clamp(volume, 0, 127);
+    DspSet(St(h));
 }
 
 DXDEC S32 AILCALL AIL_stream_volume(HSTREAM h)
@@ -1018,6 +1250,7 @@ DXDEC void AILCALL AIL_set_stream_playback_rate(HSTREAM h, S32 rate)
 {
     LOCK;
     St(h)->mPlayRate = rate;
+    DspSet(St(h));
 }
 
 DXDEC S32 AILCALL AIL_stream_playback_rate(HSTREAM h)

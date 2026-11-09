@@ -181,7 +181,7 @@ shapes by `make_icon.py` at build time (python3 is in the image), so no game art
 
 The console's DSP firmware (`dspfirm.cdc`) is Nintendo's and not distributed. OpenDSP
 (https://github.com/Cellenseres/OpenDSP, BSD-2) replaces it: a library with its own DSP image, loaded
-by `opendspInit()` in `platform_3ds.cpp` before SDL opens the audio, SDL's ndsp calls unchanged. Build
+by `opendspInit()` in `platform_3ds.cpp` before the sound starts, the ndsp calls unchanged. Build
 it with `port/3ds/build_opendsp.sh <OpenDSP source> <prefix>` and pass `-DOPENDSP_DIR=<prefix>`; ship
 `LICENSE.OpenDSP.txt` (next to the `.3dsx` in the build) with it. Without it the port asks libctru for
 `sdmc:/3ds/dspfirm.cdc` as other homebrew does.
@@ -189,24 +189,47 @@ it with `port/3ds/build_opendsp.sh <OpenDSP source> <prefix>` and pass `-DOPENDS
 Azahar plays it with HLE audio (the default, which emulates Nintendo's firmware and only hashes the
 image) and with LLE (Teakra runs OpenDSP's code, at about a quarter of real time). OpenDSP costs nothing over Nintendo's path.
 
-The port mixes the game's sounds on the CPU (`compat/src/miles.cpp`) at the DSP's 32728 Hz, and SDL's
-audio thread runs on the system core (core 1, 30 % of it, `APT_SetAppCpuTimeLimit`) on both models:
-SDL 3.4.18 does that on the New 3DS only, `build_sdl3.sh` applies `sdl3_audio_syscore.patch` for the Old.
-Mixing takes about 1.9 ms per frame in bil (5 voices), off the game's core; SDL's conversion, ndsp and
-the DSP cost nothing measurable. bil walks at 30 frames per second with sound. Two mixer changes made
-that possible (bit-exact with the previous output): the limiter scanned its 64-frame lookahead for every
-output frame (a quarter of the Old 3DS core), and each voice now has a loop per sample format with a
-steady-state path. Azahar's GDB stub only shows the main thread: the audio time was measured with tick
-counters and a lowest-priority thread counting idle time on core 0.
+The DSP mixes the game's sounds (`3ds/dsp_voices.cpp`, behind `compat/src/miles.cpp`): each sample the game
+starts plays on one of ndsp's 24 channels, from the sound bank itself, with linear interpolation as the PC
+mixer. The game's pitch and engine changes set the channel's rate, its volume and pan the channel's mix, and
+a loop is two wave buffers, the sound up to the loop's end and then the loop again, looping (the game uses
+loop counts 0 and 1 only). The DSP ramps a gain change over its next frame (160 samples, 4.9 ms, a voice's
+first frame aside), so a stop sets the gain to 0 and frees the channel 3 frames later. Unsigned 8-bit sounds
+(`mhSample`'s, the police radio's words) are made signed in a copy, as the DSP plays signed ones only. A channel is taken
+as a sound starts, so the game's 16 channels, its voice sample, the pause menu's and two streams share the
+24: a drive with crashes uses up to 20 at once, fading ones included; when none is free the one faded out
+longest is taken, else the sound does not play. The CPU mixer has a limiter, the DSP none: the game's mix
+passes full scale rarely and by little (peaks of 1.2 in the frontend, 1.24 in a drive with crashes, 1.31
+with the tank's shells, under 0.1 % of the frames over 0.99), and the DSP's soft clipping (`NDSP_CLIP_SOFT`,
+which OpenDSP applies as x - x^3 / 6.75, flat from 1.5) takes them; the master volume stays at the game's.
+The CPU mixer (at the DSP's 32728 Hz, SDL's audio thread) plays instead with `GTA2_3DS_CPU_MIX=1` or another
+SDL driver (`GTA2_AUDIO_DRIVER=dummy`).
+
+The streams keep their CPU decode. A thread on the system core (core 1, of which the application gets 30 %,
+`APT_SetAppCpuTimeLimit`, as SDL's audio thread had) decodes them ahead every 10 ms and hands each its
+channel's frames at the file's own rate, in a ring of 4 wave buffers of 1024 frames (0.19 s at 22050 Hz); it
+also notes the sounds that ended and frees the channels faded out. SDL opens no audio device then.
+`GTA2_3DS_STATS` logs that thread's share of the time and the channels in use every 5 s (`dsp:`).
 
 The frontend plays `GTAudio/D.wav` (PCM, 22050 Hz stereo; `A.wav` on the credits page) and the radio the
 stations `1.wav` to `12.wav` and their `a` variants (IMA ADPCM), all as streams (`AIL_open_stream`). A stream
 takes 64 KB: 32 KB of the file read at once, about every 1.5 s for a station and 0.37 s for the menu music, and
-0.37 s of decoded frames, topped up by the audio thread before each mix without the lock the game's sound
-calls take. In Azahar (Old 3DS mode, driving in `ste` with the radio, per 5 s) a station's mix takes 4 % of
-the audio thread and its reading and decoding 3 to 6 % (a read about 10 ms), the heap 26.2 MB. Opening a
+0.37 s of decoded frames, topped up without the lock the game's sound calls take. Opening a
 station on the main thread takes 30 to 60 ms the first time a file is opened, 13 to 21 ms after: over
 2000 frames the radio adds one frame over 60 ms per station change (82 ms), none without the radio.
+
+The system core's time in Azahar (Old 3DS mode, per 5 s, the same scripted runs): with the CPU mixer, the
+audio thread took 16 to 17 % in the frontend with its music, 31 to 50 % driving a police car through traffic
+with the radio, 28 to 35 % with the tank's shells; on hardware the Old 3DS ran out of its 30 % there and
+crackled. With the DSP the thread takes 6 to 7.5 % with a stream (the frontend's music or a station: its 32
+KB reads, about 14 ms each in Azahar, and decoding) and 0.1 % without. Captures of both paths through
+Azahar's HLE audio (SDL's disk driver) match in pitch (spectra at a frequency scale of 1.000), loudness (0.2
+to 0.4 dB louder, the limiter gone) and balance (within 0.1 dB). Azahar's HLE audio clips hard where OpenDSP
+clips softly (62 to 1365 samples over full scale in 100 s; one in a run with LLE audio, which runs OpenDSP's
+code) and does not ramp gains: a crude count of abrupt steps finds 2 to 3 times more there than with the CPU
+mixer's fades (10 against 1 in the frontend, 35 against 14 driving), stops cut at a DSP frame. OpenDSP ramps
+them; Nintendo's firmware, used when OpenDSP does not start, needs a console to tell.
+
 OpenDSP was tested by its author on a New 3DS with Luma3DS; whether a stock DSP module accepts its
 unsigned image, and its sleep handling, need a console.
 
@@ -352,8 +375,9 @@ modes): the console then reboots into that mode at launch and exit, and the syst
 (HOME Menu and applets limited); not worth it here.
 
 Azahar gives a `.3dsx` more (memory type 2, 96 MB, in Old 3DS mode), so the port fixes its heaps
-(`platform_3ds.cpp`) and the emulator holds it to them: 40 MB heap, out of which libctru takes the 2 MB
-stack, and 16 MB linear heap, 59.2 MB in all with the image, which leaves 4.8 MB free on an Old 3DS. If
+(`platform_3ds.cpp`) and the emulator holds it to them: 34 MB heap, out of which libctru takes the 2 MB
+stack, and 22 MB linear heap, which holds the sound the DSP plays, 59.2 MB in all with the image, which
+leaves 4.8 MB free on an Old 3DS. If
 the system cannot give that (the Homebrew Launcher in applet mode, a bigger image), libctru 2.7.0 would
 stop at start-up (`svcBreak` in `allocateHeaps.c`, before `main`); the port replaces that function
 (`__system_allocateHeaps`, weak) and then takes smaller heaps, enough for an error screen with the sizes.
@@ -370,10 +394,14 @@ Measured in Azahar's Old 3DS mode with `GTA2_3DS_STATS` (peaks over a minute and
 | ste | 16.0 MB | 6.7 MB |
 | bil | 16.1 MB | 6.8 MB |
 | bil with sound (SDL's dummy driver) | 22.2 MB | 6.8 MB |
+| ste driving with the radio, the DSP's sound | 19.8 MB | 14.2 MB |
 
-New 3DS mode gives the same figures: the game's needs do not depend on the model. The sound bank of a
-city (6 MB) is the only addition still to come with the DSP. The minimap adds its 768 KB of linear memory
-and 64 KB of heap.
+New 3DS mode gives the same figures: the game's needs do not depend on the model. The rows above the last
+are from before the DSP's sound and the minimap: the game's sound bank buffer (6.1 MB, the cities' banks
+and the frontend's load into it) moved from the heap to the linear heap, by `AIL_mem_alloc_lock`, and the
+heap split by as much, as the DSP reads linear memory only. The pause menu's sounds (from `FSTYLE.RAW`) go
+there too, and each stream's 4 buffers take 16 KB. The minimap adds its 768 KB of linear memory and 64 KB
+of heap.
 
 Going back to the frontend after a game is the tight spot: the frontend allocates while the heap is in
 the pieces the city left (19 MB free in a 26.5 MB arena, the largest piece 4 to 6.5 MB, 7.5 MB still in
@@ -381,7 +409,9 @@ use). Its 26 TGA backgrounds took 17 MB at 32 bits per texel, in blocks up to 1.
 session that failed ("Couldn't allocate memory for targa file"). They are kept at their 16 bits and
 expanded for the upload only: the frontend takes 12.4 MB (20 MB of heap in use in all, against 28.6) and
 fits in what the city freed. With the heap cut to 35 MB in a test build, four game and frontend cycles
-keep 7.3 MB free at the top.
+keep 7.3 MB free at the top. With the 34 MB heap and the bank in the linear heap, four frontend and wil
+cycles peak at 19.8 MB of heap in an arena of 20.1 MB that stays the same from the first city on (about 12
+MB never touched at the top), and 12.7 MB of the 22 MB linear heap.
 
 ### Speed
 
@@ -461,7 +491,7 @@ that draws it against 0.59 to 0.66.
   second pager; multiplayer scores; bonus stages.
 - Menus: the port's own menus (pause, options) with a larger font scale on the 3DS, or on the bottom
   screen at 1:1.
-- Sound on hardware: OpenDSP's DSP load and sleep, the Old 3DS's audio thread on the system core.
+- Sound on hardware: the DSP's channels (clicks on stops, OpenDSP's load with 20 voices), sleep.
 - Real Old 3DS timings: Azahar's are optimistic for memory bound code (no cache model). If the
   hardware is short, the next candidates are the per-vertex lighting at night and the draw calls.
 - Real hardware: a 3DS or New 3DS with custom firmware.
