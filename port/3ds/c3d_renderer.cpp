@@ -523,7 +523,9 @@ void C3DRenderer::Impl::BeginFrame()
         return;
     }
     const u64 t0 = svcGetSystemTick();
-    C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
+    // GTA2_UNCAPPED (frame_loop.cpp): without waiting for the screens' refresh, frames the screens never show.
+    static const bool sUncapped = getenv("GTA2_UNCAPPED") != NULL;
+    C3D_FrameBegin(sUncapped ? 0 : C3D_FRAME_SYNCDRAW);
     Stats3DS_AddFrameBegin(svcGetSystemTick() - t0);
     mInFrame = true;
     mFrameDrew = false;

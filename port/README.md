@@ -254,6 +254,7 @@ clean Debian, Ubuntu or Arch Linux container with the libraries it needs.
 | `GTA2_TEST_CAR=<frame>:<model>[:<dx>:<dy>]` | a car of that model (54 the tank) that far from the player in blocks (1.5, 0 by default) at that frame, who then gets in |
 | `GTA2_CURSOR_BMP=<file>` | the mouse cursor's image written to that BMP |
 | `GTA2GL_CAPTURE=<dir>,<frame>,<a>-<b>,...` | write those frames as BMP (the first frame drawn at each); `GTA2GL_CAPTURE_FLIPS=1` counts presented frames instead |
+| `GTA2_UNCAPPED=1` | frames drawn as fast as they can be, whatever FRAME LIMIT (the logic keeps its 30.3 steps per second); on the 3DS without waiting for the screens' refresh, to measure how far it goes |
 | `GTA2_LOOP_STATS=1` | logic steps and frames per second on stderr, every 5 seconds |
 | `GTA2_LOOP_TRACE=<file>` | the player's and the camera's position after each step (`S`) and as drawn (`D`) |
 | `GTA2_NO_SOUND=1` | no audio device |

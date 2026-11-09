@@ -135,7 +135,8 @@ void Stats(unsigned long long now)
 
 void ApplySettings()
 {
-    sMaxFps = static_cast<u32>(PortSettings::MaxFps());
+    // GTA2_UNCAPPED=1: frames as fast as they can be drawn whatever FRAME LIMIT, to measure how far that goes.
+    sMaxFps = getenv("GTA2_UNCAPPED") ? 0 : static_cast<u32>(PortSettings::MaxFps());
     static bool sInit;
     if (!sInit)
     {
