@@ -14,7 +14,9 @@
 #include <string.h>
 #include <limits.h>
 #include <algorithm>
+#include <map>
 #include <mutex>
+#include <string>
 #include <vector>
 
 #undef fopen
@@ -29,7 +31,7 @@ std::recursive_mutex& Lock()
     return sLock;
 }
 
-// Held while the audio thread decodes streams without Lock(): what closes one takes it first, then Lock().
+// Held while the audio thread opens, decodes and closes streams without Lock().
 std::mutex& IoLock()
 {
     static std::mutex sLock;
@@ -60,11 +62,8 @@ struct Sample
 const u32 kQueueFrames = 8192;
 const u32 kRawBytes = 32768;
 
-// A WAV file that the audio thread reads in large blocks and decodes ahead into a queue of frames, outside
-// the game's lock (Prefetch), so the game never waits for the file system.
-struct Stream
+struct WavFormat
 {
-    FILE* mFile = NULL;
     int mFormatTag = 1;
     int mChannels = 1;
     int mRate = 22050;
@@ -74,6 +73,14 @@ struct Stream
     long mDataStart = 0;
     u32 mDataSize = 0;
     u32 mTotalFrames = 0;
+};
+
+// A WAV file that the audio thread reads in large blocks and decodes ahead into a queue of frames, outside
+// the game's lock (Prefetch), so the game never waits for the file system.
+struct Stream : WavFormat
+{
+    FILE* mFile = NULL;
+    std::string mPath; // opened by the audio thread when mFile is NULL
     S32 mVolume = 127;
     S32 mPlayRate = 0;
     S32 mLoopCount = 1;
@@ -109,6 +116,8 @@ struct Driver
     // Copies of samples stopped while playing, and closed streams, until their fade-out ends.
     std::vector<Sample*> mFadingSamples;
     std::vector<Stream*> mFadingStreams;
+    // Closed by the game, for the audio thread to close their files and free them.
+    std::vector<Stream*> mClosedStreams;
 };
 
 // A stop fades out, and a volume or pan change ramps, over this many frames (7.5 ms), as a step in the
@@ -181,10 +190,9 @@ u32 Rd32(const u8* p)
     return p[0] | (p[1] << 8) | (p[2] << 16) | ((u32)p[3] << 24);
 }
 
-bool OpenWav(Stream* s, const char* path)
+bool OpenWav(Stream* s, const char* real)
 {
-    char real[PATH_MAX];
-    s->mFile = fopen(port_resolve_path(path, real), "rb");
+    s->mFile = fopen(real, "rb");
     if (!s->mFile)
     {
         return false;
@@ -251,6 +259,10 @@ bool OpenWav(Stream* s, const char* path)
 // The data chunk's bytes [offset, offset + size), read with the ones after them in one request.
 const u8* RawBytes(Stream* s, u32 offset, u32 size)
 {
+    if (!s->mFile)
+    {
+        return NULL;
+    }
     if (offset < s->mRawOffset || offset + size > s->mRawOffset + s->mRaw.size())
     {
         s->mRaw.resize(SDL_min(SDL_max(size, kRawBytes), s->mDataSize - offset));
@@ -604,16 +616,32 @@ void PrefetchStreams()
 {
     std::lock_guard<std::mutex> io(IoLock());
     static std::vector<Stream*> sStreams; // the audio thread's alone
+    static std::vector<Stream*> sClosed;
     {
         std::lock_guard<std::recursive_mutex> lock(Lock());
         sStreams.clear();
+        sClosed.clear();
         if (sDriver)
         {
             sStreams = sDriver->mStreams;
+            sClosed.swap(sDriver->mClosedStreams);
         }
+    }
+    for (Stream* s : sClosed)
+    {
+        if (s->mFile)
+        {
+            fclose(s->mFile);
+        }
+        delete s;
     }
     for (Stream* s : sStreams)
     {
+        if (!s->mFile && !s->mPath.empty())
+        {
+            s->mFile = fopen(s->mPath.c_str(), "rb");
+            s->mPath.clear();
+        }
         Prefetch(s);
     }
 }
@@ -666,7 +694,10 @@ void SDLCALL AudioCallback(void*, SDL_AudioStream* stream, int additional, int)
                     i++;
                     continue;
                 }
-                fclose(s->mFile);
+                if (s->mFile)
+                {
+                    fclose(s->mFile);
+                }
                 delete s;
                 sDriver->mFadingStreams.erase(sDriver->mFadingStreams.begin() + i);
             }
@@ -839,11 +870,19 @@ void DropFading()
     }
     for (Stream* s : sDriver->mFadingStreams)
     {
-        fclose(s->mFile);
+        sDriver->mClosedStreams.push_back(s);
+    }
+    for (Stream* s : sDriver->mClosedStreams)
+    {
+        if (s->mFile)
+        {
+            fclose(s->mFile);
+        }
         delete s;
     }
     sDriver->mFadingSamples.clear();
     sDriver->mFadingStreams.clear();
+    sDriver->mClosedStreams.clear();
 }
 
 Stream* St(HSTREAM h)
@@ -1171,10 +1210,29 @@ DXDEC void AILCALL AIL_set_digital_master_volume(HDIGDRIVER, S32 master_volume)
 #endif
 }
 
+// A file opened once keeps its format here, and the audio thread opens it again: an open, a read or a
+// close waits for the SD card on the 3DS, tens of milliseconds.
 DXDEC HSTREAM AILCALL AIL_open_stream(HDIGDRIVER, char FAR* filename, S32)
 {
+    static std::map<std::string, WavFormat> sFormats;
+    if (!sDriver)
+    {
+        return NULL;
+    }
+    char real[PATH_MAX];
+    port_resolve_path(filename, real);
     Stream* s = new Stream();
-    if (!sDriver || !OpenWav(s, filename))
+    const std::map<std::string, WavFormat>::const_iterator it = sFormats.find(real);
+    if (it != sFormats.end())
+    {
+        static_cast<WavFormat&>(*s) = it->second;
+        s->mPath = real;
+    }
+    else if (OpenWav(s, real))
+    {
+        sFormats[real] = *s;
+    }
+    else
     {
         if (s->mFile)
         {
@@ -1190,7 +1248,6 @@ DXDEC HSTREAM AILCALL AIL_open_stream(HDIGDRIVER, char FAR* filename, S32)
 
 DXDEC void AILCALL AIL_close_stream(HSTREAM h)
 {
-    std::lock_guard<std::mutex> io(IoLock());
     LOCK;
     if (sDriver && h)
     {
@@ -1208,8 +1265,7 @@ DXDEC void AILCALL AIL_close_stream(HSTREAM h)
             sDriver->mFadingStreams.push_back(St(h));
             return;
         }
-        fclose(St(h)->mFile);
-        delete St(h);
+        sDriver->mClosedStreams.push_back(St(h));
     }
 }
 
