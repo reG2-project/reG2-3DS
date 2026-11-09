@@ -106,6 +106,12 @@ class IRenderer
 
     // Triangles (count multiple of 3).
     virtual void DrawTriangles(const RVertex* pVerts, s32 count, RTexture* pTex, u32 state) = 0;
+    // A triangle or a quad: 3 or 4 corners, a fan from the first.
+    virtual void DrawFan(const RVertex* pVerts, s32 count, RTexture* pTex, u32 state)
+    {
+        const RVertex tris[6] = {pVerts[0], pVerts[1], pVerts[2], pVerts[0], pVerts[2], pVerts[count - 1]};
+        DrawTriangles(tris, count == 4 ? 6 : 3, pTex, state);
+    }
 
     virtual void SetClipRect(f32 left, f32 top, f32 right, f32 bottom) = 0;
 

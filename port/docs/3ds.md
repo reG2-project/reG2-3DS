@@ -101,8 +101,13 @@ what it would read from a texture of their own clamped to its edges (in Azahar, 
 0.02 % of the pixels, from the coordinates' precision). Pages of 1024 cut a little more (53 %) but left up to
 2.6 MB unused per format and ran linear memory out in ste. A draw that differs from the previous one only by
 its texture writes the texture unit's registers and the draw into the command buffer itself, as citro3d
-writes them: `C3D_DrawArrays` also scans the 96 vertex and 96 geometry uniforms and the dirty state on every
+writes them: `C3D_DrawElements` also scans the 96 vertex and 96 geometry uniforms and the dirty state on every
 call. Driving in Azahar, that and the pages cut the batches' submission by 70 %.
+
+The gbh_* layer hands a primitive over as its 3 or 4 corners (`IRenderer::DrawFan`; the OpenGL renderer
+expands them into its list of triangles). citro3d writes them as 4 vertices: each four is drawn as the
+triangles (0, 1, 2) and (0, 2, 3) of an index buffer written once at start, so a quad takes 4 vertices
+rather than 6, and a triangle repeats its last corner (its second triangle is empty).
 
 The game's textures are a cache in linear memory: an 8 MB budget, least recently drawn evicted first and
 converted again on their next draw. Without it, the textures a long session has drawn outgrew the 16 MB
@@ -522,6 +527,24 @@ worst frame:
 
 The worker wrote 72 and 64 % of the jobs (busy at most 5 % of the time); the frames over 42 ms stay at 3 %,
 Azahar's own hitches. Azahar is 4 to 6 times optimistic on the console, so its milliseconds are a guide only.
+
+The draw's primitives: on an Old 3DS driving at night (`GTA2_3DS_PROF`, 26 fps), the draw took 14.9 ms of CPU
+per frame, 11 ms of it in its 346 primitives (235 tiles, 51 sprites), about 30 us each, nearly all in the
+port's gbh_* layer and citro3d backend. The profiler weighs on those parts there: in each timed primitive (one
+in 8) every part reads the system tick, a system call, and the cache misses that follow count in the parts;
+`GTA2_3DS_PROF_SAMPLE=100000` leaves the primitives untimed when only the totals matter. In Azahar (frozen
+frames, primitives untimed), cutting the path at points split a day drive's draw (4.7 ms, 373 primitives)
+into the game's own code 2.4 ms, the gbh_* layer 0.9 ms (the calls down to `RenderVertsUnturned`, the window
+test and the texture lookup about 0.16 ms each, the corners and state 0.43) and citro3d 1.5 ms, half of it the
+draw calls. Since then the profiler's sections cost a test when it is off (they were a call each, seven per
+primitive), `LogCall` returns at once without a command log, `DrawTile`'s turn and flips are one corner
+permutation, a primitive reaches the renderer as its corners (`IRenderer::DrawFan`) without arrays on the
+stack (`-ftrivial-auto-var-init` cleared about 500 bytes per primitive), `OneToOne` compares instead of
+dividing, the rare paths (trace, command log, soft shadows, lighting) are out of line, `NearLights` skips
+the lights below the first asked for, a quad is 4 vertices instead of 6 and unlit vertices carry no world
+position. The draw went from 3.46 to 3.12 ms walking by day, 3.63 to 3.32 by night, 5.15 to 4.64 driving by
+day and 5.43 to 4.94 by night (9 to 10 % in Azahar, which has no cache model), both screens the same to the
+pixel.
 
 Build options, the same walk, three runs each (main thread CPU per frame, logic step): 7.91 and 3.43 ms
 without them; 7.80 and 3.30 with unaligned access (clang's bare metal default goes byte by byte where it
