@@ -300,17 +300,17 @@ bool OneToOne(const RVertex* pVerts, s32 count, const RTexture* pTex)
     const f32 x2 = pVerts[2].x - pVerts[0].x, y2 = pVerts[2].y - pVerts[0].y;
     const f32 u1 = (pVerts[1].u - pVerts[0].u) * tw, v1 = (pVerts[1].v - pVerts[0].v) * th;
     const f32 u2 = (pVerts[2].u - pVerts[0].u) * tw, v2 = (pVerts[2].v - pVerts[0].v) * th;
-    const f32 det = x1 * y2 - x2 * y1;
-    if (fabsf(det) < 1.0f)
+    const f32 det = fabsf(x1 * y2 - x2 * y1);
+    if (det < 1.0f)
     {
         return false;
     }
-    // Texels per logical pixel along x and y.
-    const f32 dudx = (u1 * y2 - u2 * y1) / det, dudy = (u2 * x1 - u1 * x2) / det;
-    const f32 dvdx = (v1 * y2 - v2 * y1) / det, dvdy = (v2 * x1 - v1 * x2) / det;
-    const f32 e = 0.01f;
-    const bool straight = fabsf(fabsf(dudx) - 1.0f) < e && fabsf(dudy) < e && fabsf(dvdx) < e && fabsf(fabsf(dvdy) - 1.0f) < e;
-    const bool turned = fabsf(dudx) < e && fabsf(fabsf(dudy) - 1.0f) < e && fabsf(fabsf(dvdx) - 1.0f) < e && fabsf(dvdy) < e;
+    // Texels per logical pixel along x and y, times |det| (the ARM11 divides slowly).
+    const f32 dudx = fabsf(u1 * y2 - u2 * y1), dudy = fabsf(u2 * x1 - u1 * x2);
+    const f32 dvdx = fabsf(v1 * y2 - v2 * y1), dvdy = fabsf(v2 * x1 - v1 * x2);
+    const f32 e = 0.01f * det;
+    const bool straight = fabsf(dudx - det) < e && dudy < e && dvdx < e && fabsf(dvdy - det) < e;
+    const bool turned = dudx < e && fabsf(dudy - det) < e && fabsf(dvdx - det) < e && dvdy < e;
     return straight || turned;
 }
 
