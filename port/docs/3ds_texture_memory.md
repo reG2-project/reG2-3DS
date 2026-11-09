@@ -28,6 +28,13 @@ streaming texture cache:
 - Should the allocation still fail (no free block big enough), more are freed until it fits. If nothing is
   left to free, the texture draws untextured for that frame and is tried again on the next.
 - An evicted texture is converted again on its next draw (`IRenderer::Evicted`, checked by `Resolve`).
+- Evictable 64x64 textures with mip levels live in a slot of a 512x512 atlas page of their format (see
+  Renderer in `3ds.md`). A slot is an entry of the list as a texture is, and counts for its share of its page
+  (80x80 texels of the 512x512: 1.7 times what a texture of its own takes). Eviction frees the slot; an upload
+  takes a free slot, else adds a page. A page goes once it has no slot left in use, so what the budget does
+  not see is the free slots of partly used pages: at most 0.66 MB per format (RGB565, RGB5A1 and RGBA4 in
+  practice). A slot freed in the current frame is not taken again before the next. Driving in ste for
+  90 s: 8.3 MB of textures in linear memory, against 5.8 MB with a texture of its own for each.
 
 The 16 MB: 4.7 MB taken before any texture (1.5 MB of vertices, citro3d's 1 MB command buffer, the
 screens' framebuffers, audio), 0.65 MB of the port's own textures in game (1.7 MB with the CPU surface in

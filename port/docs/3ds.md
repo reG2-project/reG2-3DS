@@ -93,6 +93,17 @@ ignores alpha, but Azahar hands it on to its window, where pixels drawn with alp
 the frontend's black) let what is behind show through. One frame of vertices lives
 in linear memory; texture frees wait for the GPU.
 
+Consecutive primitives with the same texture, state and scissor make one draw call. The evictable 64x64
+textures with mip levels (the map's tiles, sprites in 64 texel slots) share 512x512 atlas pages, one set per
+texel format, so a run of different tiles is one draw call too: driving, 40 % fewer draw calls. A slot is 80x80,
+the texels and a border that repeats each mip level's edge texels, one texel wide at 8x8, so filtering reads
+what it would read from a texture of their own clamped to its edges (in Azahar, at most 1 off in a channel on
+0.02 % of the pixels, from the coordinates' precision). Pages of 1024 cut a little more (53 %) but left up to
+2.6 MB unused per format and ran linear memory out in ste. A draw that differs from the previous one only by
+its texture writes the texture unit's registers and the draw into the command buffer itself, as citro3d
+writes them: `C3D_DrawArrays` also scans the 96 vertex and 96 geometry uniforms and the dirty state on every
+call. Driving in Azahar, that and the pages cut the batches' submission by 70 %.
+
 The game's textures are a cache in linear memory: an 8 MB budget, least recently drawn evicted first and
 converted again on their next draw. Without it, the textures a long session has drawn outgrew the 16 MB
 and showed white. Design and measurements: `3ds_texture_memory.md`.
