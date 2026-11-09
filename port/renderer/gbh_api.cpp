@@ -130,6 +130,10 @@ const u32* gFlipCounter;
 
 void LogCall(const char* func, u32 flags, STexture* t, u32 colour)
 {
+    if (!gCmd.Enabled())
+    {
+        return;
+    }
     if (gFlipCounter)
     {
         gCmd.Update(*gFlipCounter);
