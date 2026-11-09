@@ -93,10 +93,10 @@ int main(int argc, char** argv)
         SDL_Log("SDL_Init: %s", SDL_GetError());
         return 1;
     }
+    // Also on the game's exit() after an error: SDL's audio thread must stop before the heap goes (3DS).
+    atexit(SDL_Quit);
     port_RegisterRenderer();
     port_InitTestInput();
 
-    const int result = WinMain(reinterpret_cast<HINSTANCE>(1), NULL, &cmdLine[0], SW_SHOWNORMAL);
-    SDL_Quit();
-    return result;
+    return WinMain(reinterpret_cast<HINSTANCE>(1), NULL, &cmdLine[0], SW_SHOWNORMAL);
 }
