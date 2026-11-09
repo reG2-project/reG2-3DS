@@ -217,7 +217,9 @@ to the first city frame takes about 15 seconds there.
 
 Tests: `test/pad_input.txt` presses buttons, one `<first frame> <last frame> <hex KEY_* mask>` per line
 (frames as `port_FrameCount` counts them), for example `150 170 8` for START; the `KEY_CPAD_*` and
-`KEY_CSTICK_*` bits push the circle pad and the C-stick all the way. `GTA2_TEST_CAR=<frame>:<model>[:<dx>:<dy>]`
+`KEY_CSTICK_*` bits push the circle pad and the C-stick all the way, and two more numbers push the circle pad
+part of the way, as `hidCircleRead` gives it (up positive, about 154 at the end of the travel), for example
+`600 700 0 -109 109` for up and left. `GTA2_TEST_CAR=<frame>:<model>[:<dx>:<dy>]`
 puts a car of that model (54 the tank) beside the player at that frame, who then gets in.
 
 ## Buttons

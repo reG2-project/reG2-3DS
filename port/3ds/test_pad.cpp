@@ -1,6 +1,7 @@
 // Scripted buttons for tests, as GTA2_INPUT is for keys: test/pad_input.txt in the game folder holds
-// lines "<first frame> <last frame> <hex KEY_* mask>", frames as port_FrameCount counts them. The
-// KEY_CPAD_* and KEY_CSTICK_* bits push the circle pad and the C-stick all the way.
+// lines "<first frame> <last frame> <hex KEY_* mask> [<dx> <dy>]", frames as port_FrameCount counts them. The
+// KEY_CPAD_* and KEY_CSTICK_* bits push the circle pad and the C-stick all the way; dx and dy, the circle pad's
+// own values (hidCircleRead's, up positive), push it part of the way.
 // GTA2_TEST_SUSPEND=<frame>,<seconds>: HOME's suspend and resume at that frame, with the main thread held
 // in between as aptMainLoop holds it, then the steps run in the second after the resume are logged.
 #include <3ds.h>
@@ -24,12 +25,16 @@ struct Press
     unsigned first;
     unsigned last;
     unsigned long keys;
+    int dx;
+    int dy;
 };
 
 std::vector<Press> sPresses;
 bool sLoaded;
 u32 sHeld;
 u32 sPrevHeld;
+s16 sCircleX; // a press's dx and dy
+s16 sCircleY;
 unsigned sSuspendFrame;
 unsigned sSuspendSeconds;
 u64 sResumeMs;
@@ -47,10 +52,14 @@ void Load()
     {
         return;
     }
-    Press p;
-    while (fscanf(f, "%u %u %lx", &p.first, &p.last, &p.keys) == 3)
+    char line[128];
+    while (fgets(line, sizeof(line), f))
     {
-        sPresses.push_back(p);
+        Press p = {};
+        if (sscanf(line, "%u %u %lx %d %d", &p.first, &p.last, &p.keys, &p.dx, &p.dy) >= 3)
+        {
+            sPresses.push_back(p);
+        }
     }
     fclose(f);
 }
@@ -81,11 +90,14 @@ extern "C" void __wrap_hidScanInput()
     }
     sPrevHeld = sHeld;
     sHeld = 0;
+    sCircleX = sCircleY = 0;
     for (const Press& p : sPresses)
     {
         if (frame >= p.first && frame <= p.last)
         {
             sHeld |= p.keys;
+            sCircleX = p.dx ? static_cast<s16>(p.dx) : sCircleX;
+            sCircleY = p.dy ? static_cast<s16>(p.dy) : sCircleY;
         }
     }
 }
@@ -120,6 +132,11 @@ void PushStick(circlePosition* pPos, u32 right, u32 left, u32 up, u32 down)
 extern "C" void __wrap_hidCircleRead(circlePosition* pPos)
 {
     __real_hidCircleRead(pPos);
+    if (pPos && (sCircleX || sCircleY))
+    {
+        pPos->dx = sCircleX;
+        pPos->dy = sCircleY;
+    }
     PushStick(pPos, KEY_CPAD_RIGHT, KEY_CPAD_LEFT, KEY_CPAD_UP, KEY_CPAD_DOWN);
 }
 
