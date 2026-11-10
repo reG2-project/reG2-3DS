@@ -682,12 +682,6 @@ void BeginFrame()
     sLogFrames++;
 }
 
-// A system call per read, every layer: left out without the profiler.
-uint64_t LayerTicks()
-{
-    return PortProf::gOn ? MapCacheMesh::Ticks() : 0;
-}
-
 void Log()
 {
     if (sLogFrames < kLogEvery)
@@ -705,7 +699,7 @@ void Log()
     // Per frame but for the builds.
     Log3DS_Printf("MAPCACHE frames %u built %d builds %u drops %u quads %.1f draws %.1f mismatch %u cpulit %u invalid %u "
                   "build.ms %.2f (textures %.2f, slowest %.2f) draw.ms %.3f (flush %.3f switch %.3f draws %.3f "
-                  "[through citro3d %.3f, raw %.3f] back %.3f) begin.ms %.3f mesh.kb %u linear.free.kb %u cells %.1f skipped %.1f\n",
+                  "[first DrawArrays %.3f, others %.3f] back %.3f) begin.ms %.3f mesh.kb %u linear.free.kb %u cells %.1f skipped %.1f\n",
                   (unsigned)sLogFrames, (int)sBuilt, (unsigned)sBuilds, (unsigned)sDrops, sQuadsDrawn / n, sDrawCalls / n,
                   (unsigned)sMismatches, (unsigned)sCpuLit, (unsigned)sInvalid, MapCacheMesh::TicksToMs(sBuildTicks),
                   MapCacheMesh::TicksToMs(sBuildTexTicks), MapCacheMesh::TicksToMs(sBuildMax),
@@ -752,7 +746,7 @@ void BeginLayer(s32 z, s32 minX, s32 minY, s32 maxX, s32 maxY)
         return;
     }
     sLayer = z;
-    const uint64_t t0 = LayerTicks();
+    const uint64_t t0 = MapCacheMesh::Ticks();
     minX = minX < 0 ? 0 : minX;
     minY = minY < 0 ? 0 : minY;
     maxX = maxX > 255 ? 255 : maxX;
@@ -838,7 +832,7 @@ void BeginLayer(s32 z, s32 minX, s32 minY, s32 maxX, s32 maxY)
             PORT_PROF_COUNT(kMcDrawn, 1);
         }
     }
-    sBeginTicks += LayerTicks() - t0;
+    sBeginTicks += MapCacheMesh::Ticks() - t0;
 }
 
 bool TakeLid(u16 lid)
@@ -907,7 +901,7 @@ void EndLayer(s32 z)
         return;
     }
     PORT_PROF(kDrawMapCache);
-    const uint64_t t0 = LayerTicks();
+    const uint64_t t0 = MapCacheMesh::Ticks();
     sDraws.clear();
     const f32 scale = view.scale, rhw = view.rhw, centreX = view.centreX, centreY = view.centreY;
     const s32 rowMin = view.rowMin, rowMax = view.rowMax;
@@ -981,7 +975,7 @@ void EndLayer(s32 z)
         MapCacheMesh::DrawAll(&sDraws[0], (s32)sDraws.size(), sLit);
         sDrawCalls += (u32)sDraws.size();
     }
-    sDrawTicks += LayerTicks() - t0;
+    sDrawTicks += MapCacheMesh::Ticks() - t0;
 }
 
 void Invalidate(s32 x, s32 y)
