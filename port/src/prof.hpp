@@ -1,8 +1,6 @@
 // GTA2_3DS_PROF=<frames>: the times of the game's parts, and counts, on stderr every <frames> frames
-// (port/3ds/prof_3ds.cpp). 3DS only: elsewhere the macros are empty.
+// (port/3ds/prof_3ds.cpp). 3DS only: elsewhere the macros do nothing.
 #pragma once
-
-#if defined(__3DS__)
 
 namespace PortProf
 {
@@ -144,10 +142,16 @@ enum Count
     kCountCount
 };
 
+const unsigned kSkip = 0xFFFF;
+} // namespace PortProf
+
+#if defined(__3DS__)
+
+namespace PortProf
+{
 extern bool gOn;
 // The scale of scopes inside a primitive: 0 outside one, kSkip in one that is not sampled.
 extern unsigned gPrimScale;
-const unsigned kSkip = 0xFFFF;
 extern unsigned gCounts[kCountCount];
 
 // A timed entry on the stack, or -1. Scale: what its time and call count are multiplied by.
@@ -233,35 +237,44 @@ class PrimScope
 };
 } // namespace PortProf
 
-#define PORT_PROF_CAT2(a, b) a##b
-#define PORT_PROF_CAT(a, b) PORT_PROF_CAT2(a, b)
 // Times the rest of the enclosing block.
 #define PORT_PROF(part) PortProf::Scope PORT_PROF_CAT(portProf, __LINE__)(PortProf::part)
 // The same, with the part chosen at run time: an expression of PortProf::Part.
 #define PORT_PROF_AS(expr) PortProf::Scope PORT_PROF_CAT(portProf, __LINE__)(PortProf::gOn ? (expr) : PortProf::kStep)
 #define PORT_PROF_EXCLUDED(part) PortProf::ExcludedScope PORT_PROF_CAT(portProf, __LINE__)(PortProf::part)
 #define PORT_PROF_PRIM(part) PortProf::PrimScope PORT_PROF_CAT(portProf, __LINE__)(PortProf::part)
+#define PORT_PROF_RESET() PortProf::Reset()
+
+#else
+
+// Off and folded away. The macros below keep their conditions all the same, so that a function's PGO hash
+// (port/3ds/pgo) is the one of its 3DS build.
+namespace PortProf
+{
+constexpr bool gOn = false;
+constexpr unsigned gPrimScale = 0;
+extern unsigned gCounts[kCountCount];
+void Section(Part part);
+void EndSection();
+void AddMs(Part part, float ms);
+void EndStep();
+void EndFrame();
+} // namespace PortProf
+
+#define PORT_PROF(part)
+#define PORT_PROF_AS(expr) (void)(PortProf::gOn ? (expr) : PortProf::kStep)
+#define PORT_PROF_EXCLUDED(part)
+#define PORT_PROF_PRIM(part)
+#define PORT_PROF_RESET()
+
+#endif
+
+#define PORT_PROF_CAT2(a, b) a##b
+#define PORT_PROF_CAT(a, b) PORT_PROF_CAT2(a, b)
 // Times from here to the next section or PORT_PROF_END in the same scope.
 #define PORT_PROF_SECTION(part) (PortProf::gOn && PortProf::gPrimScale != PortProf::kSkip ? PortProf::Section(PortProf::part) : (void)0)
 #define PORT_PROF_END() (PortProf::gOn && PortProf::gPrimScale != PortProf::kSkip ? PortProf::EndSection() : (void)0)
 #define PORT_PROF_COUNT(count, n) (PortProf::gOn ? (void)(PortProf::gCounts[PortProf::count] += (n)) : (void)0)
 #define PORT_PROF_ADD_MS(part, ms) (PortProf::gOn ? PortProf::AddMs(PortProf::part, (ms)) : (void)0)
-#define PORT_PROF_RESET() PortProf::Reset()
 #define PORT_PROF_END_STEP() (PortProf::gOn ? PortProf::EndStep() : (void)0)
 #define PORT_PROF_END_FRAME() (PortProf::gOn ? PortProf::EndFrame() : (void)0)
-
-#else
-
-#define PORT_PROF(part)
-#define PORT_PROF_AS(expr)
-#define PORT_PROF_EXCLUDED(part)
-#define PORT_PROF_PRIM(part)
-#define PORT_PROF_SECTION(part)
-#define PORT_PROF_END()
-#define PORT_PROF_COUNT(count, n)
-#define PORT_PROF_ADD_MS(part, ms)
-#define PORT_PROF_RESET()
-#define PORT_PROF_END_STEP()
-#define PORT_PROF_END_FRAME()
-
-#endif

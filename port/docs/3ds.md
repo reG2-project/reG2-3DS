@@ -50,12 +50,13 @@ Each is small and makes sense on `port/m0` too:
 
 - clang compiles (`--target=armv6k-none-eabihf`), as on Linux: the game needs its MSVC extensions.
   devkitARM's GCC links, with newlib, libstdc++ and libctru. The image of `port/3ds/Dockerfile` is the
-  official `devkitpro/devkitarm` with `clang-22` and its linker plugin (`llvm-22-linker-tools`) added.
+  official `devkitpro/devkitarm` with `clang-22`, its linker plugin (`llvm-22-linker-tools`) and `llvm-22`
+  (`llvm-profdata-22`, for the PGO profile) added.
 - ARM code (not Thumb) for the ARM11 MPCore with VFPv2 (`-mcpu=mpcore -mfpu=vfpv2`), -O2
   (RelWithDebInfo), strict alignment (with `-munaligned-access` clang merged stores into an STRD at an odd
-  address, which the ARM11 faults on; Azahar does not check), and
+  address, which the ARM11 faults on; Azahar does not check),
   full link time optimisation: the objects are LLVM bitcode, which devkitARM's ld compiles through
-  clang's plugin (`LLVMgold.so`). See Old 3DS, Speed.
+  clang's plugin (`LLVMgold.so`), and profile guided optimisation (Build). See Old 3DS, Speed.
 - GCC for ARM uses short enums, clang int-sized ones: SDL3 is built with `-fno-short-enums`
   (`build_sdl3.sh`), since the port shares SDL's structs. libctru and citro3d keep short enums; the
   renderer only passes their enums by value.
@@ -237,6 +238,54 @@ docker run --rm -u $(id -u):$(id -g) -v $PWD:$PWD -v $SDL:$SDL -w $PWD gta2-3ds-
 
 The result is `build_3ds/gta2.3dsx` (about 2.3 MB). Its Homebrew Launcher icon (48x48) is drawn from plain
 shapes by `make_icon.py` at build time (python3 is in the image), so no game art is involved.
+
+### Profile guided optimisation
+
+The build optimises with the counts of the Linux port playing the game (`GTA2_3DS_PGO`, on by default;
+`-DGTA2_3DS_PGO=OFF` builds without). `port/3ds/pgo/gta2.proftext` keeps them as text, which the image's
+`llvm-profdata-22` indexes at build time whatever LLVM wrote it, and every file is compiled with
+`-fprofile-instr-use`. The counts travel in the bitcode to the LTO link: inlining, block layout (the
+taken path falls through, cold blocks go to the end of the function), hot functions in `.text.hot`, the
+never run ones in `.text.unlikely` and optimised for size. The game behaves the same, only the code's
+layout changes.
+
+A function takes its counts only if its control flow is the profiled one (clang hashes it): code under
+`#if __3DS__` keeps the static heuristics, and `port/src/prof.hpp`'s macros have the same conditions on
+every platform for this. Of the 5,887 functions of the 3DS build, 5,519 take their counts, 23 do not match
+(0.14 % of the calls: the DSP path of `compat/src/miles.cpp`, a few in `gbh_api.cpp` and `frame_loop.cpp`,
+the x86 asm of `gtx_0x106C.cpp`, 3DS functions named as Linux ones) and 345 have none, nearly all in the 3DS's
+own files. Functions the scenes never ran count as cold.
+
+A cache simulation of the Linux port (16 KB 4-way L1 caches, its x86 code layout, the instruction
+addresses also scaled by 1.3 for ARM code; a drive and a walk in ste other than the profiled scenes), per
+logic step without and with PGO, the second figure with the functions in link order as on the 3DS:
+
+| | I1 misses | I1, ARM scale | D1 misses | blocks run |
+|---|---|---|---|---|
+| drive | 24,363 to 19,935 / 18,629 | 33,596 to 27,024 / 26,517 | 9,326 to 9,212 / 9,315 | -2.6 % |
+| walk | 19,251 to 15,364 / 14,291 | 26,954 to 20,731 / 20,262 | 8,754 to 8,802 / 8,736 | -2.5 % |
+
+So 20 to 25 % fewer instruction cache misses in the logic, about 1 ms of a night drive's step on an Old 3DS
+at 40 to 50 cycles a miss, and none fewer for data; the draw's shared code (the OpenGL renderer aside)
+misses half as often. Per-50-step hashes of the cars, peds and `rand` are the same with and without, in
+Azahar (walk and drive, day and night, up to 2,600 steps) and on Linux (2,000 steps, the sound queue
+included), and so are Azahar's frozen frames. The sound
+queue's own count can drift by a few samples after a while in Azahar: it asks the DSP which channels still
+play, so it depends on timing, and the same build drifts between the day and the night run of a drive.
+Azahar, which counts instructions, gives the step 8 % less time (2.75 to 2.52 ms driving by night). The
+`.3dsx` grows by 90 KB.
+
+After larger changes to the shared code, regenerate the profile (stale functions only lose their counts):
+
+```bash
+port/3ds/pgo/train.sh <game folder with data/> <work folder>
+```
+
+It builds the Linux port (`port/toolchain-linux32-clang.cmake` and its 32-bit dependencies; `SETUP_DEPS`
+for `GTA2_SETUP_DEPS_DIR`) with `-fprofile-instr-generate`, plays six scripted scenes at once, headless and
+silent (about 2 minutes): a fast car by night and by day and the tank firing into traffic in wil, the tank
+in ste, a walk in ste, the frontend and the pause menu. It merges their counts into `gta2.proftext` with the
+host's `llvm-profdata` (about 650 KB, 140 KB compressed in git).
 
 ### Sound
 

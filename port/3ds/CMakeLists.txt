@@ -75,6 +75,22 @@ endforeach()
 if(GTA2_3DS_FLAGS)
     target_compile_options(gta2 PRIVATE "SHELL:${GTA2_3DS_FLAGS}")
 endif()
+# Profile guided optimisation with the Linux port's counts (pgo/train.sh), kept as text and indexed by the
+# image's llvm-profdata. Functions whose code differs from the profiled build's keep the static heuristics.
+option(GTA2_3DS_PGO "Optimise with the profile of GTA2_3DS_PGO_PROFILE" ON)
+set(GTA2_3DS_PGO_PROFILE ${CMAKE_CURRENT_LIST_DIR}/pgo/gta2.proftext CACHE FILEPATH "Text profile for GTA2_3DS_PGO")
+find_program(LLVM_PROFDATA llvm-profdata-${CLANG_VERSION})
+if(GTA2_3DS_PGO AND NOT LLVM_PROFDATA)
+    message(WARNING "No llvm-profdata-${CLANG_VERSION} (an older build image): building without PGO")
+elseif(GTA2_3DS_PGO)
+    set(profdata ${CMAKE_CURRENT_BINARY_DIR}/gta2.profdata)
+    add_custom_command(OUTPUT ${profdata}
+        COMMAND ${LLVM_PROFDATA} merge -o ${profdata} ${GTA2_3DS_PGO_PROFILE}
+        DEPENDS ${GTA2_3DS_PGO_PROFILE} VERBATIM)
+    target_compile_options(gta2 PRIVATE -fprofile-instr-use=${profdata})
+    get_target_property(gta2_src gta2 SOURCES)
+    set_property(SOURCE ${gta2_src} APPEND PROPERTY OBJECT_DEPENDS ${profdata})
+endif()
 separate_arguments(render_flags UNIX_COMMAND "${GTA2_3DS_RENDER_FLAGS}")
 separate_arguments(hot_flags UNIX_COMMAND "${GTA2_3DS_HOT_FLAGS}")
 set_property(SOURCE ${render_src} APPEND PROPERTY COMPILE_OPTIONS ${render_flags} ${hot_flags})
