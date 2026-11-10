@@ -356,8 +356,10 @@ the same in New 3DS mode, which runs the same clock; Azahar leaves out the GPU's
 `GTA2_AUDIO_DRIVER=dummy` runs the sound without the DSP, `GTA2_3DS_VRAM=0` keeps the textures in linear memory
 (`GTA2_3DS_STATS` logs what VRAM holds, the DMA copies and the waits for them), `GTA2_3DS_UPLOAD_WORKER=0` makes the textures' levels on
 the main thread (see Renderer; `GTA2_3DS_STATS` logs the worker's time and the jobs the main thread wrote), `GTA2_3DS_MINIMAP=wide` or `off` sets the
-minimap's place (see Renderer) and `GTA2_3DS_STEREO=<pixels>` the stereo's strength (see Stereo, 0 for none).
-To boot into a city, the registry's `Debug` keys
+minimap's place (see Renderer), `GTA2_3DS_STEREO=<pixels>` the stereo's strength (see Stereo, 0 for none),
+`GTA2_3DS_EYES=<frame>,...` writes the top screen's left and right framebuffers of those renderer frames to
+`test/eyes_<frame>.bin` (BGR8 as the screen holds them, 240 by 400 each, the left eye's first; `port/3ds/eyes_png.py`
+makes PNGs of them, side by side and red-cyan too). To boot into a city, the registry's `Debug` keys
 `skip_frontend`, `mapname`, `stylename` and `scriptname` (see `Source/debug.cpp`).
 
 `GTA2_3DS_PROF=150` (`port/3ds/prof_3ds.cpp`) logs every 150 frames of a game where the main thread's time goes.

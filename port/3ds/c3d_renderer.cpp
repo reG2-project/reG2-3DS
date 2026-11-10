@@ -678,6 +678,12 @@ struct C3DRenderer::Impl : HudTheme::Sink
     f32 mRightEye;
     u32* mStereoList;
     u32 mStereoWords;
+    // GTA2_3DS_EYES=<frame>,...: the top screen's framebuffers of those frames written to test/eyes_<frame>.bin (BGR8, as
+    // the screen holds them, the left eye's then the right's), once the GPU is done with the frame.
+    std::vector<u32> mEyeFrames;
+    u8* mEyeShot[2];
+    u32 mEyeShotFrame;
+    void WriteEyeShot();
 
     ScreenRect ToScreen(f32 left, f32 top, f32 right, f32 bottom) const;
     void BeginFrame();
@@ -1294,6 +1300,10 @@ void C3DRenderer::Impl::BeginFrame()
         C3D_FrameBegin(0);
     }
     Stats3DS_AddFrameBegin(svcGetSystemTick() - t0);
+    if (mEyeShot[0])
+    {
+        WriteEyeShot();
+    }
     // Those of the previous frame, now over.
     PORT_PROF_ADD_MS(kGpu, C3D_GetDrawingTime());
     PORT_PROF_ADD_MS(kC3dCpu, C3D_GetProcessingTime());
@@ -1417,6 +1427,26 @@ void C3DRenderer::Impl::SubmitStereo()
     GX_ProcessCommandList(mStereoList, mStereoWords * 4, GX_CMDLIST_FLUSH);
     C3DContextTransferLeft();
     GX_ProcessCommandList(mStereoList, mStereoWords * 4, 0);
+}
+
+void C3DRenderer::Impl::WriteEyeShot()
+{
+    const u32 bytes = 240 * 400 * 3;
+    char name[64];
+    snprintf(name, sizeof(name), "test/eyes_%lu.bin", mEyeShotFrame);
+    if (FILE* f = fopen(name, "wb"))
+    {
+        std::vector<u8> copy(bytes);
+        for (s32 i = 0; i < 2; i++)
+        {
+            // Copied first: Azahar writes out what its GPU drew for the CPU's reads only, not the SD card's.
+            GSPGPU_InvalidateDataCache(mEyeShot[i], bytes);
+            memcpy(&copy[0], mEyeShot[i], bytes);
+            fwrite(&copy[0], 1, bytes, f);
+        }
+        fclose(f);
+    }
+    mEyeShot[0] = mEyeShot[1] = 0;
 }
 
 // fan: pVerts is a triangle or a quad (DrawFan), else a list of triangles.
@@ -2072,6 +2102,10 @@ bool C3DRenderer::Init(Loader, const char** ppError)
     const char* pStereo = getenv("GTA2_3DS_STEREO");
     p->mStereoPx = pStereo ? (f32)atof(pStereo) : kStereoPx;
     p->mEyeDepth = 6.0f;
+    for (const char* pEyes = getenv("GTA2_3DS_EYES"); pEyes && *pEyes; pEyes = strchr(pEyes, ',') ? strchr(pEyes, ',') + 1 : "")
+    {
+        p->mEyeFrames.push_back((u32)atoi(pEyes));
+    }
     // GTA2_3DS_VRAM=0: textures in linear memory only.
     const char* pVram = getenv("GTA2_3DS_VRAM");
     p->mGxQueue = &__C3D_Context;
@@ -2337,6 +2371,12 @@ void C3DRenderer::Present(s32, s32)
     if (p->mStereo)
     {
         p->SubmitStereo();
+    }
+    if (std::find(p->mEyeFrames.begin(), p->mEyeFrames.end(), p->mFrame) != p->mEyeFrames.end())
+    {
+        p->mEyeShot[0] = gfxGetFramebuffer(GFX_TOP, GFX_LEFT, NULL, NULL);
+        p->mEyeShot[1] = gfxGetFramebuffer(GFX_TOP, GFX_RIGHT, NULL, NULL);
+        p->mEyeShotFrame = p->mFrame;
     }
     const u64 t0 = svcGetSystemTick();
     {
