@@ -99,9 +99,10 @@ set(icon ${CMAKE_CURRENT_BINARY_DIR}/icon.png)
 add_custom_command(OUTPUT ${icon}
     COMMAND python3 ${CMAKE_CURRENT_LIST_DIR}/make_icon.py ${icon}
     DEPENDS ${CMAKE_CURRENT_LIST_DIR}/make_icon.py VERBATIM)
+set(GTA2_3DS_TITLE "GTA2" CACHE STRING "The Homebrew Launcher's title, at most 64 characters")
 set(smdh ${CMAKE_CURRENT_BINARY_DIR}/gta2.smdh)
 add_custom_command(OUTPUT ${smdh}
-    COMMAND ${DEVKITPRO}/tools/bin/smdhtool --create "GTA2" "Grand Theft Auto 2, from the gta2_re decompilation. Needs the PC game's data."
+    COMMAND ${DEVKITPRO}/tools/bin/smdhtool --create "${GTA2_3DS_TITLE}" "Grand Theft Auto 2, from the gta2_re decompilation. Needs the PC game's data."
             "gta2_re" ${icon} ${smdh}
     DEPENDS ${icon} VERBATIM)
 add_custom_command(OUTPUT gta2.3dsx
