@@ -7,6 +7,7 @@
 #include "../src/hud_screen.hpp"
 #include "hud_theme.hpp"
 #include "minimap.hpp"
+#include "stereo_game.hpp"
 #include <3ds.h>
 #include <citro3d.h>
 #include <algorithm>
@@ -79,6 +80,16 @@ const s32 kScreenW = 400;
 const s32 kScreenH = 240;
 const s32 kBottomW = 320;
 const s32 kBottomH = 240;
+// Stereo: the eye's fixed attribute in render.v.pica's attributes (v4) and in map_cache.v.pica's (v2); the parallax
+// between these depths (w), the world's, not the HUD's 1 and 10000.
+const s32 kEyeAttrib = 4;
+const s32 kMeshEyeAttrib = 2;
+const f32 kWorldDepthMin = 1.01f;
+const f32 kWorldDepthMax = 1000.0f;
+// Each eye's shift in pixels at full slider, per unit of 1 - w0 / w (GTA2_3DS_STEREO; 0 keeps the top screen 2D), and
+// how fast the screen plane's depth w0 follows the player's, per frame.
+const f32 kStereoPx = 3.0f;
+const f32 kEyeDepthEase = 0.25f;
 const s32 kMaxTexSize = 1024;
 // The bottom screen is drawn in one frame of that many (the game leaves its HUD draws out of the others), and only
 // when what it shows changed.
@@ -102,8 +113,10 @@ const u32 kMinStaging = 1024;
 // libctru's VRAM allocator takes its pools as all free again once bank A has no free block left (vramMemAlignAt tests
 // the pool's first block): a hole of this size between two blocks kept always leaves one.
 const u32 kVramHole = 0x80;
-// GX queue entries left for citro3d: the frame's command list, the screens' transfers and clears.
+// GX queue entries left for citro3d: the frame's command list, the screens' transfers and clears; in stereo, the top
+// screen's commands twice and the left eye's transfer too.
 const u16 kQueueReserve = 8;
+const u16 kStereoQueueEntries = 3;
 const u32 kBatchStateMask = RS_ALPHA_TEST | RS_BLEND_ALPHA | RS_BLEND_ADD | RS_FILTER_LINEAR | RS_NO_TEXTURE;
 // Evictable 64x64 textures with mip levels (tiles, 64 texel sprite slots) share atlas pages by format: one batch for a
 // run of them. Each level's border repeats its edges (a texel at 8x8), so filtering sees a clamped texture of its own.
@@ -660,9 +673,30 @@ struct C3DRenderer::Impl : HudTheme::Sink
     std::vector<RTexture*> mUploading;
     bool mWarnedVerts, mWarnedCmdBuf, mWarnedAlloc;
     C3DRenderer* mOwner;
+    // Stereo (3D slider up, the world drawn in the last frame): the commands up to the end of the top screen's draws,
+    // mStereoList once split, run once per eye. mStereoPx: kStereoPx or GTA2_3DS_STEREO; mEyeDepth: the screen plane's w.
+    bool mStereo;
+    bool mSliderUp;
+    bool mWorldDrawn, mWorldDrawnLast;
+    f32 mStereoPx;
+    f32 mEyeDepth;
+    f32 mRightEye;
+    u32* mStereoList;
+    u32 mStereoWords;
+    // GTA2_3DS_EYES=<frame>,...: the top screen's framebuffers of those frames written to test/eyes_<frame>.bin (BGR8, as
+    // the screen holds them, the left eye's then the right's), once the GPU is done with the frame.
+    std::vector<u32> mEyeFrames;
+    u8* mEyeShot[2];
+    u32 mEyeShotFrame;
+    void WriteEyeShot();
 
     ScreenRect ToScreen(f32 left, f32 top, f32 right, f32 bottom) const;
     void BeginFrame();
+    void BeginStereo();
+    void WriteEye(f32 shift);
+    void EndStereoTop();
+    void SubmitStereo();
+    u16 QueueReserve() const { return kQueueReserve + (mStereo ? kStereoQueueEntries : 0); }
     void Append(const RVertex* pVerts, s32 count, RTexture* pTex, u32 state, f32 offset, const ScreenRect& scissor, const HudRule* pRule,
                 bool fan = false);
     void DrawGame(const RVertex* pVerts, s32 count, RTexture* pTex, u32 state, bool fan);
@@ -945,7 +979,7 @@ void C3DRenderer::Impl::FreePage(size_t i)
 // frame only: citro3d's queue then runs at C3D_FrameEnd, ahead of the frame's command list, or here when short.
 void C3DRenderer::Impl::CopyToVram(const u8* pSrc, u8* pDst, u32 rowBytes, u32 rows, u32 dstPitch)
 {
-    if (mGxQueue->numEntries + 1 + kQueueReserve > mGxQueue->maxEntries)
+    if (mGxQueue->numEntries + 1 + QueueReserve() > mGxQueue->maxEntries)
     {
         DrainCopies();
     }
@@ -1271,6 +1305,10 @@ void C3DRenderer::Impl::BeginFrame()
         C3D_FrameBegin(0);
     }
     Stats3DS_AddFrameBegin(svcGetSystemTick() - t0);
+    if (mEyeShot[0])
+    {
+        WriteEyeShot();
+    }
     // Those of the previous frame, now over.
     PORT_PROF_ADD_MS(kGpu, C3D_GetDrawingTime());
     PORT_PROF_ADD_MS(kC3dCpu, C3D_GetProcessingTime());
@@ -1297,6 +1335,7 @@ void C3DRenderer::Impl::BeginFrame()
         C3D_RenderTargetClear(mTarget, C3D_CLEAR_COLOR, 0x000000FF, 0);
         mNeedClear = false;
     }
+    BeginStereo();
     C3D_FrameDrawOn(mTarget);
     mTargetW = kScreenW;
     mTargetH = kScreenH;
@@ -1307,6 +1346,7 @@ void C3DRenderer::Impl::BeginFrame()
     AttrInfo_AddLoader(pAttr, 1, GPU_UNSIGNED_BYTE, 4);
     AttrInfo_AddLoader(pAttr, 2, GPU_FLOAT, 2);
     AttrInfo_AddLoader(pAttr, 3, GPU_FLOAT, 4);
+    AttrInfo_AddFixed(pAttr, kEyeAttrib);
     C3D_BufInfo* pBuf = C3D_GetBufInfo();
     BufInfo_Init(pBuf);
     BufInfo_Add(pBuf, mVerts, sizeof(C3DVertex), 4, 0x3210);
@@ -1319,6 +1359,99 @@ void C3DRenderer::Impl::BeginFrame()
     mBatchTex = 0;
     mStateValid = false;
     mBoundTex = 0;
+}
+
+// Stereo or not for this frame, the eye's attribute for the left eye or none. The left eye's goes ahead in a command list
+// of its own: from here on, the commands run once per eye.
+void C3DRenderer::Impl::BeginStereo()
+{
+    const f32 slider = mStereoPx > 0.0f ? osGet3DSliderState() : 0.0f;
+    const bool stereo = slider > 0.0f && mWorldDrawnLast;
+    mSliderUp = slider > 0.0f;
+    mWorldDrawnLast = mWorldDrawn;
+    mWorldDrawn = false;
+    if (stereo != mStereo)
+    {
+        C3DContextSetStereo(stereo);
+        mStereo = stereo;
+    }
+    const f32 depth = StereoGame::PlayerDepth();
+    if (depth >= kWorldDepthMin && depth < kWorldDepthMax)
+    {
+        mEyeDepth += (depth - mEyeDepth) * kEyeDepthEase;
+    }
+    if (!stereo)
+    {
+        WriteEye(0.0f);
+        return;
+    }
+    // Clip y runs right to left on the screen (Mtx_OrthoTilt): the left eye sees what is beyond the plane moved left.
+    const f32 shift = slider * mStereoPx * 2.0f / kScreenW;
+    mRightEye = -shift;
+    WriteEye(shift);
+    u32* pList;
+    u32 words;
+    GPUCMD_Split(&pList, &words);
+    GX_ProcessCommandList(pList, words * 4, GX_CMDLIST_FLUSH);
+    // The second run starts from the state the first left: the program and every uniform are written again here, the
+    // rest of the state BeginFrame and ApplyState set at the first draw.
+    shaderProgramConfigure(&mProgram, true, false);
+    for (s32 i = 0; i < mUniLights + 2 * kMaxShaderLights; i++)
+    {
+        C3D_FVUnifDirty[GPU_VERTEX_SHADER][i] = true;
+    }
+    C3D_IVUnifDirty[GPU_VERTEX_SHADER][mUniLightLoop] = true;
+    C3D_BoolUnifsDirty[GPU_VERTEX_SHADER] = true;
+}
+
+// Both shaders' eye attribute, written into the commands at this point: citro3d writes its fixed attributes at the next
+// draw, which may be in the commands run twice.
+void C3DRenderer::Impl::WriteEye(f32 shift)
+{
+    const s32 attribs[2] = {kEyeAttrib, kMeshEyeAttrib};
+    for (s32 i = 0; i < 2; i++)
+    {
+        GPUCMD_AddWrite(GPUREG_FIXEDATTRIB_INDEX, attribs[i]);
+        C3D_ImmSendAttrib(shift, mEyeDepth, kWorldDepthMin, kWorldDepthMax);
+    }
+}
+
+// The end of the commands run twice: the target written out for the left eye's transfer, the right eye's parallax.
+void C3DRenderer::Impl::EndStereoTop()
+{
+    GPUCMD_AddWrite(GPUREG_FRAMEBUFFER_FLUSH, 1);
+    GPUCMD_AddWrite(GPUREG_FRAMEBUFFER_INVALIDATE, 1);
+    WriteEye(mRightEye);
+    GPUCMD_Split(&mStereoList, &mStereoWords);
+}
+
+// After the frame's texture copies: the top screen for the left eye, its transfer, then again for the right eye, which
+// C3D_FrameEnd transfers with the bottom screen's commands.
+void C3DRenderer::Impl::SubmitStereo()
+{
+    GX_ProcessCommandList(mStereoList, mStereoWords * 4, GX_CMDLIST_FLUSH);
+    C3DContextTransferLeft();
+    GX_ProcessCommandList(mStereoList, mStereoWords * 4, 0);
+}
+
+void C3DRenderer::Impl::WriteEyeShot()
+{
+    const u32 bytes = 240 * 400 * 3;
+    char name[64];
+    snprintf(name, sizeof(name), "test/eyes_%lu.bin", mEyeShotFrame);
+    if (FILE* f = fopen(name, "wb"))
+    {
+        std::vector<u8> copy(bytes);
+        for (s32 i = 0; i < 2; i++)
+        {
+            // Copied first: Azahar writes out what its GPU drew for the CPU's reads only, not the SD card's.
+            GSPGPU_InvalidateDataCache(mEyeShot[i], bytes);
+            memcpy(&copy[0], mEyeShot[i], bytes);
+            fwrite(&copy[0], 1, bytes, f);
+        }
+        fclose(f);
+    }
+    mEyeShot[0] = mEyeShot[1] = 0;
 }
 
 // fan: pVerts is a triangle or a quad (DrawFan), else a list of triangles.
@@ -1364,6 +1497,11 @@ void C3DRenderer::Impl::Append(const RVertex* pVerts, s32 count, RTexture* pTex,
     mBatchScissor = scissor;
     mBatchRule = pRule;
     mFrameDrew = true;
+    if (mSliderUp && !mWorldDrawn && !pRule)
+    {
+        const f32 w = 1.0f / pVerts[0].rhw;
+        mWorldDrawn = w >= kWorldDepthMin && w < kWorldDepthMax;
+    }
     const f32 dx = offset + (pRule ? pRule->dx : 0);
     const f32 dy = offset + (pRule ? pRule->dy : 0);
     const f32 su = pTex ? pTex->mScaleU : 0.0f;
@@ -1978,10 +2116,19 @@ bool C3DRenderer::Init(Loader, const char** ppError)
     p->mUniAnyLights = shaderInstanceGetUniformLocation(p->mProgram.vertexShader, "anyLights");
     p->mNeedClear = true;
     p->mFrame = 1;
+    // GTA2_3DS_STEREO=<pixels>: each eye's shift at full slider for kStereoPx, 0 for none.
+    const char* pStereo = getenv("GTA2_3DS_STEREO");
+    p->mStereoPx = pStereo ? (f32)atof(pStereo) : kStereoPx;
+    p->mEyeDepth = 6.0f;
+    for (const char* pEyes = getenv("GTA2_3DS_EYES"); pEyes && *pEyes; pEyes = strchr(pEyes, ',') ? strchr(pEyes, ',') + 1 : "")
+    {
+        p->mEyeFrames.push_back((u32)atoi(pEyes));
+    }
     // GTA2_3DS_VRAM=0: textures in linear memory only.
     const char* pVram = getenv("GTA2_3DS_VRAM");
     p->mGxQueue = &__C3D_Context;
-    p->mVram = !(pVram && !strcmp(pVram, "0")) && p->mGxQueue->entries && p->mGxQueue->maxEntries > kQueueReserve + kShadowLevel;
+    p->mVram = !(pVram && !strcmp(pVram, "0")) && p->mGxQueue->entries &&
+               p->mGxQueue->maxEntries > kQueueReserve + kStereoQueueEntries + kShadowLevel;
     if (p->mVram)
     {
         u8* pBlocks[3];
@@ -2224,6 +2371,13 @@ void C3DRenderer::Present(s32, s32)
     if (p->mFrameDrew)
     {
         p->DrawOverlay();
+    }
+    if (p->mStereo)
+    {
+        p->EndStereoTop();
+    }
+    if (p->mFrameDrew)
+    {
         p->DrawHud();
     }
     if (p->mVertCount > 0)
@@ -2232,6 +2386,16 @@ void C3DRenderer::Present(s32, s32)
     }
     p->EndDrawnUploads();
     p->CopyShadows();
+    if (p->mStereo)
+    {
+        p->SubmitStereo();
+    }
+    if (std::find(p->mEyeFrames.begin(), p->mEyeFrames.end(), p->mFrame) != p->mEyeFrames.end())
+    {
+        p->mEyeShot[0] = gfxGetFramebuffer(GFX_TOP, GFX_LEFT, NULL, NULL);
+        p->mEyeShot[1] = gfxGetFramebuffer(GFX_TOP, GFX_RIGHT, NULL, NULL);
+        p->mEyeShotFrame = p->mFrame;
+    }
     const u64 t0 = svcGetSystemTick();
     {
         PORT_PROF(kPresentFrameEnd);
@@ -2707,7 +2871,9 @@ bool C3DRenderer::DrawMeshes(const MeshDraw* pDraws, s32 count, bool lit)
     AttrInfo_Init(pAttr);
     AttrInfo_AddLoader(pAttr, 0, GPU_UNSIGNED_BYTE, 4);
     AttrInfo_AddLoader(pAttr, 1, GPU_FLOAT, 2);
+    AttrInfo_AddFixed(pAttr, kMeshEyeAttrib);
     C3D_BoolUnifSet(GPU_VERTEX_SHADER, sUniMeshLit, lit);
+    p->mWorldDrawn = true;
     const C3D_Mtx& m = p->mProjection;
     const MeshVertex* pBuffer = 0;
     t1 = svcGetSystemTick();
@@ -2765,6 +2931,7 @@ bool C3DRenderer::DrawMeshes(const MeshDraw* pDraws, s32 count, bool lit)
     AttrInfo_AddLoader(pAttr, 1, GPU_UNSIGNED_BYTE, 4);
     AttrInfo_AddLoader(pAttr, 2, GPU_FLOAT, 2);
     AttrInfo_AddLoader(pAttr, 3, GPU_FLOAT, 4);
+    AttrInfo_AddFixed(pAttr, kEyeAttrib);
     C3D_BufInfo* pBuf = C3D_GetBufInfo();
     BufInfo_Init(pBuf);
     BufInfo_Add(pBuf, p->mVerts, sizeof(C3DVertex), 4, 0x3210);
