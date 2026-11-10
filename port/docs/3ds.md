@@ -746,6 +746,32 @@ would still cost a draw call per group, 7 to 13 us in Azahar against about 12 fo
 at best 0.15 ms of Azahar's 0.38, for several hundred lines. Slopes and diagonals draw 0 to 5 primitives a frame.
 The meshes' own cost is 0.19 ms a frame in Azahar, half of it the first draw after the switch of shader program.
 
+On the console (night drive, `GTA2_3DS_PROF_AB=mapcache`) the cache took 76 lids a frame from the game but saved
+only 0.3 ms of `draw.map`, and its worst blocks were worse. `draw.map.cache` times it per frame: the checks of the
+chunks' tile mappings and texture versions, the builds (blocks, quads, sort, mesh), the test of the lights past the
+shader's, and the draws (the game's batch, the switch to the mesh program, the draw calls, the switch back, both
+switches updating citro3d's context themselves so that their uploads show there); `mc.*` count the chunks checked,
+built, drawn and left to the game, the rows left for a light, the lids drawn, taken and left out of the walk. Its
+log line showed where the time went: a build took 5.1 ms (7.2 at most) in one frame, 5 to 22 of them in 150 frames
+driving; the draws 0.6 ms a frame; the checks and light tests 0.3; and at night 3 chunk layers a frame went back to
+the game whole for a light past the shader's 44. Now a build reads the blocks once, resolves a lid's tile once and
+sorts 8-byte keys (Azahar: 4.4 ms, now 1.2, at most 1.3); such a light leaves to the game only the rows it may
+reach, which it lights on the CPU as before; after the first draw of a state through citro3d (whose context update
+walks every uniform of both shader stages, 11 to 17 us a draw in Azahar), a layer's draws write the texture, the
+chunk's two uniform rows and buffer offset, and C3D_DrawArrays' commands themselves; and the lights are looked up
+once per chunk and frame, for the chunks on screen. Azahar, `draw.map` in ms: frozen at night in ste with 47 lights,
+1.93 without the cache, 2.36 with it before, 1.85 now; the scripted night drive 1.87 without it, 1.75 now (before,
+slower than without it in most blocks). With the shader at 32 lights (a test build) the frozen frames are the
+game's to the pixel. Left: two program switches per layer with lids, about 20 us each in Azahar, and a draw through
+citro3d per state and layer.
+
+The cache simulator (the Linux port, see the logic's memory traffic), zoomed out on a fast drive, per frame: the
+walk's draw list misses little (123 data, 52 instruction cache misses); `RenderBlockAt`'s map reads (base table,
+columns, blocks) about 730 data misses, about 0.13 ms at 50 cycles; the rest of `draw.map` is the gbh_* path per
+primitive: data misses on the texture lookups (300), the lights (sqrt table 280, the light grid's clear 255) and the
+vertices, and above all instruction misses (9,300 per frame on x86 without PGO). No cheap change in the walk itself;
+the per-primitive path is what the cache saves.
+
 The bottom screen's CPU time per frame (`GTA2_3DS_STATS`, walking, Old 3DS mode): 0.38 to 0.42 ms
 (0.45 to 0.51 at most) when it was drawn every frame without a minimap; with the minimap and drawn only
 on a change, 0.05 ms standing (5 frames of 150 drawn, for the clock), 0.18 to 0.44 ms walking (up to 75
