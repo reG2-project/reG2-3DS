@@ -40,7 +40,8 @@ const s32 kBuildsPerFrame = 1;
 // Frames between looks at the textures of the lids a chunk left to the game.
 const u32 kPartialRebuild = 30;
 // Lights past the shader's that may reach a chunk before it is left to the game whole.
-const s32 kMaxFarLights = 24;
+const s32 kMaxFarLights = 32;
+const s32 kFarSets = 16;
 
 struct Group
 {
@@ -94,6 +95,13 @@ struct Chunk
     u16 walk[kLayers][kChunkSize];
 };
 
+struct FarSet
+{
+    s32 chunk;
+    s32 count;
+    f32 lights[kMaxFarLights * 4];
+};
+
 struct Quad
 {
     s32 layer;
@@ -116,6 +124,8 @@ s32 sBuilt;
 s32 sBuildsLeft;
 u32 sMeshBytes; // linear memory of the built chunks
 s32 sMinCx, sMinCy, sMaxCx, sMaxCy;
+FarSet sFarSets[kFarSets];
+s32 sFarSetCount;
 Chunk sChunks[kChunks][kChunks];
 u32 sAnimated[1024 / 32];
 std::vector<void*> sPendingFree;
@@ -519,23 +529,72 @@ void Build(Chunk& c, s32 cx, s32 cy)
     sBuildMax = took > sBuildMax ? took : sBuildMax;
 }
 
+struct View
+{
+    f32 scale, rhw, centreX, centreY;
+    s32 rowMin, rowMax, colMin, colMax;
+};
+
+// The rows and columns the screen shows at the layer's top (centred on it), and one more around them; false when
+// the top is not in front of the camera.
+bool TopView(View* pView)
+{
+    pView->scale = gScreenScaleTop.ToFloat();
+    pView->rhw = gInvDepthTop.ToFloat();
+    if (gInvDepthTop.mValue <= 0 || pView->scale <= 0.0f)
+    {
+        return false;
+    }
+    const f32 scale = pView->scale;
+    pView->centreX = (f32)static_cast<u32>(gViewCamera->mScreenPxCenterX);
+    pView->centreY = (f32)static_cast<u32>(gViewCamera->mScreenPxCenterY);
+    const f32 camX = gViewCamera->mCurPos.mX.ToFloat(), camY = gViewCamera->mCurPos.mY.ToFloat();
+    pView->rowMin = (s32)floorf(camY - pView->centreY / scale) - 1;
+    pView->rowMax = (s32)floorf(camY + pView->centreY / scale) + 1;
+    pView->colMin = (s32)floorf(camX - pView->centreX / scale) - 1;
+    pView->colMax = (s32)floorf(camX + pView->centreX / scale) + 1;
+    return true;
+}
+
+bool InView(const View& v, s32 wx, s32 wy)
+{
+    return !(wx > v.colMax || wx + kChunkSize <= v.colMin || wy > v.rowMax || wy + kChunkSize <= v.rowMin);
+}
+
 // The chunk's rows at the height top that a light past the shader's may reach, which gbh_api.cpp lights on the
 // CPU (a lid's box as near as NearLights finds it, with a margin): all of them when the shader cannot light it.
-u16 FarRows(f32 x0, f32 y0, f32 top)
+u16 FarRows(s32 cx, s32 cy, f32 top)
 {
-    f32 lights[kMaxFarLights * 4];
-    const s32 n = MapCacheMesh::FarLights(x0, y0, top, x0 + kChunkSize, y0 + kChunkSize, top, lights, kMaxFarLights);
-    if (n < 0)
+    // The chunk's lights for all the lids' heights, looked up once a frame.
+    const s32 chunk = cy * kChunks + cx;
+    s32 k = 0;
+    while (k < sFarSetCount && sFarSets[k].chunk != chunk)
+    {
+        k++;
+    }
+    const f32 x0 = (f32)(cx << kChunkShift), y0 = (f32)(cy << kChunkShift);
+    FarSet& set = sFarSets[k < kFarSets ? k : kFarSets - 1];
+    if (k >= sFarSetCount)
+    {
+        sFarSetCount += k < kFarSets ? 1 : 0;
+        set.chunk = chunk;
+        set.count = MapCacheMesh::FarLights(x0, y0, 1.0f, x0 + kChunkSize, y0 + kChunkSize, (f32)kLayers, set.lights, kMaxFarLights);
+    }
+    if (set.count < 0)
     {
         return 0xFFFF;
     }
     u16 rows = 0;
-    for (s32 i = 0; i < n; i++)
+    for (s32 i = 0; i < set.count; i++)
     {
-        const f32* pLight = &lights[i * 4];
+        const f32* pLight = &set.lights[i * 4];
         const f32 dz = fabsf(pLight[2] - top) - 0.01f;
         const f32 left = pLight[3] - (dz > 0.0f ? dz * dz : 0.0f);
-        const f32 reach = sqrtf(left > 0.0f ? left : 0.0f) + 0.05f;
+        if (left < 0.0f)
+        {
+            continue;
+        }
+        const f32 reach = sqrtf(left) + 0.05f;
         s32 r0 = (s32)floorf(pLight[1] - reach - y0);
         s32 r1 = (s32)floorf(pLight[1] + reach - y0);
         r0 = r0 < 0 ? 0 : r0;
@@ -618,6 +677,7 @@ void BeginFrame()
     }
     sLit = (gLightingDrawFlag & kFlagLighting) && MapCacheMesh::Lit();
     sBuildsLeft = kBuildsPerFrame;
+    sFarSetCount = 0;
     sFrameOn = true;
     sLogFrames++;
 }
@@ -695,6 +755,8 @@ void BeginLayer(s32 z, s32 minX, s32 minY, s32 maxX, s32 maxY)
     sMinCy = minY >> kChunkShift;
     sMaxCx = maxX >> kChunkShift;
     sMaxCy = maxY >> kChunkShift;
+    View view;
+    const bool shown = TopView(&view);
     for (s32 cy = sMinCy; cy <= sMaxCy; cy++)
     {
         for (s32 cx = sMinCx; cx <= sMaxCx; cx++)
@@ -743,16 +805,17 @@ void BeginLayer(s32 z, s32 minX, s32 minY, s32 maxX, s32 maxY)
                 c.drawnFrame = sFrame;
                 c.drawn = 0;
             }
-            if (!c.valid || !(c.layers & (1u << z)))
+            if (!c.valid || !(c.layers & (1u << z)) || !shown)
             {
                 continue;
             }
-            const f32 x0 = (f32)(cx << kChunkShift), y0 = (f32)(cy << kChunkShift), top = (f32)(z + 1);
+            const f32 top = (f32)(z + 1);
             u16 farRows = 0;
-            if (sLit)
+            // Off screen, the lids are taken from the walk and not drawn.
+            if (sLit && InView(view, cx << kChunkShift, cy << kChunkShift))
             {
                 PORT_PROF(kDrawMapCacheLight);
-                farRows = FarRows(x0, y0, top);
+                farRows = FarRows(cx, cy, top);
             }
             if (farRows == 0xFFFF)
             {
@@ -832,27 +895,18 @@ bool SkipCell(s32 x, s32 y)
 
 void EndLayer(s32 z)
 {
-    if (!sFrameOn || gInvDepthTop.mValue <= 0)
+    View view;
+    if (!sFrameOn || !TopView(&view))
     {
         return;
     }
     PORT_PROF(kDrawMapCache);
     const uint64_t t0 = MapCacheMesh::Ticks();
     sDraws.clear();
-    const f32 scale = gScreenScaleTop.ToFloat();
-    const f32 rhw = gInvDepthTop.ToFloat();
-    if (scale <= 0.0f)
-    {
-        return;
-    }
+    const f32 scale = view.scale, rhw = view.rhw, centreX = view.centreX, centreY = view.centreY;
+    const s32 rowMin = view.rowMin, rowMax = view.rowMax;
     // A 1:1 lid samples its first level, as C3DRenderer::DrawTriangles' OneToOne would find.
-    const bool noMip = scale > 0.0f && fabsf(62.9999f / scale - 1.0f) < 0.01f;
-    const f32 centreX = (f32)static_cast<u32>(gViewCamera->mScreenPxCenterX);
-    const f32 centreY = (f32)static_cast<u32>(gViewCamera->mScreenPxCenterY);
-    // The rows and columns the screen shows at the lids' height (centred on it), and one more around them.
-    const f32 camX = gViewCamera->mCurPos.mX.ToFloat(), camY = gViewCamera->mCurPos.mY.ToFloat();
-    const s32 rowMin = (s32)floorf(camY - centreY / scale) - 1, rowMax = (s32)floorf(camY + centreY / scale) + 1;
-    const s32 colMin = (s32)floorf(camX - centreX / scale) - 1, colMax = (s32)floorf(camX + centreX / scale) + 1;
+    const bool noMip = fabsf(62.9999f / scale - 1.0f) < 0.01f;
     for (s32 cy = sMinCy; cy <= sMaxCy; cy++)
     {
         for (s32 cx = sMinCx; cx <= sMaxCx; cx++)
@@ -863,7 +917,7 @@ void EndLayer(s32 z)
                 continue;
             }
             const s32 wx = cx << kChunkShift, wy = cy << kChunkShift;
-            if (wx > colMax || wx + kChunkSize <= colMin || wy > rowMax || wy + kChunkSize <= rowMin)
+            if (!InView(view, wx, wy))
             {
                 continue;
             }
