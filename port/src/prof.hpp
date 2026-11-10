@@ -20,6 +20,13 @@ enum Part
     kPeds,
     kPedsPed,
     kPedsPedAi,
+    kPedsPedWalk,
+    kPedsPedStill,
+    kPedsPedCar,
+    kPedsPedDown,
+    kPedsPedIdle,
+    kPedsPedMove,
+    kPedsPedMap,
     kPedsDummies,
     kTransport,
     kGarages,
@@ -27,6 +34,19 @@ enum Part
     kCarsCar,
     kCarsCarAi,
     kCarsCarPhysics,
+    kCarsCarPhysicsCollide,
+    kCarsCarPhysicsForces,
+    kCarsCarPhysicsMove,
+    kCarsCarPhysicsScare,
+    kCarsCarPhysicsSkid,
+    kCarsCarParked,
+    kCarsCarDriven,
+    kCarsCarMoving,
+    kCarsCarOther,
+    kCarsCarGrid,
+    kCarsCarDespawn,
+    kCarsCarDoors,
+    kCarsCarMisc,
     kCarsTraffic,
     kTrafficLights,
     kObjects,
@@ -96,6 +116,9 @@ enum Count
     kDrive,
     kCarsVisible,
     kPedsOnScreen,
+    kMapLookups,
+    kCollideTests,
+    kGridCells,
     kStepCounts,
     // Per drawn frame.
     kSteps = kStepCounts,
@@ -212,6 +235,8 @@ class PrimScope
 #define PORT_PROF_CAT(a, b) PORT_PROF_CAT2(a, b)
 // Times the rest of the enclosing block.
 #define PORT_PROF(part) PortProf::Scope PORT_PROF_CAT(portProf, __LINE__)(PortProf::part)
+// The same, with the part chosen at run time: an expression of PortProf::Part.
+#define PORT_PROF_AS(expr) PortProf::Scope PORT_PROF_CAT(portProf, __LINE__)(PortProf::gOn ? (expr) : PortProf::kStep)
 #define PORT_PROF_EXCLUDED(part) PortProf::ExcludedScope PORT_PROF_CAT(portProf, __LINE__)(PortProf::part)
 #define PORT_PROF_PRIM(part) PortProf::PrimScope PORT_PROF_CAT(portProf, __LINE__)(PortProf::part)
 // Times from here to the next section or PORT_PROF_END in the same scope.
@@ -226,6 +251,7 @@ class PrimScope
 #else
 
 #define PORT_PROF(part)
+#define PORT_PROF_AS(expr)
 #define PORT_PROF_EXCLUDED(part)
 #define PORT_PROF_PRIM(part)
 #define PORT_PROF_SECTION(part)

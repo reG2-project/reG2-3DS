@@ -4,6 +4,9 @@
 #include "../port/src/prof.hpp"
 #else
 #define PORT_PROF(part)
+#define PORT_PROF_AS(expr)
+#define PORT_PROF_SECTION(part)
+#define PORT_PROF_END()
 #endif
 #include "car_shop_event.hpp"
 #include "car_thread_trigger.hpp"
@@ -5852,6 +5855,10 @@ MATCH_FUNC(0x443170)
 bool Car::PoolUpdate()
 {
     PORT_PROF(kCarsCar);
+    PORT_PROF_AS(mpTrailer || IsTrainModel() ? PortProf::kCarsCarOther :
+                 !mPhysics                   ? PortProf::kCarsCarParked :
+                 mAI && mDriver && mDriver->GetPedType() != ped_type::player_2 ? PortProf::kCarsCarDriven :
+                                                                                 PortProf::kCarsCarMoving);
     if (!this->mLastSeenTimer)
     {
         gCarManager_6C->mVisibleCarsCount++;
@@ -5871,13 +5878,16 @@ bool Car::PoolUpdate()
 
     if (this->mDespawnStatus != car_despawn_status::despawning_5)
     {
+        PORT_PROF_SECTION(kCarsCarGrid);
         gSpriteGrid_1->RemoveFromRegionBuckets(this->mCarSprite);
     }
 
+    PORT_PROF_SECTION(kCarsCarDespawn);
     if (UpdateCarDespawnStatus())
     {
         return true;
     }
+    PORT_PROF_END();
 
     if (this->mPhysics)
     {
@@ -5898,6 +5908,7 @@ bool Car::PoolUpdate()
         ServicePhysics();
     }
 
+    PORT_PROF_SECTION(kCarsCarMisc);
     if (IsCrushing())
     {
         sCrushedCarSprites.PropagateMaxZLayer(this->mCarSprite, 1);
@@ -5920,12 +5931,15 @@ bool Car::PoolUpdate()
         TryHitchTrailer();
     }
 
+    PORT_PROF_SECTION(kCarsCarDoors);
     ServiceDoorsLightsAndHorn();
+    PORT_PROF_SECTION(kCarsCarDespawn);
     ManageDespawning();
     CountDownToWreck();
 
     if (mDespawnStatus != car_despawn_status::despawning_5)
     {
+        PORT_PROF_SECTION(kCarsCarMisc);
         if (HasTaxiLight())
         {
             if (mDriver)
@@ -5936,6 +5950,7 @@ bool Car::PoolUpdate()
                 }
             }
         }
+        PORT_PROF_SECTION(kCarsCarGrid);
         gSpriteGrid_1->AddToRegionBuckets(mCarSprite);
     }
     return false;

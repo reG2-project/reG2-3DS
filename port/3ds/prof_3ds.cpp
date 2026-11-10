@@ -17,7 +17,11 @@ namespace
 // prof_summary.py reads these names.
 const char* const kPartNames[] = {
     "step", "controls", "players", "lights", "cranes", "crushers", "generators", "peds", "peds.ped", "peds.ped.ai",
-    "peds.dummies", "transport", "garages", "cars", "cars.car", "cars.car.ai", "cars.car.physics", "cars.traffic",
+    "peds.ped.walk", "peds.ped.still", "peds.ped.car", "peds.ped.down", "peds.ped.idle", "peds.ped.move", "peds.ped.map",
+    "peds.dummies", "transport", "garages", "cars", "cars.car", "cars.car.ai", "cars.car.physics",
+    "cars.car.physics.collide", "cars.car.physics.forces", "cars.car.physics.move", "cars.car.physics.scare",
+    "cars.car.physics.skid", "cars.car.parked", "cars.car.driven", "cars.car.moving", "cars.car.other", "cars.car.grid",
+    "cars.car.despawn", "cars.car.doors", "cars.car.misc", "cars.traffic",
     "trafficlights", "objects", "scripts", "crews", "ambulance", "police", "particles", "tileanim", "hud", "doors",
     "firetrucks", "scores", "sound", "sound.entities", "sound.queues", "paused", "collide",
     "frame", "loop.next", "loop.beforestep", "loop.afterstep", "loop.begindraw", "loop.enddraw", "loop.fps", "log",
@@ -26,8 +30,8 @@ const char* const kPartNames[] = {
     "prim.setup", "prim.light", "prim.verts", "prim.c3d", "flush", "present", "present.bottom", "present.overlay",
     "present.frameend", "tex.convert", "tex.upload", "wait.vsync", "wait.gpu", "gpu", "c3d.cpu", 0};
 const char* const kCountNames[] = {
-    "drive", "cars.visible", "peds.onscreen", "steps", "prims", "drawcalls", "vertices", "states", "binds", "uploads",
-    "lights", "litprims", "lighttests", "litverts", "nearlights", "tiles", "sprites", "ambient", "pumps", "events", "late"};
+    "drive", "cars.visible", "peds.onscreen", "map.lookups", "collide.tests", "grid.cells", "steps", "prims",
+    "drawcalls", "vertices", "states", "binds", "uploads", "lights", "litprims", "lighttests", "litverts", "nearlights", "tiles", "sprites", "ambient", "pumps", "events", "late"};
 static_assert(sizeof(kPartNames) / sizeof(kPartNames[0]) == kPartCount, "a name per part");
 static_assert(sizeof(kCountNames) / sizeof(kCountNames[0]) == kCountCount, "a name per count");
 

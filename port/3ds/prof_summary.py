@@ -37,6 +37,22 @@ NOTES = {
     "prim.resolve": "the texture's lookup",
     "prim.setup": "fit to texture, depth, diffuse",
     "prim.verts": "render state, RVertex and triangles",
+    "cars.car.parked": "no physics, the visit only",
+    "cars.car.driven": "AI driver, its ai and physics parts aside",
+    "cars.car.moving": "physics without an AI driver",
+    "cars.car.other": "trailers and trains",
+    "cars.car.grid": "out of and back into the sprite grid",
+    "cars.car.despawn": "despawn status, off-screen timer, wreck",
+    "cars.car.doors": "doors, engine, lights, horn",
+    "cars.car.misc": "crushing, attachments, drowning, hitch, taxi",
+    "cars.car.physics.move": "movement against the map and sprites",
+    "peds.ped.idle": "inactive: lifetime only",
+    "peds.ped.car": "in a car",
+    "peds.ped.down": "dead or immobilised",
+    "peds.ped.move": "the Char's state and movement",
+    "peds.ped.map": "the block under the ped",
+    "map.lookups": "map column reads, the draw's included",
+    "grid.cells": "sprite grid cells walked to reach a sprite's",
 }
 
 

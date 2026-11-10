@@ -3,6 +3,7 @@
 #include "../port/src/prof.hpp"
 #else
 #define PORT_PROF(part)
+#define PORT_PROF_COUNT(count, n)
 #endif
 #include "Camera.hpp"
 #include "Car.hpp"
@@ -459,6 +460,7 @@ void SpriteGrid::DoRemove(s32 x_pos, s32 y_pos, Sprite* pSprite)
 
     for (GridCell* pCell = this->mRows[y_pos]; pCell; pCell = pCell->mpNext)
     {
+        PORT_PROF_COUNT(kGridCells, 1);
         if (pCell->mX == x_pos)
         {
             GridSpriteLink* pLink = pCell->mpSpriteLinks;
@@ -507,6 +509,7 @@ void SpriteGrid::RemoveFromRowBuckets(s32 y_pos, Sprite* pSprite)
     GridCell* pPrevCell = NULL;
     for (GridCell* pCell = this->mRows[y_pos]; pCell; pCell = pCell->mpNext)
     {
+        PORT_PROF_COUNT(kGridCells, 1);
         if (pCell->mX == x_pos)
         {
             GridSpriteLink* pLink = pCell->mpSpriteLinks;
@@ -575,6 +578,7 @@ void SpriteGrid::AddToSingleBucketAt(s32 x_pos, s32 y_pos, Sprite* pSprite)
     GridCell* pCell;
     for (pCell = this->mRows[y_pos]; pCell; pCell = pCell->mpNext)
     {
+        PORT_PROF_COUNT(kGridCells, 1);
         const s32 cell_x = pCell->mX;
         if (cell_x > x_pos)
         {
@@ -616,6 +620,7 @@ void SpriteGrid::AddToRowBuckets(s32 y_pos, Sprite* pSprite)
     {
         while (pNextCell)
         {
+            PORT_PROF_COUNT(kGridCells, 1);
             if (pNextCell->mX > x_pos)
             {
                 break;
@@ -670,6 +675,7 @@ GridCell* SpriteGrid::GetFirstXCellInRow(s32 y_pos) const
     }
     for (pIter = this->mRows[y_pos]; pIter; pIter = pIter->mpNext)
     {
+        PORT_PROF_COUNT(kGridCells, 1);
         cell_x = static_cast<u8>(pIter->mX);
         if (cell_x >= gSpriteGrid_left)
         {
