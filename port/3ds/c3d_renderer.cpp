@@ -2788,11 +2788,17 @@ DVLB_s* sMeshDvlb;
 shaderProgram_s sMeshProgram;
 s32 sMeshState;
 s32 sUniMeshLit;
-// DrawMeshes' ticks: the batch before, the switch to the mesh program, the draws, the switch back, and in the
-// draws, C3D_DrawArrays for the first draw (it uploads the program) and for the others.
+// DrawMeshes' ticks with GTA2_3DS_PROF: the batch before, the switch to the mesh program, the draws, the switch back,
+// and in the draws, C3D_DrawArrays for the first draw and for the others.
 uint64_t sMeshTicks[6];
 std::vector<u32> sMeshStates;
 const u32 kDrawn = 0xFFFFFFFFu;
+}
+
+// A system call per read: left out without the profiler.
+static u64 MeshTick()
+{
+    return PortProf::gOn ? svcGetSystemTick() : 0;
 }
 
 u32 C3DRenderer::MeshFrame()
@@ -2871,11 +2877,11 @@ bool C3DRenderer::DrawMeshes(const MeshDraw* pDraws, s32 count, bool lit)
         return false;
     }
     p->BeginFrame();
-    u64 t = svcGetSystemTick();
+    u64 t = MeshTick();
     PORT_PROF_SECTION(kDrawMapCacheDrawFlush);
     p->Flush();
     PORT_PROF_SECTION(kDrawMapCacheDrawSwitch);
-    u64 t1 = svcGetSystemTick();
+    u64 t1 = MeshTick();
     sMeshTicks[0] += t1 - t;
     t = t1;
     C3D_BindProgram(&sMeshProgram);
@@ -2890,7 +2896,7 @@ bool C3DRenderer::DrawMeshes(const MeshDraw* pDraws, s32 count, bool lit)
     p->mWorldDrawn = true;
     const C3D_Mtx& m = p->mProjection;
     const MeshVertex* pBuffer = 0;
-    t1 = svcGetSystemTick();
+    t1 = MeshTick();
     sMeshTicks[1] += t1 - t;
     t = t1;
     PORT_PROF_SECTION(kDrawMapCacheDrawCalls);
@@ -2941,7 +2947,7 @@ bool C3DRenderer::DrawMeshes(const MeshDraw* pDraws, s32 count, bool lit)
                               w * (m.r[1].x * d.x0 + m.r[1].y * d.y0 + m.r[1].w), -0.5f * w, w);
                 C3D_FVUnifSet(GPU_VERTEX_SHADER, p->mUniProjection + 3, d.wx - p->mLightOriginX, d.wy - p->mLightOriginY, d.wz, 0.0f);
             }
-            const u64 td = svcGetSystemTick();
+            const u64 td = MeshTick();
             if (!raw)
             {
                 p->ApplyState(state, p->mClip);
@@ -2984,7 +2990,7 @@ bool C3DRenderer::DrawMeshes(const MeshDraw* pDraws, s32 count, bool lit)
                                     1, GPUCMD_HEADER(0, 0xF, GPUREG_VTX_FUNC)};
                 GPUCMD_AddRawCommands(draw, sizeof(draw) / 4);
             }
-            sMeshTicks[n++ == 0 ? 4 : 5] += svcGetSystemTick() - td;
+            sMeshTicks[n++ == 0 ? 4 : 5] += MeshTick() - td;
             pBuffer = d.pVerts;
             pLastTex = pTex3;
             lastParam = pTex3->param;
@@ -2995,7 +3001,7 @@ bool C3DRenderer::DrawMeshes(const MeshDraw* pDraws, s32 count, bool lit)
             PORT_PROF_COUNT(kVertices, (u32)d.count);
         }
     }
-    t1 = svcGetSystemTick();
+    t1 = MeshTick();
     sMeshTicks[2] += t1 - t;
     t = t1;
     PORT_PROF_SECTION(kDrawMapCacheDrawBack);
@@ -3015,7 +3021,7 @@ bool C3DRenderer::DrawMeshes(const MeshDraw* pDraws, s32 count, bool lit)
     C3Di_UpdateContext();
     p->mStateValid = false;
     p->mBoundTex = 0;
-    sMeshTicks[3] += svcGetSystemTick() - t;
+    sMeshTicks[3] += MeshTick() - t;
     PORT_PROF_END();
     return true;
 }
