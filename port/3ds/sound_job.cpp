@@ -123,7 +123,7 @@ void Init()
     const char* pOn = getenv("GTA2_3DS_SOUND_CORE1");
     const char* pInterval = getenv("GTA2_3DS_STATS");
     sInterval = pInterval ? (u32)atoi(pInterval) : 0;
-    sOn = pOn && !strcmp(pOn, "1");
+    sOn = !pOn || strcmp(pOn, "0");
     if (sOn)
     {
         Start();

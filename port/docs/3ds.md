@@ -854,7 +854,7 @@ step's collision queue; outside its own tables it writes only what nothing reads
 it takes from the cars, peds and weapons, the crime report queue, the ped's scream timer, the CarInfo globals the
 physics sets again before use, and the map's zone iterator. At FRAME LIMIT 30 the draw writes none of what it
 reads (it moves no sprite, the CHINATOWN view turns the view camera and the pass uses the game camera), makes no
-`rand()` draw and no sound call. `GTA2_3DS_SOUND_CORE1=1` (`port/3ds/sound_job.cpp`, off by default) keeps the
+`rand()` draw and no sound call. `GTA2_3DS_SOUND_CORE1` (`port/3ds/sound_job.cpp`, on unless 0; about 0.5 to 2 ms less per step on an Old 3DS) keeps the
 start of `sound_obj::Service` in the step (its 5 `rand()` draws, as newlib keeps the generator's state per thread,
 the pause test, the frame counter, the view's turn) and runs `ServiceSoundEffects` on a thread of the system core,
 with the main thread's FPSCR, while the frame draws; it is joined before the next step, before a window message
