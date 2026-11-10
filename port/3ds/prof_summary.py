@@ -9,12 +9,15 @@ a game start (its load) is left out unless --keep-first. A group's first line sp
 (logic: a step's time by the steps per frame; timers: what the timers added). Per part: the average per step
 (logic) or per frame (the rest), the largest block average, the largest single step or frame, the average
 without the parts listed under it, and the calls per step or frame. --blocks lists each block's main figures.
+With GTA2_3DS_PROF_PMU=1 each block counted one pair of CPU events too: the step parts' events per step, then
+the same without the parts under them, averaged over the blocks that counted each event.
 """
 import argparse
 import re
 import sys
 
 VALUE = re.compile(r"(\S+)=([-\d.]+)/([-\d.]+)(?:/([-\d.]+)/([-\d.]+))?")
+PMU = re.compile(r"(\S+)=([-\d.]+)/([-\d.]+)/([-\d.]+)/([-\d.]+)")
 
 # Shown beside the rows whose place in the tree does not tell what they hold.
 NOTES = {
@@ -55,6 +58,9 @@ NOTES = {
     "grid.cells": "sprite grid cells walked to reach a sprite's",
 }
 
+EVENTS = {0x0: "i miss", 0x1: "i stall", 0x2: "d stall", 0x7: "mispred", 0x8: "insts", 0xB: "d rmiss",
+          0xD: "d wmiss", 0x10: "tlb miss"}
+
 
 def parse(path, keep_first, writes):
     blocks = []
@@ -73,9 +79,18 @@ def parse(path, keep_first, writes):
                 if write and int(write.group(1)):
                     writes.append((int(write.group(1)), float(write.group(2))))
                 block = {"frames": int(m.group(1)), "steps": int(m.group(2)), "step": {}, "frame": {}, "count": {},
-                         "timers": float(timers.group(1)) if timers else 0.0}
+                         "timers": float(timers.group(1)) if timers else 0.0, "pmu": {}}
                 continue
             if block is None:
+                continue
+            m = re.match(r"prof pmu step (\d+),(\d+):", line)
+            if m:
+                ev = (int(m.group(1)), int(m.group(2)))
+                for v in PMU.finditer(line):
+                    a, b, sa, sb = (float(x) for x in v.groups()[1:])
+                    block["pmu"].setdefault(v.group(1), {})
+                    block["pmu"][v.group(1)][ev[0]] = (a, sa)
+                    block["pmu"][v.group(1)][ev[1]] = (b, sb)
                 continue
             for kind in ("step", "frame", "count"):
                 if line.startswith("prof %s:" % kind):
@@ -137,6 +152,28 @@ def table(title, blocks, kind, extra_order=()):
         print("  %-26s %8.3f %8.3f %8.3f %8.3f %8.1f  %s" % (label, avg, tb, top, self_, calls, note))
 
 
+def pmu_table(blocks):
+    events = sorted({e for b in blocks for p in b["pmu"].values() for e in p})
+    if not events:
+        return
+    names = []
+    for b in blocks:
+        for n in b["step"]:
+            if n not in names:
+                names.append(n)
+    print("\nevents per step (logic parts), total / without the parts under it")
+    print("  %-26s" % "part" + "".join(" %17s" % EVENTS.get(e, hex(e)) for e in events))
+    for n in names:
+        cells = []
+        for e in events:
+            have = [b["pmu"][n][e] for b in blocks if n in b["pmu"] and e in b["pmu"][n]]
+            if have:
+                cells.append(" %8.0f/%8.0f" % (sum(h[0] for h in have) / len(have), sum(h[1] for h in have) / len(have)))
+            else:
+                cells.append(" %17s" % "-")
+        print("  %-26s" % ("  " * depth(n, names) + n) + "".join(cells))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("log")
@@ -187,6 +224,7 @@ def main():
         rest = avg("frame", "frame") - sum(v for _, v in budget)
         print("frame %.2f ms = %s + rest %.2f" % (avg("frame", "frame"), " + ".join("%s %.2f" % x for x in budget), rest))
         table("logic, per step", bs, "step")
+        pmu_table(bs)
         table("frame, per frame", bs, "frame")
         table("counts (step ones per step, the others per frame)", bs, "count")
 
