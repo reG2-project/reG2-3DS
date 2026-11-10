@@ -323,9 +323,11 @@ player drives. Each part gives its average, its most in one step or frame, its t
 and its calls. The timers' own cost, measured at the start, is taken out of the times and logged; one primitive
 in `GTA2_3DS_PROF_SAMPLE` (default 4) is timed, with what it runs, and counted for that many. Without the
 variable, a timer costs a test. `python3 port/3ds/prof_summary.py gta2_log.txt` sums a log up in tables,
-walking and driving, day and night apart. The lines of `GTA2_3DS_PROF` and `GTA2_3DS_STATS` are kept in memory
-and written 8 KB at a time, and at exit (`port/3ds/log_3ds.cpp`): on the console each write to the SD card takes
-milliseconds, and the unbuffered stderr made dozens per block, a frame of almost a second every 150.
+walking and driving, day and night apart. The lines of `GTA2_3DS_PROF`, `GTA2_3DS_STATS` and `GTA2_LOOP_STATS` are
+kept in memory and written 8 KB at a time by a thread of their own on the system core, below the sound's feed and the
+texture worker, and the rest at exit (`port/3ds/log_3ds.cpp`): on an Old 3DS such a write to the SD card takes up to
+a fifth of a second, which on the game's thread would stutter every 15 s. The `prof:` lines give the last write's size and time;
+should the writer fall 32 KB behind, a `log:` line counts the lines dropped.
 
 Azahar (2126.2) runs the `.3dsx` without firmware or system files, in Old or New 3DS mode. It passes
 no arguments, so the game folder there is always `sdmc:/3ds/gta2/`. The start
