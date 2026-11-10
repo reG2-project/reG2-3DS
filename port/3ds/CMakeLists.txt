@@ -94,8 +94,9 @@ if(OPENDSP_DIR)
 endif()
 target_link_libraries(gta2 PRIVATE SDL3::SDL3-static ${opendsp} citro3d ctru m)
 # test_pad.cpp adds scripted buttons and sticks to what SDL reads; platform_3ds.cpp shows SDL's message boxes;
-# stats_3ds.cpp times the main thread's sleeps.
-target_link_options(gta2 PRIVATE -Wl,--wrap=hidScanInput,--wrap=hidKeysDown,--wrap=hidKeysUp,--wrap=hidCircleRead,--wrap=irrstCstickRead,--wrap=SDL_ShowSimpleMessageBox,--wrap=svcSleepThread)
+# stats_3ds.cpp times the main thread's sleeps; linear_lock.cpp puts the linear heap's calls under a lock.
+target_link_options(gta2 PRIVATE -Wl,--wrap=hidScanInput,--wrap=hidKeysDown,--wrap=hidKeysUp,--wrap=hidCircleRead,--wrap=irrstCstickRead,--wrap=SDL_ShowSimpleMessageBox,--wrap=svcSleepThread
+    -Wl,--wrap=linearAlloc,--wrap=linearMemAlign,--wrap=linearRealloc,--wrap=linearGetSize,--wrap=linearFree,--wrap=linearSpaceFree)
 
 # The Homebrew Launcher's title, description, author and 48x48 icon.
 set(icon ${CMAKE_CURRENT_BINARY_DIR}/icon.png)
