@@ -73,6 +73,7 @@ NOTES = {
     "mc.quads": "lids the meshes draw, off screen columns included",
     "mc.lids": "lids the walk left to the meshes",
     "mc.skipped": "cells left out of the walk",
+    "mc.walls": "walls the meshes draw, culled ones included",
     "map.lookups": "map column reads, the draw's included",
     "lights": "the game's and the port's, as submitted",
     "lights.culled": "of those, reaching no block the map walks",

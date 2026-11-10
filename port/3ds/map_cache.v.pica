@@ -1,7 +1,8 @@
 ; C3DRenderer::DrawMeshes' shader: map_cache.cpp's tiles, projected and lit as render.v.pica does the gbh_* vertices.
 ; The uniforms up to anyLights sit in render.v.pica's registers, so its lights carry over; projection holds the draw's.
 
-; The clip position per local x, per local y and at (0, 0); the world position of (0, 0) less the light origin.
+; The clip position per local x and per local y (xy), at (0, 0), and the world position of (0, 0) less the light
+; origin; the zw of the first two rows: the clip position's move from a wall's top to its bottom.
 .fvec projection[4]
 .fvec ambient[2]
 .fvec lights[88]
@@ -20,15 +21,19 @@
 .out outclr color
 .out outtc0 texcoord0
 
-; v0 = local x, local y and shade bytes, v1 = (u, v), v2 = the eye as render.v.pica's v4
+; v0 = local x, local y, shade and 1 at a wall's bottom (bytes), v1 = (u, v), v2 = the eye as render.v.pica's v4
 .alias inpos v0
 .alias intex v1
 .alias ineye v2
 
 .proc main
-    mul r0, projection[0], inpos.xxxx
-    mad r0, inpos.yyyy, projection[1], r0
+    mul r0.xy, projection[0], inpos.xxxx
+    mad r0.xy, inpos.yyyy, projection[1], r0
+    mov r0.zw, zeros
     add r1, projection[2], r0
+    mov r2.xy, projection[0].zwzw
+    mov r2.zw, projection[1]
+    mad r1, r2, inpos.wwww, r1
     add r3, r1.wwww, -ineye.yyyy
     mul r3, ineye.xxxx, r3
     sge r4, r1.wwww, ineye.zzzz
@@ -44,6 +49,7 @@
     ifu meshLit
         mov r7, projection[3]
         add r7.xy, r7, inpos
+        add r7.z, r7, -inpos.wwww
         mul r7.w, inv255, inpos.zzzz
         mul r8, more.zzzz, r7.zzzz
         mov r9, ones

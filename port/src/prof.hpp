@@ -161,6 +161,7 @@ enum Count
     kMcQuads,
     kMcLids,
     kMcSkipped,
+    kMcWalls,
     kCountCount
 };
 

@@ -754,7 +754,7 @@ brief's text once (see Renderer). Azahar, bil: standing with a long brief, 1.6 t
 
 The map (`draw.map`, about 10 ms a frame on the console driving at night, 300 primitives with the sprites drawn
 between its layers). `GTA2_3DS_MAPCACHE` (on unless 0, `port/3ds/map_cache.cpp`; on an Old 3DS, driving at night, draw.map 11.0 to 8.6 ms on average and 17.9 to 10.2 in the worst block, walking 6.9 to 7.2) builds the flat lids of each
-16x16 block chunk once into a mesh in linear memory, drawn at the end of their layer by a vertex shader of its own
+16x16 block chunk (and their walls, see below) once into a mesh in linear memory, drawn at the end of their layer by a vertex shader of its own
 (`map_cache.v.pica`), a draw call per chunk and atlas page: a lid only overlaps the faces of nearer blocks of its
 layer, which the walk draws first, so the picture stays the same. Animated or remapped tiles, textures not converted
 yet, chunks that a light past the shader's 44 reaches and the turned view stay with the game. The walk then leaves out
@@ -772,13 +772,44 @@ layer kept with the chunk, on the heap). Azahar, frozen frames in ste, `draw.map
 | a car's lamps near (lids left to the game) | 2.41 | | 2.44 | 110 of 500 |
 
 The pictures are those of the game's own path, at most 27 pixels 1 off in a channel (the lids' projection). A built chunk takes 14 KB of linear memory in these
-scenes (2 or 3 chunks drawn), at most 48 are kept. Left to the game, and why: the walls of the walked cells, 9 to 22
-primitives a frame here in 4 to 9 (chunk, layer, page) groups, 0.06 to 0.38 ms in Azahar with the slopes' sides (the
-frame without any wall, `skip_left` and the like in the registry). A mesh of them would need the walk's order
-where faces overlap (dominance order per quadrant around the camera, the camera's row and column walked) and
-would still cost a draw call per group, 7 to 13 us in Azahar against about 12 for a wall through the gbh_* layer:
-at best 0.15 ms of Azahar's 0.38, for several hundred lines. Slopes and diagonals draw 0 to 5 primitives a frame.
-The meshes' own cost is 0.19 ms a frame in Azahar, half of it the first draw after the switch of shader program.
+scenes (2 or 3 chunks drawn), at most 48 are kept. Slopes and diagonals draw 0 to 5 primitives a frame there. The
+meshes' own cost is 0.19 ms a frame in Azahar, half of it the first draw after the switch of shader program.
+
+The walls of flat blocks (`RenderFlatBlock`'s sides, the flat pairs' faces on the cell's other side included) are in
+the same meshes, drawn at the end of their layer before its lids. A wall vertex has a byte for the layer's bottom: the
+shader moves the top's clip position by (bottom w - top w) times the screen centre's, so it lands on the game's
+bottom projection (`gScreenScaleBottom`, `gInvDepthBottom`) to its Fix16 rounding, and lights it at the bottom's
+height. The game draws a wall only when its corners run clockwise on the screen, the GPU culls the others
+(`GPU_CULL_FRONT_CCW`, in the PICA200's terms), so turning the camera never rebuilds a chunk. A ray to the screen
+stays less than a block in a layer (at most centre / mScreenScale: 0.70 across, 0.42 down), so a wall can only be
+hidden by what the cells in front of it draw in its layer: the cell it faces, and the lids and slopes of that cell's
+two neighbours along it. The walk draws what the game keeps before the meshes, so a cell's walls go to the mesh only
+when the game draws nothing in it and nothing there (worked out over the chunk until nothing changes, the ring of
+cells around it counted as the game's when they hold anything); the walk then leaves the cell out, while the mesh
+draws the walls. The lids stay after the walls: a lid a ray meets is above the walls it meets in its layer. Walls
+are not sorted among themselves: two only overlap through a cell a ray crosses after the first, and the frames below
+showed no difference, but for a flat pair's face on the plane of the next cell's side the same way round (a fence
+before a wall, in ste), whose cell stays with the game. A chunk layer's walls go back to the game (its cells walked) while a light past the shader's
+reaches it, and in the turned view. Partial blocks (the El's pylons), slopes and diagonals stay with the game, and
+with them the walls in front of them.
+
+Downtown, Azahar, the R-type at full speed (camera 3.8): frozen near the Loonies' phones (89.9, 50.5) at night, the
+game drew 147 tiles without the cache, 94 with the lids and 75 with the walls (`draw.map` 1.93, 1.90, 1.90 ms; by
+day 1.71 without, 1.77 with both); the remaining 75 are mostly the El's partial blocks. The frames are the game's
+to the pixel at night, 1 pixel 1 off by day, and in stereo 8 and 15 pixels 1 off in the left and right eye. In ste
+(the frozen scenes above), the lids left 28 and 27 tiles a frame to the game, the walls 13 and 12 (`draw.map` 1.25 to
+1.30 and 1.37 to 1.41 ms), 3 pixels 1 off driving, and standing 6 pixels, 4 of them on a building's corner edge
+that runs through pixel centres (the camera at a block's middle), covered or not by the PICA200's rounding.
+On the scripted avenue drive (`GTA2_TEST_CAR` 42) the game's tiles went from 59.6 to 32.3 a frame, but `draw.map`
+from 1.78 to 1.92 ms: the meshes' draws 0.36 to 0.61 ms (5.8 layers a frame with a program switch instead of
+4.2, and the wall groups' draw calls), the builds 0.05 to 0.12 ms a frame. In Azahar a wall through the gbh_*
+layer costs about what a draw call of the meshes does; on the console a tile took 23 us, twice Azahar's. A build with walls takes about 1.9 ms
+(2.3 at most) against 1.0 for the lids alone; at most one per frame. The build is a function of the map's blocks
+(`Scan`, `Decide`, the vertices) but for the faces' textures (`LookUp`, with the renderer), so it could run ahead
+on the system core: that needs the scan and decide steps given their own buffers (the statics `sFaces`, `sGrid`,
+`sResolved`, `sOrder`), the textures looked up on the main thread between the two, the linear memory allocated and
+the job handed back on the main thread, and a chunk built again when the map changes under the job
+(`Invalidate`).
 
 On the console (night drive, `GTA2_3DS_PROF_AB=mapcache`) the cache took 76 lids a frame from the game but saved
 only 0.3 ms of `draw.map`, and its worst blocks were worse. `draw.map.cache` times it per frame: the checks of the

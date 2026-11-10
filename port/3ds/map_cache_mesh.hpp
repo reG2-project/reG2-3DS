@@ -9,13 +9,14 @@ struct STexture;
 
 namespace MapCacheMesh
 {
-// A mesh vertex: local (x, y) on a plane of constant depth, grey shaded, lit as gbh_api.cpp lights the game's tiles.
+// A mesh vertex: local (x, y) on the layer's top, or its bottom for a wall's lower corners; grey shaded, lit as
+// gbh_api.cpp lights the game's tiles.
 struct Vertex
 {
     uint8_t x, y;
-    uint8_t shade; // the colour (shade, shade, shade, 255)
-    uint8_t pad;
-    float u, v; // in the texture's page
+    uint8_t shade;  // the colour (shade, shade, shade, 255)
+    uint8_t bottom; // 1 on the layer's bottom
+    float u, v;     // in the texture's page
 };
 
 struct Draw
@@ -25,8 +26,13 @@ struct Draw
     RTexture* pTex;
     bool blend; // RS_BLEND_ALPHA, else opaque
     bool noMip;
-    // Logical pixels = local * scale + (x0, y0), at 1 / rhw; local (0, 0) is at world (wx, wy, wz).
+    // Walls, their back faces culled. DrawAll draws the passes in order, each one's draws grouped by state.
+    bool walls;
+    int32_t pass;
+    // Logical pixels = local * scale + (x0, y0), at 1 / rhw on the top; local (0, 0) is at world (wx, wy, wz) there.
+    // A wall's bottom is at 1 / rhwBottom, seen from the screen point (centreX, centreY).
     float scale, x0, y0, rhw;
+    float rhwBottom, centreX, centreY;
     float wx, wy, wz;
 };
 

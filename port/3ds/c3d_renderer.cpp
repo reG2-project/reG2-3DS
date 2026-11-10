@@ -2900,8 +2900,9 @@ bool C3DRenderer::DrawMeshes(const MeshDraw* pDraws, s32 count, bool lit)
     sMeshTicks[1] += t1 - t;
     t = t1;
     PORT_PROF_SECTION(kDrawMapCacheDrawCalls);
-    // The draws by state, in their order within one (lids do not overlap). The first of a state goes through
-    // citro3d; the others write what changes (texture, chunk) and C3D_DrawArrays' commands, as Impl::Draw does.
+    // Each pass's draws by state (their order within a pass does not show), in their order within one. The first of a
+    // state goes through citro3d; the others write what changes (texture, chunk) and C3D_DrawArrays' commands, as
+    // Impl::Draw does.
     sMeshStates.resize((size_t)count);
     for (s32 i = 0; i < count; i++)
     {
@@ -2916,7 +2917,7 @@ bool C3DRenderer::DrawMeshes(const MeshDraw* pDraws, s32 count, bool lit)
     for (s32 run = 0, n = 0; run < count; run++)
     {
         const u32 state = sMeshStates[run];
-        for (s32 i = run; i < count && state != kDrawn; i++)
+        for (s32 i = run; i < count && state != kDrawn && pDraws[i].pass == pDraws[run].pass; i++)
         {
             if (sMeshStates[i] != state)
             {
@@ -2952,8 +2953,14 @@ bool C3DRenderer::DrawMeshes(const MeshDraw* pDraws, s32 count, bool lit)
             {
                 p->ApplyState(state, p->mClip);
                 C3D_TexBind(0, pTex3);
-                C3D_FVUnifSet(GPU_VERTEX_SHADER, p->mUniProjection, k * m.r[0].x, k * m.r[1].x, 0.0f, 0.0f);
-                C3D_FVUnifSet(GPU_VERTEX_SHADER, p->mUniProjection + 1, k * m.r[0].y, k * m.r[1].y, 0.0f, 0.0f);
+                // The game draws a wall when its corners run clockwise on the screen, y down: the others are culled.
+                C3D_CullFace(d.walls ? GPU_CULL_FRONT_CCW : GPU_CULL_NONE);
+                // A wall's bottom: the clip position at the top moved by (wb - w) * (the screen centre's, -0.5, 1).
+                const f32 dw = 1.0f / (d.rhwBottom > 0.0000001f ? d.rhwBottom : 0.0000001f) - w;
+                C3D_FVUnifSet(GPU_VERTEX_SHADER, p->mUniProjection, k * m.r[0].x, k * m.r[1].x,
+                              dw * (m.r[0].x * d.centreX + m.r[0].y * d.centreY + m.r[0].w),
+                              dw * (m.r[1].x * d.centreX + m.r[1].y * d.centreY + m.r[1].w));
+                C3D_FVUnifSet(GPU_VERTEX_SHADER, p->mUniProjection + 1, k * m.r[0].y, k * m.r[1].y, -0.5f * dw, dw);
                 if (moved)
                 {
                     C3D_BufInfo* pBuf = C3D_GetBufInfo();
@@ -3005,8 +3012,9 @@ bool C3DRenderer::DrawMeshes(const MeshDraw* pDraws, s32 count, bool lit)
     sMeshTicks[2] += t1 - t;
     t = t1;
     PORT_PROF_SECTION(kDrawMapCacheDrawBack);
-    // Back to BeginFrame's program, vertices and projection.
+    // Back to BeginFrame's program, vertices, projection and culling.
     C3D_BindProgram(&p->mProgram);
+    C3D_CullFace(GPU_CULL_NONE);
     AttrInfo_Init(pAttr);
     AttrInfo_AddLoader(pAttr, 0, GPU_FLOAT, 3);
     AttrInfo_AddLoader(pAttr, 1, GPU_UNSIGNED_BYTE, 4);
