@@ -1,4 +1,5 @@
 #include "dsp_voices.hpp"
+#include "log_3ds.hpp"
 #include <3ds.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -121,8 +122,8 @@ void FeedThread(void*)
             }
             else if (t1 - sStats.mStart >= 5 * (u64)SYSCLOCK_ARM11)
             {
-                fprintf(stderr, "dsp: feed %.2f %% of the time (at most %.2f ms), voices %d at most\n",
-                        sStats.mBusy * 100.0 / (t1 - sStats.mStart), sStats.mMax * 1000.0 / SYSCLOCK_ARM11, sStats.mVoicesMax);
+                Log3DS_Printf("dsp: feed %.2f %% of the time (at most %.2f ms), voices %d at most\n",
+                              sStats.mBusy * 100.0 / (t1 - sStats.mStart), sStats.mMax * 1000.0 / SYSCLOCK_ARM11, sStats.mVoicesMax);
                 sStats.mStart = t1;
                 sStats.mBusy = 0;
                 sStats.mMax = 0;
