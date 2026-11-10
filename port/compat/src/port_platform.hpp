@@ -118,6 +118,9 @@ void port_TestCar(int model, float dx, float dy);
 // Tests (GTA2_TEST_AT): the player, or his vehicle turned to that heading (degrees), moved to that point in blocks.
 // Returns what moved.
 const char* port_TestTeleport(float x, float y, float degrees);
+// Tests (GTA2_TEST_BOOM): cars parked in two rows of that spacing around the player (step 0), set burning one after
+// another, each blown up a few seconds later; call once per step from 0 on. Returns the cars still in play.
+int port_TestBoom(unsigned step, int count, float spacing);
 // The player's vehicle: how far RT, LT and the stick press FORWARD, BACKWARD and the steering, 0 to 1, 1 for
 // a key or the d-pad (pad.cpp).
 void port_PadVehicleInput(float* pForward, float* pBackward, float* pSteer);

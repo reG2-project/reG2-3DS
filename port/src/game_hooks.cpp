@@ -38,6 +38,80 @@ void port_TestCar(int model, float dx, float dy)
     pPed->set_target_car_door(0);
 }
 
+namespace
+{
+struct BoomCar
+{
+    Car* mpCar;
+    s32 mPhase; // 0 parked, 1 burning, 2 blown up
+};
+BoomCar sBoom[32];
+
+bool InPool(const Car* pCar)
+{
+    for (Car* p = gCar_BC_Pool ? gCar_BC_Pool->GetFirstCar_420E50() : NULL; p; p = p->mpNext)
+    {
+        if (p == pCar)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+void DamageTo(Car* pCar, s32 target)
+{
+    Fix16_Point centre(kFpZero_6777CC, kFpZero_6777CC);
+    for (s32 i = 0; i < 400 && pCar->mDamage < target && !pCar->IsMaxDamage(); i++)
+    {
+        pCar->AccumulateDamage(200, &centre);
+    }
+}
+} // namespace
+
+int port_TestBoom(unsigned step, int count, float spacing)
+{
+    const unsigned kStagger = 20, kBurn = 75;
+    count = count < 32 ? count : 32;
+    Player* pPlayer = port_GameRunning() ? gGame_0x40->mLocalPlayer : NULL;
+    Ped* pPed = pPlayer ? pPlayer->mPlayerPed : NULL;
+    if (step == 0)
+    {
+        const Sprite* pSprite = pPed && pPed->mGameObject ? pPed->GetSprite() : NULL;
+        for (s32 i = 0; i < count; i++)
+        {
+            const f32 dx = ((i / 2) - (count - 1) / 4.0f) * spacing;
+            const f32 dy = i % 2 ? spacing : -spacing;
+            sBoom[i].mPhase = 0;
+            sBoom[i].mpCar = pSprite ? gCarManager_6C->SpawnCarAt(pSprite->mXy.x + Fix16(dx), pSprite->mXy.y + Fix16(dy),
+                                                                  pSprite->mZpos, Ang16(0), i % 2 ? 50 : 42, Fix16(1))
+                                     : NULL;
+        }
+    }
+    s32 left = 0;
+    for (s32 i = 0; i < count; i++)
+    {
+        BoomCar& b = sBoom[i];
+        if (!b.mpCar || b.mPhase == 2 || !InPool(b.mpCar))
+        {
+            b.mpCar = NULL;
+            continue;
+        }
+        left++;
+        if (b.mPhase == 0 && step >= i * kStagger)
+        {
+            DamageTo(b.mpCar, 26000);
+            b.mPhase = 1;
+        }
+        if (b.mPhase == 1 && step >= i * kStagger + kBurn)
+        {
+            DamageTo(b.mpCar, 32000);
+            b.mPhase = 2;
+        }
+    }
+    return left;
+}
+
 const char* port_TestTeleport(float x, float y, float degrees)
 {
     Player* pPlayer = port_GameRunning() ? gGame_0x40->mLocalPlayer : NULL;

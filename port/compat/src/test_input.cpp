@@ -12,6 +12,7 @@
 //                                                   for the window's keyboard focus, as with Alt+Tab
 //   GTA2_EXIT_AT=<frame>                            quit at that frame
 //   GTA2_TEST_AT=<frame>:<x>:<y>[:<degrees>],...     the player (or his vehicle, turned) moved to that block point
+//   GTA2_TEST_BOOM=<frame>:<cars>[:<spacing>]        cars around the player set burning and blown up in turn
 // Frames count Vid_FlipBuffers calls, but logic steps while the game runs (port_FrameCount), so the same
 // script presses the same keys on the same game step at any frame rate.
 #include "port_platform.hpp"
@@ -69,6 +70,9 @@ unsigned sCarAt;
 int sCarModel;
 float sCarDx = 1.5f;
 float sCarDy;
+unsigned sBoomAt;
+int sBoomCars;
+float sBoomSpacing = 1.2f;
 struct Move
 {
     unsigned mFrame;
@@ -87,6 +91,10 @@ void Load()
     if (const char* car = getenv("GTA2_TEST_CAR"))
     {
         sscanf(car, "%u:%d:%f:%f", &sCarAt, &sCarModel, &sCarDx, &sCarDy);
+    }
+    if (const char* boom = getenv("GTA2_TEST_BOOM"))
+    {
+        sscanf(boom, "%u:%d:%f", &sBoomAt, &sBoomCars, &sBoomSpacing);
     }
     for (const char* at = getenv("GTA2_TEST_AT"); at && *at; at = strchr(at, ',') ? strchr(at, ',') + 1 : "")
     {
@@ -323,6 +331,15 @@ void port_InjectTestInput(unsigned frame)
         sCarAt = 0;
         port_TestCar(sCarModel, sCarDx, sCarDy);
         SDL_Log("test input: frame %u car %d", frame, sCarModel);
+    }
+    if (sBoomAt && frame >= sBoomAt && port_GameRunning())
+    {
+        const int left = port_TestBoom(frame - sBoomAt, sBoomCars, sBoomSpacing);
+        if (frame == sBoomAt || !left)
+        {
+            SDL_Log("test input: frame %u boom, %d cars", frame, left);
+        }
+        sBoomAt = left ? sBoomAt : 0;
     }
     for (auto it = sMoves.begin(); it != sMoves.end() && port_GameRunning();)
     {
