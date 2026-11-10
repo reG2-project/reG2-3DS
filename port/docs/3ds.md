@@ -129,6 +129,11 @@ thread that writes texture memory flushes it; storage is released or written aga
 go of it (a stopped job may still write the texels the main thread wrote, the same values). `GTA2_3DS_UPLOAD_WORKER=0`
 keeps every upload on the main thread.
 
+`C3D_FrameEnd` flushes the data cache over the command list only (`GX_CMDLIST_FLUSH`), not over the whole linear
+heap: every CPU write the GPU reads flushes its own range (the frame's vertices, the index buffer once, texels,
+the map cache's meshes, the VRAM staging buffers and shadows). Azahar has no data cache, so a missing flush shows on
+hardware only.
+
 The effects' frames (code object 112: explosions, fire, smoke, sparks, blood; 205 sprites, the same in the three
 styles, 1.3 MB with their mip levels) are listed at the city load and converted at the next scene, on the worker
 in the background, rather than one per frame of the first explosions (`port_PreloadTexture`). The next scene,

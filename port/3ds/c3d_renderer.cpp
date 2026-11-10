@@ -2209,7 +2209,8 @@ void C3DRenderer::Present(s32, s32)
     const u64 t0 = svcGetSystemTick();
     {
         PORT_PROF(kPresentFrameEnd);
-        C3D_FrameEnd(0);
+        // Only the command list is flushed: each CPU write the GPU reads flushes its own range.
+        C3D_FrameEnd(GX_CMDLIST_FLUSH);
     }
     p->mInFrame = false;
     Stats3DS_SetTextures(p->mTexCount, p->mTexBytes, p->mCachedBytes, p->mEvictions, p->mAllocFails);
