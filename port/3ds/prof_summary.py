@@ -9,8 +9,8 @@ a game start (its load) is left out unless --keep-first. A group's first line sp
 (logic: a step's time by the steps per frame; timers: what the timers added). Per part: the average per step
 (logic) or per frame (the rest), the largest block average, the largest single step or frame, the average
 without the parts listed under it, and the calls per step or frame. --blocks lists each block's main figures.
---options groups the blocks by the logic options and the map cache state they ran with (GTA2_3DS_PROF_AB=logic,
-=mapcache or =logic,mapcache alternates them).
+--options groups the blocks by the logic options, the map cache state and where the sound pass ran
+(GTA2_3DS_PROF_AB=logic, =mapcache, =soundcore1 or a comma separated list of them alternates them).
 With GTA2_3DS_PROF_PMU=1 each block counted one pair of CPU events too: the step parts' events per step, then
 the same without the parts under them, averaged over the blocks that counted each event.
 """
@@ -84,10 +84,12 @@ def parse(path, keep_first, writes):
                     writes.append((int(write.group(1)), float(write.group(2))))
                 options = re.search(r"options (\d+)", line)
                 mapcache = re.search(r"mapcache (\d)", line)
+                soundcore1 = re.search(r"soundcore1 (\d)", line)
                 block = {"frames": int(m.group(1)), "steps": int(m.group(2)), "step": {}, "frame": {}, "count": {},
                          "timers": float(timers.group(1)) if timers else 0.0, "pmu": {},
                          "options": int(options.group(1)) if options else None,
-                         "mapcache": int(mapcache.group(1)) if mapcache else None}
+                         "mapcache": int(mapcache.group(1)) if mapcache else None,
+                         "soundcore1": int(soundcore1.group(1)) if soundcore1 else None}
                 continue
             if block is None:
                 continue
@@ -123,6 +125,8 @@ def group_of(b):
         g += ", options %d" % b["options"]
     if AB and b["mapcache"] is not None:
         g += ", mapcache %s" % ("on" if b["mapcache"] else "off")
+    if AB and b["soundcore1"] is not None:
+        g += ", soundcore1 %s" % ("on" if b["soundcore1"] else "off")
     return g
 
 
@@ -192,7 +196,7 @@ def main():
     ap.add_argument("log")
     ap.add_argument("--keep-first", action="store_true", help="keep the first block after a game start")
     ap.add_argument("--blocks", action="store_true", help="list each block too")
-    ap.add_argument("--options", action="store_true", help="group the blocks by their logic options and map cache state too")
+    ap.add_argument("--options", action="store_true", help="group the blocks by their logic options, map cache state and sound pass core too")
     args = ap.parse_args()
     global AB
     AB = args.options
