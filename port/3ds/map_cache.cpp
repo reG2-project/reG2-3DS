@@ -734,9 +734,10 @@ bool InView(const View& v, s32 wx, s32 wy)
     return !(wx > v.colMax || wx + kChunkSize <= v.colMin || wy > v.rowMax || wy + kChunkSize <= v.rowMin);
 }
 
-// The chunk's rows between the heights lo and hi that a light past the shader's may reach, which gbh_api.cpp lights
-// on the CPU (a tile's box as near as NearLights finds it, with a margin): all of them when the shader cannot light it.
-u16 FarRows(s32 cx, s32 cy, f32 lo, f32 hi)
+// The chunk's rows between the heights lo and hi that a light past the shader's may reach on screen, which
+// gbh_api.cpp lights on the CPU (a tile's box as near as NearLights finds it, with a margin): all of them when the
+// shader cannot light it.
+u16 FarRows(s32 cx, s32 cy, f32 lo, f32 hi, const View& view)
 {
     // The chunk's lights for all the lids' heights, looked up once a frame.
     const s32 chunk = cy * kChunks + cx;
@@ -768,8 +769,15 @@ u16 FarRows(s32 cx, s32 cy, f32 lo, f32 hi)
             continue;
         }
         const f32 reach = sqrtf(left) + 0.05f;
+        // A light that reaches only lids off the screen changes nothing drawn.
+        if (pLight[0] + reach < (f32)view.colMin || pLight[0] - reach >= (f32)(view.colMax + 1))
+        {
+            continue;
+        }
         s32 r0 = (s32)floorf(pLight[1] - reach - y0);
         s32 r1 = (s32)floorf(pLight[1] + reach - y0);
+        r0 = r0 < view.rowMin - (s32)y0 ? view.rowMin - (s32)y0 : r0;
+        r1 = r1 > view.rowMax - (s32)y0 ? view.rowMax - (s32)y0 : r1;
         r0 = r0 < 0 ? 0 : r0;
         r1 = r1 >= kChunkSize ? kChunkSize - 1 : r1;
         if (r0 <= r1)
@@ -1016,7 +1024,7 @@ void BeginLayer(s32 z, s32 minX, s32 minY, s32 maxX, s32 maxY)
             if (sLit && InView(view, cx << kChunkShift, cy << kChunkShift))
             {
                 PORT_PROF(kDrawMapCacheLight);
-                farRows = FarRows(cx, cy, top, top);
+                farRows = FarRows(cx, cy, top, top, view);
             }
             if (farRows == 0xFFFF)
             {
@@ -1038,7 +1046,7 @@ void BeginLayer(s32 z, s32 minX, s32 minY, s32 maxX, s32 maxY)
                 if (sLit && !wallRows && InView(wallView, cx << kChunkShift, cy << kChunkShift))
                 {
                     PORT_PROF(kDrawMapCacheLight);
-                    wallRows = FarRows(cx, cy, top - 1.0f, top);
+                    wallRows = FarRows(cx, cy, top - 1.0f, top, wallView);
                 }
                 c.walls |= (u8)(wallRows ? 0 : 1u << z);
             }

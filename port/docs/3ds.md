@@ -87,6 +87,11 @@ keeps only those that reach that area (layer 0's, the widest, from `gbh_SetCamer
 R-type's top speed the camera rises to about 3.8 and the area grows: on the avenue south of the Loonies' easy phones
 in Downtown 64 lights a frame came in, more than the shader's 44, so the map cache left rows to the game and the CPU
 lit them (504 light tests a frame); 36 of them reach nothing drawn, and without them the CPU lights nothing there.
+With more lights than the shader's, `UploadLights` ranks them by the part of that area they reach (stable, so the
+frame's order otherwise): the game submits its lamps first and the port's blasts (6 blocks) and fires last, so in an
+explosion chain the blasts were the ones lit on the CPU. Ranked, the lights past the 44th are the small lamps at the
+area's edge (`GTA2_TEST_BOOM` in Azahar: 65 to 78 lights a frame, from 1000 light tests and 170 CPU-lit vertices a
+frame to 2 and 0). A light lit by the shader rather than the CPU differs by at most one level, as above.
 The game's vertices are in logical pixels with 1/w; the vertex shader
 outputs `(x*w, y*w, z*w, w)` so the PICA200 interpolates textures with perspective. Textures arrive
 as RGBA8 from the gbh_* layer and are stored in the smallest exact PICA format (RGB565, RGBA4,
@@ -501,7 +506,12 @@ part of the way, as `hidCircleRead` gives it (up positive, about 154 at the end 
 bottom screen, and two more its point on the last frame, for a drag: `900 960 100000 160 120 60 60`. `GTA2_TEST_CAR=<frame>:<model>[:<dx>:<dy>]`
 puts a car of that model (54 the tank, 42 the R-type) beside the player at that frame, who then gets in, and
 `GTA2_TEST_AT=<frame>:<x>:<y>[:<degrees>],...` moves the player there (in blocks), or his vehicle turned to that
-heading (0 north, 90 west, 180 south, 270 east); the log names what moved. The menus' presses of `padA.txt` reach
+heading (0 north, 90 west, 180 south, 270 east); the log names what moved. `GTA2_TEST_BOOM=<frame>:<cars>[:<spacing>]`
+parks that many cars (R-types and S-types) in two rows that far above and below the player (1.2 blocks by default),
+sets one burning every 20 steps and blows each up 75 steps after (`port_TestBoom`). On foot the camera takes about
+400 steps to follow a far `GTA2_TEST_AT`, and parked cars off the screen for 130 steps despawn, so the explosion chain
+of Speed is `GTA2_TEST_AT=700:87.5:33.5`, `GTA2_TEST_BOOM=1250:12:1.2` after the menus' presses, with the registry's
+`Debug` key `do_invulnerable` (the player stands among the blasts). The menus' presses of `padA.txt` reach
 the game too (A gets in and out of a car), so a drive starts after them: the avenue south of the Loonies' easy
 phones in Downtown, east then west, is `GTA2_TEST_AT=900:56:50.5,1150:56.5:50.5:270,1950:173:54.5:90`,
 `GTA2_TEST_CAR=950:42:1.5:0` and R held (`1160 1940 200`, `1960 2750 200`).
@@ -823,7 +833,8 @@ log line showed where the time went: a build took 5.1 ms (7.2 at most) in one fr
 driving; the draws 0.6 ms a frame; the checks and light tests 0.3; and at night 3 chunk layers a frame went back to
 the game whole for a light past the shader's 44. Now a build reads the blocks once, resolves a lid's tile once and
 sorts 8-byte keys (Azahar: 4.4 ms, now 1.2, at most 1.3); such a light leaves to the game only the rows it may
-reach, which it lights on the CPU as before; after the first draw of a state through citro3d (whose context update
+reach on the screen (the chunk's rows and columns in view at the layer's top, one more around), which it lights on
+the CPU as before; after the first draw of a state through citro3d (whose context update
 walks every uniform of both shader stages, 11 to 17 us a draw in Azahar), a layer's draws write the texture, the
 chunk's two uniform rows and buffer offset, and C3D_DrawArrays' commands themselves; and the lights are looked up
 once per chunk and frame, for the chunks on screen. Azahar, `draw.map` in ms: frozen at night in ste with 47 lights,
@@ -909,6 +920,53 @@ Even inexact, the split buys little: with the AI and the physics each in a pass 
 instruction misses fall 23 % driving and 15 % walking, against 31 % for the exact code layout (PGO), and its
 data misses rise 12 and 9 %.
 
+Map zones by position. `Map_0x370::GetZoneAtPosOfType`, `GetNavZoneAtPos`, `GetFirstZoneAtPos` and `GetNextZone`
+(with a position) test every zone of the map in turn, about 150 in ste, and a step asks about 40 times: each
+ped's public transport test, the traffic and ped spawners' densities, the player's zones, the HUD. A Linux
+sampling profile of the step put them at 2.5 %. `port/src/zone_index.cpp` lists, when the map's zone list is
+built, the zones whose rect meets each 8x8 block cell, in the list's order; the lookups test only those
+(`Map_0x370::PortFirstZoneAtPos`) and leave `mCurZoneIdx` where the full scan does, which `GetNextZone` and
+`GetCurrentZoneInfo` read. The port's screen settings (`PortSettings::Screen`) are kept from their first read:
+each read opened the registry key, a few times a step (the aim camera, the lights) and a frame (the day and
+night cycle). In Azahar (lockstep, four scenes) the step is 0.10 to 0.23 ms shorter: the peds 0.11 to 0.15,
+traffic 0.02, the HUD 0.01, the players (the settings) 0.02; about 0.4 ms on an Old 3DS. Checks: a test build
+that runs both zone lookups at every call found no difference in the zone or in `mCurZoneIdx` (168,000 calls,
+Linux drive and walk), and the hashes match (Azahar: four scenes; Linux: drive and walk, night 2000 and day
+3000 steps, with the sound queue).
+
+Divisions are a small item now. In the Linux drive (steps 300 to 1950) a step makes 173 `Fix16` divisions
+(and the draw 21 a frame), on the VFP (above), about 45 cycles each: 0.03 ms of the console's 7.7. The 293
+`Fix16 / int` a step divide by constants, which the compiler turns into multiplies (no `__divsi3` call
+from them in the ARM build), and `rng::get_int`'s modulo (`__aeabi_idivmod`) runs 46 times a step. No other
+64-bit division in the game logic but one in the sound pass's skid sound. Their share of a Linux sampling
+profile of the step: 0.1 %.
+
+A sprite grid index was tried and left out: per row, a bitmap of the occupied x cells and each cell's
+address, so that the row walks (`RemoveFromRowBuckets`, `AddToRowBuckets`, `GetFirstXCellInRow`, ...)
+start at their x rather than at the row's head. A walk passes 2 cells or more on average before its x (45 % none),
+and the index costs an access to the bitmap, one to the cell table and one to the cell before: in Azahar the
+parked cars' visit took 0.09 ms more, and on Linux the step as long.
+
+Explosion chains (`GTA2_TEST_BOOM`, Running; the hook works in the Linux port too). A Linux sampling profile of
+steps 1250 to 1650 puts the particles at 14 % of the step and the objects at 9 %. A quarter of the particles' time
+is `SpriteGrid::DoRemove` on grid 3 (particles only): a step removes 300 to 400 sprites, each found by walking
+its row (3.6 cells) and then its cell's links (15 to 18, the smoke piles up in a few cells), 5,800 links a step.
+Keeping, for grid 3, each link's predecessor and each sprite's link and cell (170 lines in `SpriteGrid.cpp`)
+removes in constant time with the same lists (every removal took the shortcut; grid 3's order hashed the same,
+and the cars and peds): the Linux step was 2 % shorter during the chain, and Azahar's particles 0.02 ms longer,
+the bookkeeping on every add and removal costing more instructions than the short walks it saves. Left out; on
+the console the walks' cache misses might make it a gain, which only a measurement there would show. The rest
+of the particles is their own update (the circular bursts 40 %, sprite sizes and depth), and the objects'
+time goes to their collisions against grid 1 (rows of 4.7 cells, as outside chains) and their movement, with
+no repeated work of the zone kind.
+
+The trains cost the same everywhere (about 0.45 ms on the console for 2 trains): every step each carriage is
+taken out of the sprite grid and put back (a quarter of the trains' time on Linux), the engine runs its AI and
+physics, and each carriage is placed 2 blocks behind the one before by `AdvanceAlongRailway(Checked)`, a block by
+block walk of the rails reading the map's columns and arrows (a third). The carriages move every step, so no
+result carries over between steps; within a step each walk starts where the previous one ended, but sharing that
+start would mean rewriting the matched rail walk. Left as it is.
+
 The system core cannot take the car physics either: each car's physics is a link in that chain (the next
 cars' AI, the peds it runs over, the objects, explosions and particles it makes, `rand()`, the collision sound
 queue), and the rest of the step reads the cars where the physics left them, so any overlap changes the
@@ -938,6 +996,23 @@ its hand-off on average (at most 4.6 to 8 ms), ran 0.67 to 0.71 ms (at most 5.8 
 station's first open), and the join waited in none of 1650 steps walking and 2 of 2250 driving (at most 21 ms).
 On a console the pass takes about 1 ms of the step: 3 to 5 ms there, plus the wait for its turn, inside a draw of
 14 ms. That needs a console to confirm.
+
+Explosion chains: walking at night in Downtown traffic around block (87, 33), machine-gunning cars that blew up
+in chains, an Old 3DS fell to 22 to 27 frames per second over whole blocks. 59 to 89 lights a frame came in (the
+blasts' and the fires' added to the lamps'), so the CPU lit what those past the shader's 44 reach: up to 1800 light
+tests a frame over a block, up to 132 rows a frame left by the map cache to the game's walk, and `draw.map` went from
+about 7 ms to 13 to 19. The step took 8 to 10.6 ms (the AI driven cars 3, the particles up to 1.8), texture uploads
+10 to 26 ms in single frames (10 to 39 of them: car damage, peds' frames in their remaps), and `flush`'s 9.8 ms over a
+block is the sampled primitive's time scaled by `GTA2_3DS_PROF_SAMPLE` (100000 there), not a cost. With
+`GTA2_TEST_BOOM` (Running) in Azahar, ranking the lights and leaving to the game only the rows a light past the 44th
+reaches on the screen took, over the blasts' blocks, 12 cars: `draw.map` from 4.25 and 4.75 ms to 3.16 and 3.49 (the
+ranking alone 3.30 and 3.62), light tests from 1000 to 2 a frame, rows left to the game from 17 to 20 to none, tiles
+drawn by the game from 77 to 60; 20 cars: 4.73, 4.84 and 5.52 ms to 3.41, 3.37 and 4.21, light tests from 1300 to
+2000 to 8 to 390. The top screen: one frame identical, one
+with 486 pixels one level off (lit by the shader rather than the CPU), one with 53 pixels in a column at a fire's edge
+up to 9 levels off. Azahar's 4 to 6 times on the console's CPU put the saving at 5 to 9 ms a frame in such blocks.
+Each run has 4 frames of 70 to 140 ms in Azahar alone, in `C3D_FrameBegin` (timed in `draw.map.cache`, the frame's
+first draw) as the first blasts draw, both before and after; the averages above leave them out.
 
 ### Pacing
 

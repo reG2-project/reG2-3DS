@@ -173,6 +173,7 @@ bool gMipmaps;      // option: textures uploaded with mip levels
 u32 gOptionsGeneration = ~0u;
 u32 gTextureEpoch;  // bumped when every texture has to be converted again
 bool gLightsDirty = true;
+bool gGridDirty = true; // the light grid (BuildLightGrid) is out of date
 // Whether the renderer lights vertices in its shader (IRenderer::MaxShaderLights), with the gLights before
 // gShaderLightsEnd as of the last UploadLights.
 bool gShaderLights;
@@ -379,12 +380,63 @@ void SyncOptions()
     gLightsDirty = true;
 }
 
+// How much of the walked area a light reaches: the CPU lights every primitive that a light past the shader's reaches.
+f32 AreaReached(const LightInternal& l)
+{
+    if ((l.mFlags & 0x30000) != 0x10000)
+    {
+        return -1.0f;
+    }
+    const f32 w = fminf(l.mX + l.mRadius, gLightArea[2]) - fmaxf(l.mX - l.mRadius, gLightArea[0]);
+    const f32 h = fminf(l.mY + l.mRadius, gLightArea[3]) - fmaxf(l.mY - l.mRadius, gLightArea[1]);
+    return w > 0.0f && h > 0.0f ? w * h : 0.0f;
+}
+
+// With more lights than the shader takes, those that reach the most of the walked area go first (a blast's or a
+// fire's before a lamp at the edge), the others in their order, so that the CPU lights the fewest primitives.
+void RankLights(u32 shaderMax)
+{
+    static f32 sArea[256];
+    static u8 sOrder[256];
+    static LightInternal sSorted[256];
+    u32 lit = 0;
+    for (u32 j = 0; j < gNumLights; j++)
+    {
+        sArea[j] = AreaReached(gLights[j]);
+        lit += sArea[j] >= 0.0f;
+    }
+    if (lit <= shaderMax || !gLightAreaSet)
+    {
+        return;
+    }
+    // Insertion: equal areas keep their order.
+    for (u32 j = 0; j < gNumLights; j++)
+    {
+        u32 k = j;
+        for (; k > 0 && sArea[sOrder[k - 1]] < sArea[j]; k--)
+        {
+            sOrder[k] = sOrder[k - 1];
+        }
+        sOrder[k] = (u8)j;
+    }
+    for (u32 j = 0; j < gNumLights; j++)
+    {
+        sSorted[j] = gLights[sOrder[j]];
+    }
+    memcpy(gLights, sSorted, gNumLights * sizeof(LightInternal));
+    gGridDirty = true;
+}
+
 void UploadLights()
 {
     static RLight sLights[256];
     s32 n = 0;
     bool beams = false;
     const s32 shaderMax = gRenderer->MaxShaderLights();
+    if (shaderMax >= 0)
+    {
+        RankLights((u32)shaderMax);
+    }
     gShaderLightsEnd = gNumLights;
     for (u32 j = 0; j < gNumLights; j++)
     {
@@ -499,7 +551,6 @@ struct LightGrid
     u32 mWords; // words of each cell's light mask in use
     u32 mMask[kGridCells * kGridCells][256 / 32];
 } gGrid;
-bool gGridDirty = true;
 
 // A light's reach on each axis, a little past its radius: the grid keeps every light NearLights' test lets through.
 f32 GridReach(const LightInternal& light)

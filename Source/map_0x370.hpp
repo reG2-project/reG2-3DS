@@ -7,6 +7,7 @@
 #include <windows.h>
 #if defined(GTA2_PORT)
 #include "../port/src/prof.hpp"
+#include "../port/src/zone_index.hpp"
 #endif
 
 class Gang;
@@ -435,6 +436,33 @@ class Map_0x370
     EXPORT void SetZonePolicePedRatio(u16 zone_idx, s16 value);
 
     EXPORT gmp_map_zone* GetZone(u16 zone_idx);
+#if defined(GTA2_PORT)
+    // The first zone from index first on holding (mZoneX, mZoneY) that passes test, with mCurZoneIdx as the scan
+    // of the zones from first leaves it.
+    template <typename Test> gmp_map_zone* PortFirstZoneAtPos(Test test, u16 first = 0)
+    {
+        const u16* pIdx = PortZoneIndex::At(mpZones, mZoneX, mZoneY);
+        for (mCurZoneIdx = first; !pIdx && mCurZoneIdx < mpZones->mNumZones; mCurZoneIdx++)
+        {
+            gmp_map_zone* pZone = GetZone(mCurZoneIdx);
+            if (test(pZone) && pZone->ContainsPoint(mZoneX, mZoneY))
+            {
+                return pZone;
+            }
+        }
+        for (; pIdx && *pIdx != PortZoneIndex::kEnd; pIdx++)
+        {
+            gmp_map_zone* pZone = GetZone(*pIdx);
+            if (*pIdx >= first && test(pZone) && pZone->ContainsPoint(mZoneX, mZoneY))
+            {
+                mCurZoneIdx = *pIdx;
+                return pZone;
+            }
+        }
+        mCurZoneIdx = mpZones->mNumZones;
+        return NULL;
+    }
+#endif
 
     EXPORT Gang* GetGangAtCoords(Fix16 x, Fix16 y);
 
