@@ -453,17 +453,6 @@ bool Check(Chunk& c)
     return ok;
 }
 
-bool Enabled()
-{
-    if (!sRead)
-    {
-        const char* pEnv = getenv("GTA2_3DS_MAPCACHE");
-        sOn = pEnv && atoi(pEnv) != 0;
-        sRead = true;
-    }
-    return sOn;
-}
-
 void FreePending()
 {
     for (size_t i = 0; i < sPendingFree.size(); i++)
@@ -527,10 +516,29 @@ void Log()
 }
 } // namespace
 
+bool Enabled()
+{
+    if (!sRead)
+    {
+        const char* pEnv = getenv("GTA2_3DS_MAPCACHE");
+        sOn = pEnv && atoi(pEnv) != 0;
+        sRead = true;
+    }
+    return sOn;
+}
+
+void SetEnabled(bool on)
+{
+    sOn = on;
+    sRead = true;
+}
+
 void BeginLayer(s32 z, s32 minX, s32 minY, s32 maxX, s32 maxY)
 {
     if (!Enabled())
     {
+        // The meshes stay: Invalidate, Check and TakeLid's mismatch catch what changes while off.
+        sFrameOn = false;
         return;
     }
     if (z == 0)

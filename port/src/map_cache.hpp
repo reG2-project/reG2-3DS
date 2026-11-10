@@ -7,6 +7,9 @@
 namespace PortMapCache
 {
 #if defined(__3DS__)
+// GTA2_3DS_MAPCACHE until SetEnabled, which applies from the next layer on; while off the built chunks are kept.
+bool Enabled();
+void SetEnabled(bool on);
 // After the layer's lights and projection are set, before its blocks are walked (minX..maxY: the walk's range).
 void BeginLayer(s32 z, s32 minX, s32 minY, s32 maxX, s32 maxY);
 // RenderFlatBlock's lid at gXCoord, gYCoord, gZCoord: true when the cache draws it at the end of the layer.
@@ -16,6 +19,13 @@ void EndLayer(s32 z);
 // The block column at (x, y) changed.
 void Invalidate(s32 x, s32 y);
 #else
+inline bool Enabled()
+{
+    return false;
+}
+inline void SetEnabled(bool)
+{
+}
 inline void BeginLayer(s32, s32, s32, s32, s32)
 {
 }
