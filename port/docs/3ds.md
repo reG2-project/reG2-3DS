@@ -646,7 +646,8 @@ The logic's memory traffic. In Azahar, the lockstep night drive visits about 125
 columns 2800 times (`GetBlock` 1000, `GetEffectiveBlock` 560, `GetBlockClamped` 500, the roof test 140,
 the railway 125), walks 3000 sprite grid cells and tests 90 sprite pairs; per object the console is about
 5 times slower than Azahar for the visit and the peds, 7 for the AI and the physics. Two options cut that
-traffic without changing a result (`port/src/logic_opts.hpp`, each on unless its variable is 0):
+traffic without changing a result (`port/src/logic_opts.hpp`, each off unless its variable is 1, as on the
+console neither gains anything measurable: the night drive's logic 9.82 ms per step with both off, 9.90 with both on):
 `GTA2_3DS_PREFETCH` (`port/src/prefetch.cpp`) has the car, ped and object pool walks ask, while they update
 an item, for the item 3 ahead, what the one 2 ahead points to (sprite, physics, AI, a ped's Char) and the
 next one's collision shape or sprite, each pointer read from memory asked for one item before (PLD; Azahar
@@ -658,8 +659,8 @@ redone the game's way); in Azahar 25 % fewer grid cells walked and the parked ca
 The lockstep hashes (cars, peds, `rand()`, sound) match over the four scenes. The sound queue's hash depends
 on the host's timing, as the game asks the mixer whether a sample still plays: the same logic can shift it
 by a few samples (a run with both options off did once, the event counters' slower step does), while the
-cars, peds and `rand()` never move. On the console, `GTA2_3DS_PROF_AB=1` with `GTA2_3DS_PROF_PMU=1`
-compares both options on and off in one session, with the cache misses and stall cycles of each part.
+cars, peds and `rand()` never move. On the console, `GTA2_3DS_PROF_AB=1` with both options at 1 and
+`GTA2_3DS_PROF_PMU=1` compares them on and off in one session, with the cache misses and stall cycles of each part.
 
 Phases over all cars. A cache simulation of the Old 3DS's L1 (16 KB of code) on the Linux port puts most of the
 step's instruction misses in the cars: each car's AI and physics run 8 to 18 KB of code, which the next car's

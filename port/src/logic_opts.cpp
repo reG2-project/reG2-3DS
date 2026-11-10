@@ -13,7 +13,7 @@ const char* const kNames[kOptionCount] = {"GTA2_3DS_PREFETCH", "GTA2_3DS_GRIDKEE
 bool Read(Option option)
 {
     const char* pValue = getenv(kNames[option]);
-    gOn[option] = pValue && atoi(pValue) == 0 ? 0 : 1;
+    gOn[option] = pValue && atoi(pValue) != 0 ? 1 : 0;
     return gOn[option] > 0;
 }
 } // namespace PortLogic
