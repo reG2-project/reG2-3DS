@@ -24,6 +24,8 @@ extern "C" const u8 map_cache_shbin[];
 extern "C" const u8 map_cache_shbin_end[];
 // citro3d's context begins with the GX command queue it binds for its frames (C3D_Context in citro3d's internal.h).
 extern "C" gxCmdQueue_s __C3D_Context;
+// citro3d's own (internal.h): writes the state changed since the last draw into the command buffer.
+extern "C" void C3Di_UpdateContext(void);
 
 namespace
 {
@@ -2862,7 +2864,9 @@ bool C3DRenderer::DrawMeshes(const MeshDraw* pDraws, s32 count, bool lit)
     }
     p->BeginFrame();
     u64 t = svcGetSystemTick();
+    PORT_PROF_SECTION(kDrawMapCacheDrawFlush);
     p->Flush();
+    PORT_PROF_SECTION(kDrawMapCacheDrawSwitch);
     u64 t1 = svcGetSystemTick();
     sMeshTicks[0] += t1 - t;
     t = t1;
@@ -2873,12 +2877,15 @@ bool C3DRenderer::DrawMeshes(const MeshDraw* pDraws, s32 count, bool lit)
     AttrInfo_AddLoader(pAttr, 1, GPU_FLOAT, 2);
     AttrInfo_AddFixed(pAttr, kMeshEyeAttrib);
     C3D_BoolUnifSet(GPU_VERTEX_SHADER, sUniMeshLit, lit);
+    // The program's upload, which the first draw would make.
+    C3Di_UpdateContext();
     p->mWorldDrawn = true;
     const C3D_Mtx& m = p->mProjection;
     const MeshVertex* pBuffer = 0;
     t1 = svcGetSystemTick();
     sMeshTicks[1] += t1 - t;
     t = t1;
+    PORT_PROF_SECTION(kDrawMapCacheDrawCalls);
     for (s32 i = 0; i < count; i++)
     {
         const MeshDraw& d = pDraws[i];
@@ -2924,6 +2931,7 @@ bool C3DRenderer::DrawMeshes(const MeshDraw* pDraws, s32 count, bool lit)
     t1 = svcGetSystemTick();
     sMeshTicks[2] += t1 - t;
     t = t1;
+    PORT_PROF_SECTION(kDrawMapCacheDrawBack);
     // Back to BeginFrame's program, vertices and projection.
     C3D_BindProgram(&p->mProgram);
     AttrInfo_Init(pAttr);
@@ -2936,9 +2944,12 @@ bool C3DRenderer::DrawMeshes(const MeshDraw* pDraws, s32 count, bool lit)
     BufInfo_Init(pBuf);
     BufInfo_Add(pBuf, p->mVerts, sizeof(C3DVertex), 4, 0x3210);
     C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, p->mUniProjection, &p->mProjection);
+    // Made here rather than in the game's next draw, so that its cost shows with the switch.
+    C3Di_UpdateContext();
     p->mStateValid = false;
     p->mBoundTex = 0;
     sMeshTicks[3] += svcGetSystemTick() - t;
+    PORT_PROF_END();
     return true;
 }
 

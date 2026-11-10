@@ -1,4 +1,5 @@
 #include "../src/map_cache.hpp"
+#include "../src/prof.hpp"
 #include "map_cache_mesh.hpp"
 #include "Camera.hpp"
 #include "MapRenderer.hpp"
@@ -263,6 +264,8 @@ bool QuadBefore(const Quad& a, const Quad& b)
 
 void Build(Chunk& c, s32 cx, s32 cy)
 {
+    PORT_PROF(kDrawMapCacheBuild);
+    PORT_PROF_COUNT(kMcBuilds, 1);
     const uint64_t t0 = MapCacheMesh::Ticks();
     if (c.built)
     {
@@ -282,6 +285,7 @@ void Build(Chunk& c, s32 cx, s32 cy)
     c.builtFrame = sFrame;
     sQuads.clear();
     const s32 x0 = cx << kChunkShift, y0 = cy << kChunkShift;
+    PORT_PROF_SECTION(kDrawMapCacheBuildBlocks);
     for (s32 z = 0; z < kLayers; z++)
     {
         for (s32 ly = 0; ly < kChunkSize; ly++)
@@ -373,7 +377,9 @@ void Build(Chunk& c, s32 cx, s32 cy)
             }
         }
     }
+    PORT_PROF_SECTION(kDrawMapCacheBuildSort);
     std::stable_sort(sQuads.begin(), sQuads.end(), QuadBefore);
+    PORT_PROF_SECTION(kDrawMapCacheBuildMesh);
     if (!sQuads.empty())
     {
         const size_t bytes = sQuads.size() * 6 * sizeof(MeshVertex);
@@ -407,6 +413,7 @@ void Build(Chunk& c, s32 cx, s32 cy)
             sMeshBytes += c.bytes;
         }
     }
+    PORT_PROF_SECTION(kDrawMapCacheBuildBlocks);
     for (s32 z = 0; z < kLayers; z++)
     {
         for (s32 ly = 0; ly < kChunkSize; ly++)
@@ -422,6 +429,7 @@ void Build(Chunk& c, s32 cx, s32 cy)
             c.walk[z][ly] = row;
         }
     }
+    PORT_PROF_END();
     c.built = true;
     c.dirty = false;
     c.valid = true;
@@ -560,6 +568,7 @@ void BeginLayer(s32 z, s32 minX, s32 minY, s32 maxX, s32 maxY)
         sFrameOn = false;
         return;
     }
+    PORT_PROF(kDrawMapCache);
     if (z == 0)
     {
         Log();
@@ -585,7 +594,13 @@ void BeginLayer(s32 z, s32 minX, s32 minY, s32 maxX, s32 maxY)
         {
             Chunk& c = sChunks[cy][cx];
             const bool stale = !c.built || c.dirty;
-            if (stale || (sFrame - c.builtFrame >= kPartialRebuild && Converted(c)))
+            bool converted = false;
+            if (!stale && sFrame - c.builtFrame >= kPartialRebuild)
+            {
+                PORT_PROF(kDrawMapCacheCheck);
+                converted = Converted(c);
+            }
+            if (stale || converted)
             {
                 // The rest wait for the next frames, drawn by the game meanwhile.
                 if (sBuildsLeft > 0)
@@ -601,7 +616,11 @@ void BeginLayer(s32 z, s32 minX, s32 minY, s32 maxX, s32 maxY)
             if (c.checkedFrame != sFrame)
             {
                 c.checkedFrame = sFrame;
-                c.valid = Check(c);
+                PORT_PROF_COUNT(kMcChecks, 1);
+                {
+                    PORT_PROF(kDrawMapCacheCheck);
+                    c.valid = Check(c);
+                }
                 if (!c.valid && sBuildsLeft > 0)
                 {
                     sInvalid++;
@@ -621,12 +640,20 @@ void BeginLayer(s32 z, s32 minX, s32 minY, s32 maxX, s32 maxY)
                 continue;
             }
             const f32 x0 = (f32)(cx << kChunkShift), y0 = (f32)(cy << kChunkShift), top = (f32)(z + 1);
-            if (sLit && MapCacheMesh::NeedsCpuLight(x0, y0, top, x0 + kChunkSize, y0 + kChunkSize, top))
+            bool cpuLight = false;
+            if (sLit)
+            {
+                PORT_PROF(kDrawMapCacheLight);
+                cpuLight = MapCacheMesh::NeedsCpuLight(x0, y0, top, x0 + kChunkSize, y0 + kChunkSize, top);
+            }
+            if (cpuLight)
             {
                 sCpuLit++;
+                PORT_PROF_COUNT(kMcCpuLit, 1);
                 continue;
             }
             c.drawn |= (u8)(1u << z);
+            PORT_PROF_COUNT(kMcDrawn, 1);
         }
     }
     sBeginTicks += MapCacheMesh::Ticks() - t0;
@@ -653,6 +680,7 @@ bool TakeLid(u16 lid)
     const u16 cached = c.lids[(z * kChunkSize + (y & (kChunkSize - 1))) * kChunkSize + (x & (kChunkSize - 1))];
     if (cached == lid)
     {
+        PORT_PROF_COUNT(kMcLids, 1);
         return true;
     }
     if (cached)
@@ -684,6 +712,7 @@ bool SkipCell(s32 x, s32 y)
     // A cached lid is drawn by EndLayer only in the chunks it draws this frame.
     const bool skip = !c.lids[(sLayer * kChunkSize + ly) * kChunkSize + lx] || (c.drawn >> sLayer) & 1;
     sSkipped += skip ? 1 : 0;
+    PORT_PROF_COUNT(kMcSkipped, skip ? 1 : 0);
     return skip;
 }
 
@@ -693,6 +722,7 @@ void EndLayer(s32 z)
     {
         return;
     }
+    PORT_PROF(kDrawMapCache);
     const uint64_t t0 = MapCacheMesh::Ticks();
     sDraws.clear();
     const f32 scale = gScreenScaleTop.ToFloat();
@@ -754,11 +784,13 @@ void EndLayer(s32 z)
                 d.wz = (f32)(z + 1);
                 sDraws.push_back(d);
                 sQuadsDrawn += (u32)d.count / 6;
+                PORT_PROF_COUNT(kMcQuads, (u32)d.count / 6);
             }
         }
     }
     if (!sDraws.empty())
     {
+        PORT_PROF(kDrawMapCacheDraw);
         MapCacheMesh::DrawAll(&sDraws[0], (s32)sDraws.size(), sLit);
         sDrawCalls += (u32)sDraws.size();
     }
