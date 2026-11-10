@@ -434,6 +434,9 @@ gmp_map_zone* Map_0x370::GetZoneAtPosOfType(u8 zone_x, u8 zone_y, u8 zone_type)
         mZoneY = zone_y;
         mbMatchPos = true;
 
+#if defined(GTA2_PORT)
+        return PortFirstZoneAtPos([this](const gmp_map_zone* pZone) { return pZone->mZoneType == mZoneType; });
+#else
         for (mCurZoneIdx = 0; mCurZoneIdx < mpZones->mNumZones; mCurZoneIdx++)
         {
             gmp_map_zone* pZone = GetZone(mCurZoneIdx);
@@ -442,6 +445,7 @@ gmp_map_zone* Map_0x370::GetZoneAtPosOfType(u8 zone_x, u8 zone_y, u8 zone_type)
                 return pZone;
             }
         }
+#endif
     }
     return NULL;
 }
@@ -454,6 +458,12 @@ gmp_map_zone* Map_0x370::GetNavZoneAtPos(u8 zone_x, u8 zone_y)
         mZoneX = zone_x;
         mZoneY = zone_y;
 
+#if defined(GTA2_PORT)
+        return PortFirstZoneAtPos([](const gmp_map_zone* pZone) {
+            return pZone->mZoneType == Information_10 || pZone->mZoneType == Navigation_1 ||
+                pZone->mZoneType == Local_Navigation_15;
+        });
+#else
         for (mCurZoneIdx = 0; mCurZoneIdx < mpZones->mNumZones; mCurZoneIdx++)
         {
             gmp_map_zone* pZone = GetZone(mCurZoneIdx);
@@ -465,6 +475,7 @@ gmp_map_zone* Map_0x370::GetNavZoneAtPos(u8 zone_x, u8 zone_y)
                 return pZone;
             }
         }
+#endif
     }
     return NULL;
 }
@@ -480,6 +491,9 @@ gmp_map_zone* Map_0x370::GetFirstZoneAtPos(u8 zone_x, u8 zone_y)
         this->mZoneY = zone_y;
         this->mbMatchPos = true;
 
+#if defined(GTA2_PORT)
+        return PortFirstZoneAtPos([](const gmp_map_zone*) { return true; });
+#else
         for (mCurZoneIdx = 0; mCurZoneIdx < mpZones->mNumZones; mCurZoneIdx++)
         {
             pZone = Map_0x370::GetZone(this->mCurZoneIdx);
@@ -488,6 +502,7 @@ gmp_map_zone* Map_0x370::GetFirstZoneAtPos(u8 zone_x, u8 zone_y)
                 return pZone;
             }
         }
+#endif
     }
     return NULL;
 }
@@ -499,6 +514,13 @@ gmp_map_zone* Map_0x370::GetNextZone()
 
     if (this->mpZoneData)
     {
+#if defined(GTA2_PORT)
+        if (mbMatchPos && mCurZoneIdx + 1 < mpZones->mNumZones)
+        {
+            return PortFirstZoneAtPos([this](const gmp_map_zone* pZone) { return pZone->mZoneType == mZoneType; },
+                                      mCurZoneIdx + 1);
+        }
+#endif
         for (++this->mCurZoneIdx; mCurZoneIdx < mpZones->mNumZones; ++this->mCurZoneIdx)
         {
             if (mCurZoneIdx >= mpZones->mNumZones)
@@ -4565,6 +4587,9 @@ void Map_0x370::build_zone_list(u32 chunk_size)
         in_use_size += zone_data_size;
         pZoneIter = reinterpret_cast<gmp_map_zone*>(reinterpret_cast<u8*>(pZoneIter) + zone_data_size);
     }
+#if defined(GTA2_PORT)
+    PortZoneIndex::Build(mpZones);
+#endif
 }
 
 MATCH_FUNC(0x4E9160)
