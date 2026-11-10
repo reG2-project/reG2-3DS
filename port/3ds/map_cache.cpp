@@ -699,7 +699,7 @@ void Log()
     // Per frame but for the builds.
     Log3DS_Printf("MAPCACHE frames %u built %d builds %u drops %u quads %.1f draws %.1f mismatch %u cpulit %u invalid %u "
                   "build.ms %.2f (textures %.2f, slowest %.2f) draw.ms %.3f (flush %.3f switch %.3f draws %.3f "
-                  "[first DrawArrays %.3f, others %.3f] back %.3f) begin.ms %.3f mesh.kb %u linear.free.kb %u cells %.1f skipped %.1f\n",
+                  "[through citro3d %.3f, raw %.3f] back %.3f) begin.ms %.3f mesh.kb %u linear.free.kb %u cells %.1f skipped %.1f\n",
                   (unsigned)sLogFrames, (int)sBuilt, (unsigned)sBuilds, (unsigned)sDrops, sQuadsDrawn / n, sDrawCalls / n,
                   (unsigned)sMismatches, (unsigned)sCpuLit, (unsigned)sInvalid, MapCacheMesh::TicksToMs(sBuildTicks),
                   MapCacheMesh::TicksToMs(sBuildTexTicks), MapCacheMesh::TicksToMs(sBuildMax),

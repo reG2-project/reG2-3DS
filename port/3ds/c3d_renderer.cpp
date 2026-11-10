@@ -17,11 +17,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-// render.v.pica assembled by picasso and embedded by bin2s.
+// render.v.pica and map_cache.v.pica assembled by picasso into one shbin, embedded by bin2s.
 extern "C" const u8 render_shbin[];
 extern "C" const u8 render_shbin_end[];
-extern "C" const u8 map_cache_shbin[];
-extern "C" const u8 map_cache_shbin_end[];
 // citro3d's context begins with the GX command queue it binds for its frames (C3D_Context in citro3d's internal.h).
 extern "C" gxCmdQueue_s __C3D_Context;
 // citro3d's own (internal.h): writes the state changed since the last draw into the command buffer.
@@ -564,6 +562,11 @@ struct C3DRenderer::Impl : HudTheme::Sink
     C3D_RenderTarget* mTarget;
     DVLB_s* mDvlb;
     shaderProgram_s mProgram;
+    // mProgram's inputs as BeginFrame binds them, which DrawMeshes writes back itself.
+    C3D_AttrInfo mAttr;
+    C3D_BufInfo mBufInfo;
+    // BeginFrame's program and inputs may not be in the command buffer yet: no draw through citro3d since.
+    bool mCtxPending;
     s32 mUniProjection;
     s32 mUniAmbient, mUniLights, mUniLightLoop, mUniAnyLights;
     // The batch has vertices lit in the shader.
@@ -1342,17 +1345,9 @@ void C3DRenderer::Impl::BeginFrame()
     mTargetW = kScreenW;
     mTargetH = kScreenH;
     C3D_BindProgram(&mProgram);
-    C3D_AttrInfo* pAttr = C3D_GetAttrInfo();
-    AttrInfo_Init(pAttr);
-    AttrInfo_AddLoader(pAttr, 0, GPU_FLOAT, 3);
-    AttrInfo_AddLoader(pAttr, 1, GPU_UNSIGNED_BYTE, 4);
-    AttrInfo_AddLoader(pAttr, 2, GPU_FLOAT, 2);
-    AttrInfo_AddLoader(pAttr, 3, GPU_FLOAT, 4);
-    AttrInfo_AddFixed(pAttr, kEyeAttrib);
-    C3D_BufInfo* pBuf = C3D_GetBufInfo();
-    BufInfo_Init(pBuf);
-    BufInfo_Add(pBuf, mVerts, sizeof(C3DVertex), 4, 0x3210);
-    mIndexOffset = osConvertVirtToPhys(mIndices) - pBuf->base_paddr;
+    C3D_SetAttrInfo(&mAttr);
+    C3D_SetBufInfo(&mBufInfo);
+    mCtxPending = true;
     C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, mUniProjection, &mProjection);
     C3D_DepthTest(false, GPU_ALWAYS, GPU_WRITE_COLOR);
     C3D_CullFace(GPU_CULL_NONE);
@@ -2031,6 +2026,7 @@ void C3DRenderer::Impl::Draw(RTexture* pTex, u32 state, const ScreenRect& scisso
     if (!sameState)
     {
         C3D_DrawElements(GPU_TRIANGLES, count / 4 * 6, C3D_UNSIGNED_SHORT, mIndices + first / 4 * 6);
+        mCtxPending = false;
         return;
     }
     // The texture, then C3D_DrawElements' commands.
@@ -2117,6 +2113,15 @@ bool C3DRenderer::Init(Loader, const char** ppError)
     GSPGPU_FlushDataCache(p->mIndices, kMaxIndices * sizeof(u16));
     shaderProgramInit(&p->mProgram);
     shaderProgramSetVsh(&p->mProgram, &p->mDvlb->DVLE[0]);
+    AttrInfo_Init(&p->mAttr);
+    AttrInfo_AddLoader(&p->mAttr, 0, GPU_FLOAT, 3);
+    AttrInfo_AddLoader(&p->mAttr, 1, GPU_UNSIGNED_BYTE, 4);
+    AttrInfo_AddLoader(&p->mAttr, 2, GPU_FLOAT, 2);
+    AttrInfo_AddLoader(&p->mAttr, 3, GPU_FLOAT, 4);
+    AttrInfo_AddFixed(&p->mAttr, kEyeAttrib);
+    BufInfo_Init(&p->mBufInfo);
+    BufInfo_Add(&p->mBufInfo, p->mVerts, sizeof(C3DVertex), 4, 0x3210);
+    p->mIndexOffset = osConvertVirtToPhys(p->mIndices) - p->mBufInfo.base_paddr;
     p->mUniProjection = shaderInstanceGetUniformLocation(p->mProgram.vertexShader, "projection");
     p->mUniAmbient = shaderInstanceGetUniformLocation(p->mProgram.vertexShader, "ambient");
     p->mUniLights = shaderInstanceGetUniformLocation(p->mProgram.vertexShader, "lights");
@@ -2783,16 +2788,30 @@ s32 C3DRenderer::HudScreenWidth() const
 
 namespace
 {
-// map_cache.v.pica, loaded on the first DrawMeshes: 1 ready, -1 unusable.
-DVLB_s* sMeshDvlb;
+// map_cache.v.pica, render_shbin's second DVLE, and its inputs, set up on the first DrawMeshes: 1 ready, -1 unusable.
 shaderProgram_s sMeshProgram;
+u32 sGameEntry, sMeshEntry;
+C3D_AttrInfo sMeshAttr;
+C3D_BufCfg sMeshBuf;
 s32 sMeshState;
 s32 sUniMeshLit;
 // DrawMeshes' ticks: the batch before, the switch to the mesh program, the draws, the switch back, and in the
-// draws, C3D_DrawArrays for the first draw (it uploads the program) and for the others.
+// draws, those through citro3d and the others.
 uint64_t sMeshTicks[6];
 std::vector<u32> sMeshStates;
 const u32 kDrawn = 0xFFFFFFFFu;
+}
+
+// A program of render_shbin and its inputs, as C3D_BindProgram, C3Di_AttrInfoBind and C3Di_BufInfoBind write them when
+// only the entry point differs; citro3d's context keeps BeginFrame's.
+static void WriteProgram(u32 entry, const C3D_AttrInfo& attr, const C3D_BufCfg& buf)
+{
+    GPUCMD_AddWrite(GPUREG_VSH_ENTRYPOINT, 0x7FFF0000u | (entry & 0xFFFF));
+    GPUCMD_AddIncrementalWrites(GPUREG_ATTRIBBUFFERS_FORMAT_LOW, attr.flags, 2);
+    GPUCMD_AddMaskedWrite(GPUREG_VSH_INPUTBUFFER_CONFIG, 0xB, 0xA0000000u | (u32)(attr.attrCount - 1));
+    GPUCMD_AddWrite(GPUREG_VSH_NUM_ATTR, (u32)(attr.attrCount - 1));
+    GPUCMD_AddIncrementalWrites(GPUREG_VSH_ATTRIBUTES_PERMUTATION_LOW, (const u32*)&attr.permutation, 2);
+    GPUCMD_AddIncrementalWrites(GPUREG_ATTRIBBUFFER0_OFFSET, (const u32*)&buf, 3);
 }
 
 u32 C3DRenderer::MeshFrame()
@@ -2846,24 +2865,47 @@ bool C3DRenderer::DrawMeshes(const MeshDraw* pDraws, s32 count, bool lit)
     if (sMeshState == 0)
     {
         sMeshState = -1;
-        sMeshDvlb = DVLB_ParseFile((u32*)map_cache_shbin, (u32)(map_cache_shbin_end - map_cache_shbin));
-        if (sMeshDvlb)
+        // The shbin's words, as libctru's DVLE_s holds enums of another size than this file's: a DVLE's main offset, its
+        // constants and outputs (offset, count).
+        const u32* pShbin = (const u32*)render_shbin;
+        const u32 size = (u32)(render_shbin_end - render_shbin);
+        u32* pCopy = pShbin[1] == 2 ? (u32*)malloc(size) : 0;
+        if (pCopy)
         {
+            const u32* pA = pShbin + pShbin[2] / 4;
+            const u32* pB = pShbin + pShbin[3] / 4;
+            // A copy listing map_cache.v.pica's DVLE first, as DVLE[1] is out of reach with this file's DVLE_s.
+            memcpy(pCopy, pShbin, size);
+            pCopy[2] = pShbin[3];
+            pCopy[3] = pShbin[2];
+            DVLB_s* pDvlb = DVLB_ParseFile(pCopy, size);
             shaderProgramInit(&sMeshProgram);
-            shaderProgramSetVsh(&sMeshProgram, &sMeshDvlb->DVLE[0]);
+            shaderProgramSetVsh(&sMeshProgram, pDvlb ? &pDvlb->DVLE[0] : 0);
             shaderInstance_s* pVsh = sMeshProgram.vertexShader;
             sUniMeshLit = shaderInstanceGetUniformLocation(pVsh, "meshLit");
-            // The lights stay in the registers render.v.pica put them in.
+            sGameEntry = pA[2];
+            sMeshEntry = pB[2];
+            // The lights stay in the registers render.v.pica put them in, and WriteProgram changes the entry point only.
             const bool same = shaderInstanceGetUniformLocation(pVsh, "projection") == p->mUniProjection &&
                               shaderInstanceGetUniformLocation(pVsh, "ambient") == p->mUniAmbient &&
                               shaderInstanceGetUniformLocation(pVsh, "lights") == p->mUniLights &&
                               shaderInstanceGetUniformLocation(pVsh, "lightLoop") == p->mUniLightLoop &&
-                              shaderInstanceGetUniformLocation(pVsh, "anyLights") == p->mUniAnyLights;
+                              shaderInstanceGetUniformLocation(pVsh, "anyLights") == p->mUniAnyLights &&
+                              pA[7] == pB[7] && !memcmp(pA + pA[6] / 4, pB + pB[6] / 4, pA[7] * sizeof(DVLE_constEntry_s)) &&
+                              pA[11] == pB[11] && !memcmp(pA + pA[10] / 4, pB + pB[10] / 4, pA[11] * sizeof(DVLE_outEntry_s));
             sMeshState = same && sUniMeshLit >= 0 ? 1 : -1;
             if (sMeshState < 0)
             {
-                Log3DS_Printf("c3d: map_cache.v.pica's uniforms are not where render.v.pica's are\n");
+                Log3DS_Printf("c3d: map_cache.v.pica's uniforms, constants or outputs are not where render.v.pica's are\n");
             }
+            AttrInfo_Init(&sMeshAttr);
+            AttrInfo_AddLoader(&sMeshAttr, 0, GPU_UNSIGNED_BYTE, 4);
+            AttrInfo_AddLoader(&sMeshAttr, 1, GPU_FLOAT, 2);
+            AttrInfo_AddFixed(&sMeshAttr, kMeshEyeAttrib);
+            C3D_BufInfo buf;
+            BufInfo_Init(&buf);
+            BufInfo_Add(&buf, p->mVerts, sizeof(MeshVertex), 2, 0x10);
+            sMeshBuf = buf.buffers[0];
         }
     }
     if (sMeshState < 0)
@@ -2878,24 +2920,33 @@ bool C3DRenderer::DrawMeshes(const MeshDraw* pDraws, s32 count, bool lit)
     u64 t1 = svcGetSystemTick();
     sMeshTicks[0] += t1 - t;
     t = t1;
-    C3D_BindProgram(&sMeshProgram);
-    C3D_AttrInfo* pAttr = C3D_GetAttrInfo();
-    AttrInfo_Init(pAttr);
-    AttrInfo_AddLoader(pAttr, 0, GPU_UNSIGNED_BYTE, 4);
-    AttrInfo_AddLoader(pAttr, 1, GPU_FLOAT, 2);
-    AttrInfo_AddFixed(pAttr, kMeshEyeAttrib);
+    // BeginFrame's program and inputs first, or the next draw through citro3d would write them over the mesh's.
+    if (p->mCtxPending)
+    {
+        C3Di_UpdateContext();
+        p->mCtxPending = false;
+    }
+    // The buffer's offset comes with the first draw. Uniforms written here are left dirty: citro3d's next update
+    // uploads them again, with the values the switch back leaves.
+    WriteProgram(sMeshEntry, sMeshAttr, sMeshBuf);
     C3D_BoolUnifSet(GPU_VERTEX_SHADER, sUniMeshLit, lit);
-    // The program's upload, which the first draw would make.
-    C3Di_UpdateContext();
-    p->mWorldDrawn = true;
+    GPUCMD_AddWrite(GPUREG_VSH_BOOLUNIFORM, 0x7FFF0000u | C3D_BoolUnifs[GPU_VERTEX_SHADER]);
+    // render.v.pica's clip position (x, y, -0.5, 1) / rhw of the logical pixel, as affine in the local (x, y): the first
+    // two rows are the layer's, the same for all its draws, the others the chunk's.
     const C3D_Mtx& m = p->mProjection;
-    const MeshVertex* pBuffer = 0;
+    const f32 w = 1.0f / (pDraws[0].rhw > 0.0000001f ? pDraws[0].rhw : 0.0000001f);
+    const f32 k = w * pDraws[0].scale;
+    C3D_FVUnifSet(GPU_VERTEX_SHADER, p->mUniProjection, k * m.r[0].x, k * m.r[1].x, 0.0f, 0.0f);
+    C3D_FVUnifSet(GPU_VERTEX_SHADER, p->mUniProjection + 1, k * m.r[0].y, k * m.r[1].y, 0.0f, 0.0f);
+    GPUCMD_AddWrite(GPUREG_VSH_FLOATUNIFORM_CONFIG, 0x80000000u | (u32)p->mUniProjection);
+    GPUCMD_AddWrites(GPUREG_VSH_FLOATUNIFORM_DATA, (u32*)&C3D_FVUnif[GPU_VERTEX_SHADER][p->mUniProjection], 8);
+    p->mWorldDrawn = true;
     t1 = svcGetSystemTick();
     sMeshTicks[1] += t1 - t;
     t = t1;
     PORT_PROF_SECTION(kDrawMapCacheDrawCalls);
-    // The draws by state, in their order within one (lids do not overlap). The first of a state goes through
-    // citro3d; the others write what changes (texture, chunk) and C3D_DrawArrays' commands, as Impl::Draw does.
+    // The draws by state, in their order within one (lids do not overlap). A state other than the one applied goes
+    // through citro3d; the others write what changes (texture, chunk) and C3D_DrawArrays' commands, as Impl::Draw does.
     sMeshStates.resize((size_t)count);
     for (s32 i = 0; i < count; i++)
     {
@@ -2905,9 +2956,10 @@ bool C3DRenderer::DrawMeshes(const MeshDraw* pDraws, s32 count, bool lit)
         state |= pTex && pTex->mPremultiplied ? kStatePremultiplied : 0;
         sMeshStates[i] = state | (d.noMip ? kStateNoMip : 0);
     }
-    const C3D_Tex* pLastTex = 0;
-    u32 lastParam = 0, lastLod = 0;
-    for (s32 run = 0, n = 0; run < count; run++)
+    const MeshVertex* pBuffer = 0;
+    C3D_Tex* pLastTex = p->mBoundTex;
+    u32 lastParam = p->mBoundParam, lastLod = p->mBoundLod;
+    for (s32 run = 0; run < count; run++)
     {
         const u32 state = sMeshStates[run];
         for (s32 i = run; i < count && state != kDrawn; i++)
@@ -2917,7 +2969,7 @@ bool C3DRenderer::DrawMeshes(const MeshDraw* pDraws, s32 count, bool lit)
                 continue;
             }
             sMeshStates[i] = kDrawn;
-            const bool raw = i != run;
+            const bool raw = p->mStateValid && state == p->mAppliedState && !(p->mClip != p->mAppliedScissor);
             const MeshDraw& d = pDraws[i];
             RTexture* pTex = d.pTex && d.pTex->mValid ? d.pTex : 0;
             RTexture* pBind = pTex ? (pTex->mPage ? &pTex->mPage->mTex : pTex) : p->mWhite;
@@ -2930,30 +2982,22 @@ bool C3DRenderer::DrawMeshes(const MeshDraw* pDraws, s32 count, bool lit)
             C3D_TexSetFilter(pTex3, GPU_LINEAR, GPU_LINEAR);
             C3D_TexSetFilterMipmap(pTex3, GPU_LINEAR);
             pTex3->maxLevel = d.noMip ? 0 : pBind->mLevels;
-            // render.v.pica's clip position (x, y, -0.5, 1) / rhw of the logical pixel, as affine in the local (x, y).
-            // The first two rows are the layer's, the same for all its draws.
-            const f32 w = 1.0f / (d.rhw > 0.0000001f ? d.rhw : 0.0000001f);
-            const f32 k = w * d.scale;
             const bool moved = d.pVerts != pBuffer;
-            if (!raw || moved)
+            if (moved)
             {
                 C3D_FVUnifSet(GPU_VERTEX_SHADER, p->mUniProjection + 2, w * (m.r[0].x * d.x0 + m.r[0].y * d.y0 + m.r[0].w),
                               w * (m.r[1].x * d.x0 + m.r[1].y * d.y0 + m.r[1].w), -0.5f * w, w);
                 C3D_FVUnifSet(GPU_VERTEX_SHADER, p->mUniProjection + 3, d.wx - p->mLightOriginX, d.wy - p->mLightOriginY, d.wz, 0.0f);
             }
             const u64 td = svcGetSystemTick();
+            if (moved)
+            {
+                GPUCMD_AddWrite(GPUREG_ATTRIBBUFFER0_OFFSET, osConvertVirtToPhys(d.pVerts) - p->mBufInfo.base_paddr);
+            }
             if (!raw)
             {
                 p->ApplyState(state, p->mClip);
                 C3D_TexBind(0, pTex3);
-                C3D_FVUnifSet(GPU_VERTEX_SHADER, p->mUniProjection, k * m.r[0].x, k * m.r[1].x, 0.0f, 0.0f);
-                C3D_FVUnifSet(GPU_VERTEX_SHADER, p->mUniProjection + 1, k * m.r[0].y, k * m.r[1].y, 0.0f, 0.0f);
-                if (moved)
-                {
-                    C3D_BufInfo* pBuf = C3D_GetBufInfo();
-                    BufInfo_Init(pBuf);
-                    BufInfo_Add(pBuf, d.pVerts, sizeof(MeshVertex), 2, 0x10);
-                }
                 C3D_DrawArrays(GPU_TRIANGLES, d.first, d.count);
             }
             else
@@ -2964,12 +3008,9 @@ bool C3DRenderer::DrawMeshes(const MeshDraw* pDraws, s32 count, bool lit)
                 }
                 if (moved)
                 {
-                    // The two rows as C3D_UpdateUniforms uploads them (left dirty: uploaded again with the next state's
-                    // draw or the switch back), and the buffer's offset from BufInfo_Init's base.
                     const u32 config = 0x80000000u | (u32)(p->mUniProjection + 2);
                     GPUCMD_AddWrite(GPUREG_VSH_FLOATUNIFORM_CONFIG, config);
                     GPUCMD_AddWrites(GPUREG_VSH_FLOATUNIFORM_DATA, (u32*)&C3D_FVUnif[GPU_VERTEX_SHADER][p->mUniProjection + 2], 8);
-                    GPUCMD_AddWrite(GPUREG_ATTRIBBUFFER0_OFFSET, osConvertVirtToPhys(d.pVerts) - 0x18000000u);
                 }
                 const u32 draw[] = {GPU_TRIANGLES, GPUCMD_HEADER(0, 0x2, GPUREG_PRIMITIVE_CONFIG),
                                     1, GPUCMD_HEADER(0, 0xF, GPUREG_RESTART_PRIMITIVE),
@@ -2984,7 +3025,7 @@ bool C3DRenderer::DrawMeshes(const MeshDraw* pDraws, s32 count, bool lit)
                                     1, GPUCMD_HEADER(0, 0xF, GPUREG_VTX_FUNC)};
                 GPUCMD_AddRawCommands(draw, sizeof(draw) / 4);
             }
-            sMeshTicks[n++ == 0 ? 4 : 5] += svcGetSystemTick() - td;
+            sMeshTicks[raw ? 5 : 4] += svcGetSystemTick() - td;
             pBuffer = d.pVerts;
             pLastTex = pTex3;
             lastParam = pTex3->param;
@@ -2999,22 +3040,19 @@ bool C3DRenderer::DrawMeshes(const MeshDraw* pDraws, s32 count, bool lit)
     sMeshTicks[2] += t1 - t;
     t = t1;
     PORT_PROF_SECTION(kDrawMapCacheDrawBack);
-    // Back to BeginFrame's program, vertices and projection.
-    C3D_BindProgram(&p->mProgram);
-    AttrInfo_Init(pAttr);
-    AttrInfo_AddLoader(pAttr, 0, GPU_FLOAT, 3);
-    AttrInfo_AddLoader(pAttr, 1, GPU_UNSIGNED_BYTE, 4);
-    AttrInfo_AddLoader(pAttr, 2, GPU_FLOAT, 2);
-    AttrInfo_AddLoader(pAttr, 3, GPU_FLOAT, 4);
-    AttrInfo_AddFixed(pAttr, kEyeAttrib);
-    C3D_BufInfo* pBuf = C3D_GetBufInfo();
-    BufInfo_Init(pBuf);
-    BufInfo_Add(pBuf, p->mVerts, sizeof(C3DVertex), 4, 0x3210);
+    // Back to BeginFrame's program, inputs and projection, the ones citro3d's context holds. The state and texture
+    // stay as the last draw left them.
+    WriteProgram(sGameEntry, p->mAttr, p->mBufInfo.buffers[0]);
     C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, p->mUniProjection, &p->mProjection);
-    // Made here rather than in the game's next draw, so that its cost shows with the switch.
-    C3Di_UpdateContext();
-    p->mStateValid = false;
-    p->mBoundTex = 0;
+    GPUCMD_AddWrite(GPUREG_VSH_FLOATUNIFORM_CONFIG, 0x80000000u | (u32)p->mUniProjection);
+    GPUCMD_AddWrites(GPUREG_VSH_FLOATUNIFORM_DATA, (u32*)&C3D_FVUnif[GPU_VERTEX_SHADER][p->mUniProjection], 16);
+    for (s32 i = 0; i < 4; i++)
+    {
+        C3D_FVUnifDirty[GPU_VERTEX_SHADER][p->mUniProjection + i] = false;
+    }
+    p->mBoundTex = pLastTex;
+    p->mBoundParam = lastParam;
+    p->mBoundLod = lastLod;
     sMeshTicks[3] += svcGetSystemTick() - t;
     PORT_PROF_END();
     return true;
