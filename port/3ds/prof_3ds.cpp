@@ -1,5 +1,6 @@
 #include "../src/prof.hpp"
 #include "../src/logic_opts.hpp"
+#include "../src/map_cache.hpp"
 #include "log_3ds.hpp"
 #include <3ds.h>
 #include <stdarg.h>
@@ -98,10 +99,18 @@ u32 sSectionTicks;
 u64 sLastFrame;
 bool sPmu;
 u32 sEventPair;
-// GTA2_3DS_PROF_AB=1: the logic options (logic_opts.hpp) set as asked in one block of lines, all off in the next.
-bool sAB;
+// GTA2_3DS_PROF_AB: "logic" (or 1) for the logic options (logic_opts.hpp), "mapcache" for the map cache, or both
+// comma separated. Each is as set in one block of lines and off in the next; both make a cycle of four blocks.
+enum
+{
+    kABLogic = 1,
+    kABMapCache = 2
+};
+u32 sAB;
+u32 sABCycle = 1;
 u32 sBlocks;
 signed char sOptions[PortLogic::kOptionCount];
+bool sMapCache;
 // What a tick read, a scope and a section count of the two events.
 u32 sTickEvents[2];
 u32 sScopeEvents[2];
@@ -263,6 +272,45 @@ void Calibrate()
     }
 }
 
+u32 ParseAB(const char* p)
+{
+    u32 ab = 0;
+    while (p && *p)
+    {
+        const char* pEnd = strchr(p, ',');
+        const size_t n = pEnd ? (size_t)(pEnd - p) : strlen(p);
+        if ((n == 1 && *p == '1') || (n == 5 && !strncmp(p, "logic", n)))
+        {
+            ab |= kABLogic;
+        }
+        else if (n == 8 && !strncmp(p, "mapcache", n))
+        {
+            ab |= kABMapCache;
+        }
+        p = pEnd ? pEnd + 1 : 0;
+    }
+    return ab;
+}
+
+// The states of the block sBlocks: a bit of it per thing alternated, set for off.
+void SetAB()
+{
+    u32 bit = 0;
+    if (sAB & kABLogic)
+    {
+        const bool off = (sBlocks >> bit++) & 1;
+        for (u32 i = 0; i < PortLogic::kOptionCount; i++)
+        {
+            PortLogic::gOn[i] = off ? 0 : sOptions[i];
+        }
+    }
+    if (sAB & kABMapCache)
+    {
+        const bool off = (sBlocks >> bit++) & 1;
+        PortMapCache::SetEnabled(!off && sMapCache);
+    }
+}
+
 // The next pair of events on the two counters, and what the timers count of them.
 void NextEvents()
 {
@@ -376,9 +424,10 @@ void Print()
     {
         options |= PortLogic::On(static_cast<PortLogic::Option>(i)) ? 1u << i : 0;
     }
-    Log3DS_Printf("prof: %lu frames, %lu steps, %.0f scopes and %.0f sections per frame (%.2f ms); last log write %lu bytes in %.2f ms; options %lu\n",
+    Log3DS_Printf("prof: %lu frames, %lu steps, %.0f scopes and %.0f sections per frame (%.2f ms); last log write %lu bytes in %.2f ms; options %lu mapcache %d\n",
                   sFrames, sSteps, (double)sScopes / sFrames, (double)sSections / sFrames,
-                  Ms((u64)sScopes * sScopeTicks + (u64)sSections * sSectionTicks) / sFrames, logBytes, Ms(logTicks), options);
+                  Ms((u64)sScopes * sScopeTicks + (u64)sSections * sSectionTicks) / sFrames, logBytes, Ms(logTicks), options,
+                  PortMapCache::Enabled() ? 1 : 0);
     PrintParts("step", 0, kStepParts, steps);
     PrintParts("frame", kStepParts, kPartCount, sFrames);
     if (sPmu)
@@ -464,11 +513,22 @@ void Reset()
         const char* pSample = getenv("GTA2_3DS_PROF_SAMPLE");
         sSample = pSample && atoi(pSample) > 0 ? (u32)atoi(pSample) : sSample;
         gOn = sInterval > 0;
-        const char* pAB = getenv("GTA2_3DS_PROF_AB");
-        sAB = gOn && pAB && atoi(pAB) > 0;
+        sAB = gOn ? ParseAB(getenv("GTA2_3DS_PROF_AB")) : 0;
+        u32 options = 0;
         for (u32 i = 0; i < PortLogic::kOptionCount && sAB; i++)
         {
             sOptions[i] = PortLogic::On(static_cast<PortLogic::Option>(i)) ? 1 : 0;
+            options |= sOptions[i] ? 1u << i : 0;
+        }
+        sMapCache = PortMapCache::Enabled();
+        sABCycle = (sAB & kABLogic ? 2 : 1) * (sAB & kABMapCache ? 2 : 1);
+        if (sAB & kABLogic)
+        {
+            Log3DS_Printf("prof: A/B per block: logic options %lu, then off\n", options);
+        }
+        if (sAB & kABMapCache)
+        {
+            Log3DS_Printf("prof: A/B per block: map cache %d, then off\n", sMapCache ? 1 : 0);
         }
         const char* pPmu = getenv("GTA2_3DS_PROF_PMU");
         if (gOn && pPmu && atoi(pPmu) > 0)
@@ -518,13 +578,10 @@ void EndFrame()
         sBlocks++;
         if (sAB)
         {
-            for (u32 i = 0; i < PortLogic::kOptionCount; i++)
-            {
-                PortLogic::gOn[i] = sBlocks % 2 ? 0 : sOptions[i];
-            }
+            SetAB();
         }
-        // A section open here would be taken by the calibration's. With sAB, each pair sees both settings.
-        if (sPmu && (!sAB || sBlocks % 2 == 0) && !(sDepth && sStack[sDepth - 1].section))
+        // A section open here would be taken by the calibration's. With sAB, each pair sees every state.
+        if (sPmu && sBlocks % sABCycle == 0 && !(sDepth && sStack[sDepth - 1].section))
         {
             sEventPair = (sEventPair + 1) % kEventPairCount;
             NextEvents();

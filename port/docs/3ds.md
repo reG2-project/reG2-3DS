@@ -343,8 +343,10 @@ counts give the map column reads, sprite collision tests and sprite grid cells w
 tick: per part and step, a pair of events per block of lines in turn (data cache read misses and instruction
 cache misses, the stall cycles on data and on instructions, data cache write misses and main TLB misses,
 instructions and mispredicted branches), less what the timers themselves count; a scope then costs about
-twice as much, and Azahar reads zeros. `GTA2_3DS_PROF_AB=1` runs the logic options of `port/src/logic_opts.hpp`
-as set in one block and all off in the next (`prof_summary.py --options` groups the blocks by them). The lines of `GTA2_3DS_PROF`, `GTA2_3DS_STATS` and `GTA2_LOOP_STATS` are
+twice as much, and Azahar reads zeros. `GTA2_3DS_PROF_AB=logic` (or 1) runs the logic options of
+`port/src/logic_opts.hpp` as set in one block and all off in the next, `GTA2_3DS_PROF_AB=mapcache` the map cache
+(`GTA2_3DS_MAPCACHE`) the same way, and `logic,mapcache` both in a cycle of four blocks, every pair of states
+(`prof_summary.py --options` groups the blocks by them). Off, the map cache keeps its built chunks for the next block on. The lines of `GTA2_3DS_PROF`, `GTA2_3DS_STATS` and `GTA2_LOOP_STATS` are
 kept in memory and written 8 KB at a time by a thread of their own on the system core, below the sound's feed and the
 texture worker, and the rest at exit (`port/3ds/log_3ds.cpp`): on an Old 3DS such a write to the SD card takes up to
 a fifth of a second, which on the game's thread would stutter every 15 s. The `prof:` lines give the last write's size and time;
