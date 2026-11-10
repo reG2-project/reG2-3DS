@@ -248,18 +248,107 @@ void TileUvs(u32 flags, f32 out[4][2])
     memcpy(out, cur, sizeof(cur));
 }
 
-// A draw call per page, blending and premultiplication (the key).
-bool QuadBefore(const Quad& a, const Quad& b)
+// A draw call per page, blending and premultiplication (the key); in a group, the quads in the cells' order.
+struct QuadOrder
 {
-    if (a.layer != b.layer)
+    const void* bind;
+    u16 layerKey; // layer << 8 | key
+    u16 index;    // in sQuads
+};
+
+bool OrderBefore(const QuadOrder& a, const QuadOrder& b)
+{
+    if ((a.layerKey >> 8) != (b.layerKey >> 8))
     {
-        return a.layer < b.layer;
+        return a.layerKey < b.layerKey;
     }
     if (a.bind != b.bind)
     {
         return a.bind < b.bind;
     }
-    return a.key < b.key;
+    return a.layerKey != b.layerKey ? a.layerKey < b.layerKey : a.index < b.index;
+}
+
+// A flat lid the mesh may take: its layer, row, column and lid.
+struct LidCell
+{
+    u8 z, ly, lx;
+    u16 lid;
+};
+
+// A lid's tile (logical tile and colour key) as a build resolves it; pTex null when the lid stays with the game.
+struct Look
+{
+    u32 build;
+    u16 key;
+    RTexture* pTex;
+    MapCacheMesh::TexturePlace place;
+};
+
+const s32 kLooks = 128;
+Look sLooks[kLooks];
+u32 sBuildStamp;
+std::vector<LidCell> sLidCells;
+std::vector<QuadOrder> sOrder;
+
+const Look& LookUp(Chunk& c, u16 logical, bool colourKey)
+{
+    const u16 key = (u16)(logical | (colourKey ? 0x400u : 0u));
+    Look& l = sLooks[(logical ^ (colourKey ? 0x55u : 0u)) & (kLooks - 1)];
+    if (l.build == sBuildStamp && l.key == key)
+    {
+        return l;
+    }
+    l.build = sBuildStamp;
+    l.key = key;
+    l.pTex = 0;
+    const s16 physical = gGtx_0x106C->GetTile(logical);
+    const u16 textureIdx = (u16)physical;
+    if (!textureIdx)
+    {
+        return l;
+    }
+    STexture* pSTex = gTextureCache_15D8->GetTexture(textureIdx);
+    const uint64_t tt = MapCacheMesh::Ticks();
+    RTexture* pTex = pSTex ? MapCacheMesh::TileTexture(pSTex, colourKey) : 0;
+    const bool placed = pTex && MapCacheMesh::Texture(pTex, &l.place);
+    sBuildTexTicks += MapCacheMesh::Ticks() - tt;
+    if (!placed)
+    {
+        bool seen = !pSTex;
+        for (size_t t = 0; t < c.missing.size() && !seen; t++)
+        {
+            seen = c.missing[t].pTex == pSTex && c.missing[t].alpha == colourKey;
+        }
+        if (!seen)
+        {
+            const MissingTexture m = {pSTex, colourKey};
+            c.missing.push_back(m);
+        }
+        return l;
+    }
+    l.pTex = pTex;
+    bool seen = false;
+    for (size_t t = 0; t < c.textures.size() && !seen; t++)
+    {
+        seen = c.textures[t].pTex == pTex;
+    }
+    if (!seen)
+    {
+        const TexUse use = {pTex, l.place.version};
+        c.textures.push_back(use);
+    }
+    seen = false;
+    for (size_t t = 0; t < c.tiles.size() && !seen; t++)
+    {
+        seen = c.tiles[t].logical == logical;
+    }
+    if (!seen)
+    {
+        const TileUse use = {logical, physical};
+        c.tiles.push_back(use);
+    }
+    return l;
 }
 
 void Build(Chunk& c, s32 cx, s32 cy)
@@ -284,135 +373,11 @@ void Build(Chunk& c, s32 cx, s32 cy)
     c.missing.clear();
     c.builtFrame = sFrame;
     sQuads.clear();
+    sLidCells.clear();
+    sBuildStamp++;
     const s32 x0 = cx << kChunkShift, y0 = cy << kChunkShift;
-    PORT_PROF_SECTION(kDrawMapCacheBuildBlocks);
-    for (s32 z = 0; z < kLayers; z++)
-    {
-        for (s32 ly = 0; ly < kChunkSize; ly++)
-        {
-            for (s32 lx = 0; lx < kChunkSize; lx++)
-            {
-                const gmp_block_info* pBlock = gMap_0x370->GetBlock(x0 + lx, y0 + ly, z);
-                if (!pBlock || !pBlock->mLid || !FlatBlock(pBlock))
-                {
-                    continue;
-                }
-                const u16 lid = pBlock->mLid;
-                const u16 logical = lid & block_face::tile_idx_mask;
-                if (sAnimated[logical >> 5] & (1u << (logical & 31)))
-                {
-                    continue;
-                }
-                const s16 physical = gGtx_0x106C->GetTile(logical);
-                const u16 textureIdx = (u16)physical;
-                if (!textureIdx)
-                {
-                    continue;
-                }
-                STexture* pSTex = gTextureCache_15D8->GetTexture(textureIdx);
-                const bool colourKey = (lid & block_face::flat) != 0;
-                const uint64_t tt = MapCacheMesh::Ticks();
-                RTexture* pTex = pSTex ? MapCacheMesh::TileTexture(pSTex, colourKey) : 0;
-                sBuildTexTicks += MapCacheMesh::Ticks() - tt;
-                MapCacheMesh::TexturePlace place;
-                if (!pTex || !MapCacheMesh::Texture(pTex, &place))
-                {
-                    bool seen = !pSTex;
-                    for (size_t t = 0; t < c.missing.size() && !seen; t++)
-                    {
-                        seen = c.missing[t].pTex == pSTex && c.missing[t].alpha == colourKey;
-                    }
-                    if (!seen)
-                    {
-                        const MissingTexture m = {pSTex, colourKey};
-                        c.missing.push_back(m);
-                    }
-                    continue;
-                }
-                Quad q;
-                q.layer = z;
-                q.bind = place.bind;
-                q.blend = colourKey;
-                q.key = (colourKey ? 1u : 0u) | (place.premultiplied ? 2u : 0u);
-                q.pTex = pTex;
-                f32 uv[4][2];
-                TileUvs(MapRenderer::kLidFlags[lid >> 13], uv);
-                const u8 shade = gpMapRenderer->GetColour((lid >> 10) & 3);
-                static const s32 kCorner[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
-                static const s32 kTri[6] = {0, 1, 2, 0, 2, 3};
-                for (s32 k = 0; k < 6; k++)
-                {
-                    const s32 i = kTri[k];
-                    MeshVertex& v = q.v[k];
-                    v.x = (u8)(lx + kCorner[i][0]);
-                    v.y = (u8)(ly + kCorner[i][1]);
-                    v.shade = shade;
-                    v.pad = 0;
-                    v.u = uv[i][0] / 64.0f * place.su + place.ou;
-                    v.v = place.ov - uv[i][1] / 64.0f * place.sv;
-                }
-                sQuads.push_back(q);
-                c.lids[(z * kChunkSize + ly) * kChunkSize + lx] = lid;
-                c.layers |= (u8)(1u << z);
-                bool seen = false;
-                for (size_t t = 0; t < c.textures.size() && !seen; t++)
-                {
-                    seen = c.textures[t].pTex == pTex;
-                }
-                if (!seen)
-                {
-                    const TexUse use = {pTex, place.version};
-                    c.textures.push_back(use);
-                }
-                seen = false;
-                for (size_t t = 0; t < c.tiles.size() && !seen; t++)
-                {
-                    seen = c.tiles[t].logical == logical;
-                }
-                if (!seen)
-                {
-                    const TileUse use = {logical, physical};
-                    c.tiles.push_back(use);
-                }
-            }
-        }
-    }
-    PORT_PROF_SECTION(kDrawMapCacheBuildSort);
-    std::stable_sort(sQuads.begin(), sQuads.end(), QuadBefore);
-    PORT_PROF_SECTION(kDrawMapCacheBuildMesh);
-    if (!sQuads.empty())
-    {
-        const size_t bytes = sQuads.size() * 6 * sizeof(MeshVertex);
-        c.pVerts = MapCacheMesh::Alloc(sQuads.size() * 6);
-        if (!c.pVerts)
-        {
-            c.layers = 0;
-            std::fill(c.lids.begin(), c.lids.end(), 0);
-        }
-        else
-        {
-            for (size_t i = 0; i < sQuads.size(); i++)
-            {
-                const Quad& q = sQuads[i];
-                memcpy(&c.pVerts[i * 6], q.v, sizeof(q.v));
-                if (c.groups.empty() || c.groups.back().layer != q.layer || i == 0 || q.bind != sQuads[i - 1].bind ||
-                    q.key != sQuads[i - 1].key)
-                {
-                    Group g = {q.layer, (s32)(i * 6), 0, q.pTex, q.blend, {}};
-                    c.groups.push_back(g);
-                }
-                Group& g = c.groups.back();
-                for (s32 r = q.v[0].y + 1; r <= kChunkSize; r++)
-                {
-                    g.rows[r] = g.count + 6;
-                }
-                g.count += 6;
-            }
-            MapCacheMesh::Flush(c.pVerts, bytes);
-            c.bytes = (u32)bytes;
-            sMeshBytes += c.bytes;
-        }
-    }
+    // The flat lids, and a bit per cell that RenderBlockAt would draw more than (a lid the mesh does not take
+    // gets its bit below).
     PORT_PROF_SECTION(kDrawMapCacheBuildBlocks);
     for (s32 z = 0; z < kLayers; z++)
     {
@@ -422,13 +387,123 @@ void Build(Chunk& c, s32 cx, s32 cy)
             for (s32 lx = 0; lx < kChunkSize; lx++)
             {
                 const gmp_block_info* pBlock = gMap_0x370->GetBlock(x0 + lx, y0 + ly, z);
-                const bool lidOnly = pBlock && FlatBlock(pBlock) && !pBlock->mLeft && !pBlock->mRight && !pBlock->mTop &&
-                                     !pBlock->mBottom && (!pBlock->mLid || c.lids[(z * kChunkSize + ly) * kChunkSize + lx]);
-                row |= (u16)(pBlock && !lidOnly ? 1u << lx : 0);
+                if (!pBlock)
+                {
+                    continue;
+                }
+                const bool flat = FlatBlock(pBlock);
+                const u16 lid = pBlock->mLid;
+                const u16 logical = lid & block_face::tile_idx_mask;
+                const bool take = lid && flat && !(sAnimated[logical >> 5] & (1u << (logical & 31)));
+                if (take)
+                {
+                    const LidCell cell = {(u8)z, (u8)ly, (u8)lx, lid};
+                    sLidCells.push_back(cell);
+                }
+                const bool lidOnly = flat && !pBlock->mLeft && !pBlock->mRight && !pBlock->mTop && !pBlock->mBottom && (!lid || take);
+                row |= (u16)(lidOnly ? 0 : 1u << lx);
             }
             c.walk[z][ly] = row;
         }
     }
+    PORT_PROF_SECTION(kDrawMapCacheBuildQuads);
+    static f32 sUvs[8][4][2];
+    static bool sUvsMade;
+    if (!sUvsMade)
+    {
+        for (s32 i = 0; i < 8; i++)
+        {
+            TileUvs(MapRenderer::kLidFlags[i], sUvs[i]);
+        }
+        sUvsMade = true;
+    }
+    for (size_t n = 0; n < sLidCells.size(); n++)
+    {
+        const LidCell& cell = sLidCells[n];
+        const u16 lid = cell.lid;
+        const bool colourKey = (lid & block_face::flat) != 0;
+        const Look& look = LookUp(c, lid & block_face::tile_idx_mask, colourKey);
+        if (!look.pTex)
+        {
+            c.walk[cell.z][cell.ly] |= (u16)(1u << cell.lx);
+            continue;
+        }
+        const MapCacheMesh::TexturePlace& place = look.place;
+        Quad q;
+        q.layer = cell.z;
+        q.bind = place.bind;
+        q.blend = colourKey;
+        q.key = (colourKey ? 1u : 0u) | (place.premultiplied ? 2u : 0u);
+        q.pTex = look.pTex;
+        const f32(*uv)[2] = sUvs[lid >> 13];
+        const u8 shade = gpMapRenderer->GetColour((lid >> 10) & 3);
+        static const s32 kCorner[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+        static const s32 kTri[6] = {0, 1, 2, 0, 2, 3};
+        for (s32 k = 0; k < 6; k++)
+        {
+            const s32 i = kTri[k];
+            MeshVertex& v = q.v[k];
+            v.x = (u8)(cell.lx + kCorner[i][0]);
+            v.y = (u8)(cell.ly + kCorner[i][1]);
+            v.shade = shade;
+            v.pad = 0;
+            v.u = uv[i][0] / 64.0f * place.su + place.ou;
+            v.v = place.ov - uv[i][1] / 64.0f * place.sv;
+        }
+        const QuadOrder o = {place.bind, (u16)((cell.z << 8) | q.key), (u16)sQuads.size()};
+        sQuads.push_back(q);
+        sOrder.push_back(o);
+        c.lids[(cell.z * kChunkSize + cell.ly) * kChunkSize + cell.lx] = lid;
+        c.layers |= (u8)(1u << cell.z);
+    }
+    PORT_PROF_SECTION(kDrawMapCacheBuildSort);
+    std::sort(sOrder.begin(), sOrder.end(), OrderBefore);
+    PORT_PROF_SECTION(kDrawMapCacheBuildMesh);
+    if (!sQuads.empty())
+    {
+        const size_t bytes = sQuads.size() * 6 * sizeof(MeshVertex);
+        c.pVerts = MapCacheMesh::Alloc(sQuads.size() * 6);
+        if (!c.pVerts)
+        {
+            c.layers = 0;
+            std::fill(c.lids.begin(), c.lids.end(), 0);
+            for (size_t i = 0; i < sQuads.size(); i++)
+            {
+                const MeshVertex& v = sQuads[i].v[0];
+                c.walk[sQuads[i].layer][v.y] |= (u16)(1u << v.x);
+            }
+        }
+        else
+        {
+            for (size_t i = 0; i < sOrder.size(); i++)
+            {
+                const QuadOrder& o = sOrder[i];
+                const Quad& q = sQuads[o.index];
+                memcpy(&c.pVerts[i * 6], q.v, sizeof(q.v));
+                if (i == 0 || o.layerKey != sOrder[i - 1].layerKey || o.bind != sOrder[i - 1].bind)
+                {
+                    Group g = {q.layer, (s32)(i * 6), 0, q.pTex, q.blend, {}};
+                    c.groups.push_back(g);
+                }
+                // Per row first, summed into the vertices before each row below.
+                Group& g = c.groups.back();
+                g.rows[q.v[0].y + 1] += 6;
+                g.count += 6;
+            }
+            for (size_t i = 0; i < c.groups.size(); i++)
+            {
+                Group& g = c.groups[i];
+                for (s32 r = 1; r <= kChunkSize; r++)
+                {
+                    g.rows[r] += g.rows[r - 1];
+                }
+            }
+            MapCacheMesh::Flush(c.pVerts, bytes);
+            c.bytes = (u32)bytes;
+            sMeshBytes += c.bytes;
+        }
+    }
+    sOrder.clear();
     PORT_PROF_END();
     c.built = true;
     c.dirty = false;
