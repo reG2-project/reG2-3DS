@@ -91,16 +91,14 @@ void Stop()
     sThread = NULL;
 }
 
-void Init()
+void Start()
 {
-    sInit = true;
-    const char* pOn = getenv("GTA2_3DS_SOUND_CORE1");
-    const char* pInterval = getenv("GTA2_3DS_STATS");
-    sInterval = pInterval ? (u32)atoi(pInterval) : 0;
-    if (!(pOn && !strcmp(pOn, "1")))
+    static bool sStarted;
+    if (sStarted)
     {
         return;
     }
+    sStarted = true;
     LightLock_Init(&sLock);
     CondVar_Init(&sWorkCv);
     CondVar_Init(&sDoneCv);
@@ -112,14 +110,45 @@ void Init()
         svcGetThreadPriority(&priority, CUR_THREAD_HANDLE);
         sThread = threadCreate(WorkerMain, NULL, 64 * 1024, priority < 0x3F ? priority + 1 : 0x3F, 1, false);
     }
-    sOn = sThread != NULL;
-    if (sOn)
+    if (sThread)
     {
         atexit(Stop);
     }
-    Log3DS_Printf("sound job: %s\n", sOn ? "on the system core" : "no thread, on the game's core");
+    Log3DS_Printf("sound job: %s\n", sThread ? "on the system core" : "no thread, on the game's core");
+}
+
+void Init()
+{
+    sInit = true;
+    const char* pOn = getenv("GTA2_3DS_SOUND_CORE1");
+    const char* pInterval = getenv("GTA2_3DS_STATS");
+    sInterval = pInterval ? (u32)atoi(pInterval) : 0;
+    sOn = pOn && !strcmp(pOn, "1");
+    if (sOn)
+    {
+        Start();
+    }
 }
 } // namespace
+
+void SetEnabled(bool on)
+{
+    if (!sInit)
+    {
+        Init();
+    }
+    if (on)
+    {
+        Start();
+    }
+    Join();
+    sOn = on;
+}
+
+bool Enabled()
+{
+    return sOn && sThread;
+}
 
 bool Defer()
 {
@@ -128,7 +157,7 @@ bool Defer()
         Init();
     }
     // The draw's interpolation moves sprites, and the pause menu plays sounds and changes settings while it draws.
-    if (!sOn || !sAllow || !gGame_0x40 || gGame_0x40->mGameState != GameState::Running_1 || PortPauseMenu::IsOpen() ||
+    if (!sOn || !sThread || !sAllow || !gGame_0x40 || gGame_0x40->mGameState != GameState::Running_1 || PortPauseMenu::IsOpen() ||
         PortFrameLoop::Interpolated())
     {
         return false;
@@ -147,7 +176,7 @@ bool Defer()
 
 void Join()
 {
-    if (!sOn)
+    if (!sThread)
     {
         return;
     }
