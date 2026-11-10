@@ -5,6 +5,9 @@
 #include "fix16.hpp"
 #include "gtx_0x106C.hpp"
 #include <windows.h>
+#if defined(GTA2_PORT)
+#include "../port/src/prof.hpp"
+#endif
 
 class Gang;
 class Sprite;
@@ -152,6 +155,9 @@ struct gmp_compressed_map_32
     // 9.6f 0x42A830
     u32* get_base(s32 y, s32 x)
     {
+#if defined(GTA2_PORT)
+        PORT_PROF_COUNT(kMapLookups, 1);
+#endif
         return &mBase[y][x];
     }
 };

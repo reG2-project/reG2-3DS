@@ -4,6 +4,9 @@
 #include "../port/src/prof.hpp"
 #else
 #define PORT_PROF(part)
+#define PORT_PROF_AS(expr)
+#define PORT_PROF_SECTION(part)
+#define PORT_PROF_END()
 #endif
 #include "ped_move_target_type.hpp"
 #include "ped_attack_target_type.hpp"
@@ -4248,6 +4251,7 @@ bool Ped::StateMachineTick()
 MATCH_FUNC(0x462b80)
 void Ped::UpdateCharB4()
 {
+    PORT_PROF(kPedsPedMove);
     mGameObject->Set_F8_ped_state_1_433910(mPedState1);
     mGameObject->SetPedState2(mPedState2);
     mGameObject->Update(gDistanceToTarget);
@@ -4310,6 +4314,11 @@ MATCH_FUNC(0x462e70)
 bool Ped::PoolUpdate()
 {
     PORT_PROF(kPedsPed);
+    PORT_PROF_AS(!mBf21C.bActive ? PortProf::kPedsPedIdle :
+                 !mGameObject    ? PortProf::kPedsPedCar :
+                 mPedState1 == ped_state_1::dead_9 || mPedState1 == ped_state_1::immobilized_8 ? PortProf::kPedsPedDown :
+                 mPedState1 == ped_state_1::standing_still_7 ? PortProf::kPedsPedStill :
+                                                              PortProf::kPedsPedWalk);
     if (Is_occupation_elvis())
     {
         if (gElvisVoiceTimer > 0)
@@ -4481,7 +4490,9 @@ bool Ped::PoolUpdate()
                 {
                     zpos -= kFpOne_678664;
                 }
+                PORT_PROF_SECTION(kPedsPedMap);
                 mBlockSpec = gMap_0x370->GetBlockSpec(get_cam_x(), get_cam_y(), zpos);
+                PORT_PROF_END();
                 Ped::UpdateCharB4();
 
                 mBf21C.bHitByAttacker = false;

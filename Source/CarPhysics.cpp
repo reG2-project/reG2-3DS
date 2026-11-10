@@ -447,6 +447,7 @@ void CarPhysics::SpinOutOnOil()
 MATCH_FUNC(0x559c30)
 void CarPhysics::ScarePedsOnDrivingFast()
 {
+    PORT_PROF(kCarsCarPhysicsScare);
     Fix16 cp3 = mCp3;
 
     if (!gMap_0x370->IsGradientSlopeAt(mCp1.x.ToInt(), mCp1.y.ToInt(), cp3.ToInt()))
@@ -1896,6 +1897,7 @@ void CarPhysics::UpdateWheelSkidEffects()
 MATCH_FUNC(0x55e260)
 void CarPhysics::DoSkidmarks()
 {
+    PORT_PROF(kCarsCarPhysicsSkid);
     if (!bSkip_skidmarks)
     {
         CarPhysics::UpdateWheelSkidEffects();
@@ -1977,6 +1979,7 @@ bool CarPhysics::StepMovementAndCollisions()
 MATCH_FUNC(0x55eb80)
 bool CarPhysics::CheckAndHandleCarAndTrailerCollisions()
 {
+    PORT_PROF(kCarsCarPhysicsCollide);
     gCarManager_6C->mObjectHitActive = false;
 
     bool bCollision = gSpriteGrid_2->CheckAndHandleCollisionInStrips(mpCar->mCarSprite);
@@ -2141,6 +2144,7 @@ bool CarPhysics::ApplyMovementCommand()
 MATCH_FUNC(0x55f280)
 char_type CarPhysics::ProcessCollisionAndClampVelocity()
 {
+    PORT_PROF(kCarsCarPhysicsMove);
     bool movementApplied = false;
 
     Fix16_Point_POD cm1 = this->mCm1;
@@ -2194,6 +2198,7 @@ char_type CarPhysics::ProcessCollisionAndClampVelocity()
 MATCH_FUNC(0x55f330)
 void CarPhysics::StepPhysics()
 {
+    PORT_PROF(kCarsCarPhysicsMove);
     sRemainingTimeStep = kFpOne_6FE210;
     save_physics_state();
     ApplyMovementStep(kFpOne_6FE210);
@@ -3663,6 +3668,7 @@ void CarPhysics::SetCurrentCarInfoAndModelPhysics()
 MATCH_FUNC(0x562f30)
 void CarPhysics::ApplyInputsAndIntegratePhysics()
 {
+    PORT_PROF(kCarsCarPhysicsForces);
     gDamageSpeedFactor = mpCar->GetDamageFactorOnSpeed();
     ApplyThrottleInput();
     ApplyBrakePhysics();

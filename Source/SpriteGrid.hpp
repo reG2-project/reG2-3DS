@@ -107,6 +107,7 @@ class SpriteGrid
     {
         return mRows[y_pos];
     }
+    void ReAddToRegionBuckets(Sprite* pSprite, s32 left, s32 right, s32 top, s32 bottom);
 #endif
 
   private:
@@ -120,6 +121,9 @@ class SpriteGrid
     EXPORT Sprite* FindCollidingSpriteInRow(u32 y_pos, Sprite* pSprite);
     EXPORT void DebugLog(s32 x_pos, s32 y_pos) const;
     EXPORT GridCell** Clear();
+#if defined(GTA2_PORT)
+    bool MoveToFrontInRow(s32 y_pos, Sprite* pSprite);
+#endif
 
     GridCell* mRows[256]; // 0x0: rows of Y; each is a sparse X-linked list of GridCell
 };

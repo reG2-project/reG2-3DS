@@ -641,6 +641,7 @@ bool Game::ExecuteGame()
         default:
             break;
     }
+    PORT_PROF_COUNT(kCollideTests, gCollisionCounters->mTestCount);
     PORT_PROF_END();
     return UpdateExitTimer();
 }

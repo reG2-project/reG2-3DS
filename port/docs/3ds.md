@@ -335,7 +335,16 @@ and the frames over 42 ms after the last (`late`). Each part gives its average, 
 and its calls. The timers' own cost, measured at the start, is taken out of the times and logged; one primitive
 in `GTA2_3DS_PROF_SAMPLE` (default 4) is timed, with what it runs, and counted for that many. Without the
 variable, a timer costs a test. `python3 port/3ds/prof_summary.py gta2_log.txt` sums a log up in tables,
-walking and driving, day and night apart. The lines of `GTA2_3DS_PROF`, `GTA2_3DS_STATS` and `GTA2_LOOP_STATS` are
+walking and driving, day and night apart. The car visit is split by kind of car (parked, AI driven, moving
+without an AI driver, trailers and trains) and by its parts (the sprite grid, despawning, doors and lights,
+the rest), the physics by its collisions, forces, movement, ped scaring and skid marks, the peds by state;
+counts give the map column reads, sprite collision tests and sprite grid cells walked per step.
+`GTA2_3DS_PROF_PMU=1` adds the ARM11's two event counters (`svcControlPerformanceCounter`), read with each
+tick: per part and step, a pair of events per block of lines in turn (data cache read misses and instruction
+cache misses, the stall cycles on data and on instructions, data cache write misses and main TLB misses,
+instructions and mispredicted branches), less what the timers themselves count; a scope then costs about
+twice as much, and Azahar reads zeros. `GTA2_3DS_PROF_AB=1` runs the logic options of `port/src/logic_opts.hpp`
+as set in one block and all off in the next (`prof_summary.py --options` groups the blocks by them). The lines of `GTA2_3DS_PROF`, `GTA2_3DS_STATS` and `GTA2_LOOP_STATS` are
 kept in memory and written 8 KB at a time by a thread of their own on the system core, below the sound's feed and the
 texture worker, and the rest at exit (`port/3ds/log_3ds.cpp`): on an Old 3DS such a write to the SD card takes up to
 a fifth of a second, which on the game's thread would stutter every 15 s. The `prof:` lines give the last write's size and time;
@@ -631,6 +640,26 @@ the game's own state (doors, lights, despawning). The physics and the collisions
 cost of this kind (30 square roots a step, through the VFP; the grid's tests visit the cells under each
 sprite only); on hardware they are 6 times slower than in Azahar against 4 for the rest, which points to
 memory access (the map's columns and blocks, the grid's lists), which Azahar does not model.
+
+The logic's memory traffic. In Azahar, the lockstep night drive visits about 125 cars a step: 103 parked
+(0.45 ms), 15 AI driven, 6 trailers and trains (0.3 ms, the railway's map reads), and reads the map's
+columns 2800 times (`GetBlock` 1000, `GetEffectiveBlock` 560, `GetBlockClamped` 500, the roof test 140,
+the railway 125), walks 3000 sprite grid cells and tests 90 sprite pairs; per object the console is about
+5 times slower than Azahar for the visit and the peds, 7 for the AI and the physics. Two options cut that
+traffic without changing a result (`port/src/logic_opts.hpp`, each on unless its variable is 0):
+`GTA2_3DS_PREFETCH` (`port/src/prefetch.cpp`) has the car, ped and object pool walks ask, while they update
+an item, for the item 3 ahead, what the one 2 ahead points to (sprite, physics, AI, a ped's Char) and the
+next one's collision shape or sprite, each pointer read from memory asked for one item before (PLD; Azahar
+shows nothing). `GTA2_3DS_GRIDKEEP` keeps a parked car in the sprite grid through its visit: for a car
+without physics that is not despawning, crushing, towing or carrying anything, not a truck cab or TV van
+and not about to wreck, nothing between the removal and the re-add uses the grid, so its links are moved
+to the front of their cells, which is what removing and adding it leaves (a row that is not as expected is
+redone the game's way); in Azahar 25 % fewer grid cells walked and the parked cars' visit 0.45 to 0.41 ms.
+The lockstep hashes (cars, peds, `rand()`, sound) match over the four scenes. The sound queue's hash depends
+on the host's timing, as the game asks the mixer whether a sample still plays: the same logic can shift it
+by a few samples (a run with both options off did once, the event counters' slower step does), while the
+cars, peds and `rand()` never move. On the console, `GTA2_3DS_PROF_AB=1` with `GTA2_3DS_PROF_PMU=1`
+compares both options on and off in one session, with the cache misses and stall cycles of each part.
 
 ### Pacing
 

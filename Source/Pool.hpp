@@ -1,5 +1,8 @@
 #pragma once
 #include "types.hpp"
+#if defined(GTA2_PORT)
+#include "../port/src/prefetch.hpp"
+#endif
 
 // A free list only, with O(1) allocate and deallocate: unlike Pool, no list of the used items
 template<typename PoolType, s32 PoolSize>
@@ -166,6 +169,9 @@ class Pool
             ++field_X_count;
 
             PoolType* pNext = pCurrItem->mpNext;
+#if defined(GTA2_PORT)
+            PortPrefetch::Next(pNext);
+#endif
 
             if (pCurrItem->PoolUpdate())
             {
