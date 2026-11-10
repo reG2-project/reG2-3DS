@@ -473,8 +473,10 @@ instructions and mispredicted branches), less what the timers themselves count; 
 twice as much, and Azahar reads zeros. `GTA2_3DS_PROF_AB=logic` (or 1) runs the logic options of
 `port/src/logic_opts.hpp` as set in one block and all off in the next, `GTA2_3DS_PROF_AB=mapcache` the map cache
 (`GTA2_3DS_MAPCACHE`) the same way, `GTA2_3DS_PROF_AB=soundcore1` the sound pass on the system core in one block
-and in the step in the next (whatever `GTA2_3DS_SOUND_CORE1`, the pass in flight joined before the change), and a
-comma separated list of them in a cycle of four or eight blocks, every combination of states (`prof_summary.py
+and in the step in the next (whatever `GTA2_3DS_SOUND_CORE1`, the pass in flight joined before the change),
+`GTA2_3DS_PROF_AB=walls` the map cache's walls (`GTA2_3DS_MAPCACHE_WALLS`, its lids kept; every chunk is built
+again at each change, so a block's first frames build the chunks on screen), and a
+comma separated list of them in a cycle of four to sixteen blocks, every combination of states (`prof_summary.py
 --options` groups the blocks by them). Off, the map cache keeps its built chunks for the next block on. The lines of `GTA2_3DS_PROF`, `GTA2_3DS_STATS` and `GTA2_LOOP_STATS` are
 kept in memory and written 8 KB at a time by a thread of their own on the system core, below the sound's feed and the
 texture worker, and the rest at exit (`port/3ds/log_3ds.cpp`): on an Old 3DS such a write to the SD card takes up to
@@ -790,7 +792,7 @@ draws the walls. The lids stay after the walls: a lid a ray meets is above the w
 are not sorted among themselves: two only overlap through a cell a ray crosses after the first, and the frames below
 showed no difference, but for a flat pair's face on the plane of the next cell's side the same way round (a fence
 before a wall, in ste), whose cell stays with the game. A chunk layer's walls go back to the game (its cells walked) while a light past the shader's
-reaches it, and in the turned view. Partial blocks (the El's pylons), slopes and diagonals stay with the game, and
+reaches it, and in the turned view. `GTA2_3DS_MAPCACHE_WALLS=0` builds the lids alone. Partial blocks (the El's pylons), slopes and diagonals stay with the game, and
 with them the walls in front of them.
 
 Downtown, Azahar, the R-type at full speed (camera 3.8): frozen near the Loonies' phones (89.9, 50.5) at night, the

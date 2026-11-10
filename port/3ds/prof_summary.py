@@ -12,7 +12,7 @@ without the parts listed under it, and the calls per step or frame. --blocks lis
 with the player's place at its end (blocks), his vehicle model, speed (blocks per second) and the camera's height.
 --slow lists the frames over GTA2_3DS_PROF_SLOW ms (45 by default) the log has a line for, with their largest parts.
 --options groups the blocks by the logic options, the map cache state and where the sound pass ran
-(GTA2_3DS_PROF_AB=logic, =mapcache, =soundcore1 or a comma separated list of them alternates them).
+(GTA2_3DS_PROF_AB=logic, =mapcache, =soundcore1, =walls or a comma separated list of them alternates them).
 With GTA2_3DS_PROF_PMU=1 each block counted one pair of CPU events too: the step parts' events per step, then
 the same without the parts under them, averaged over the blocks that counted each event.
 """
@@ -108,11 +108,13 @@ def parse(path, keep_first, writes, slow):
                 options = re.search(r"options (\d+)", line)
                 mapcache = re.search(r"mapcache (\d)", line)
                 soundcore1 = re.search(r"soundcore1 (\d)", line)
+                walls = re.search(r"walls (\d)", line)
                 block = {"frames": int(m.group(1)), "steps": int(m.group(2)), "step": {}, "frame": {}, "count": {},
                          "timers": float(timers.group(1)) if timers else 0.0, "pmu": {},
                          "options": int(options.group(1)) if options else None,
                          "mapcache": int(mapcache.group(1)) if mapcache else None,
-                         "soundcore1": int(soundcore1.group(1)) if soundcore1 else None, "place": None}
+                         "soundcore1": int(soundcore1.group(1)) if soundcore1 else None,
+                         "walls": int(walls.group(1)) if walls else None, "place": None}
                 slow.extend((len(blocks), l) for l in pending)
                 pending = []
                 continue
@@ -158,6 +160,8 @@ def group_of(b):
         g += ", mapcache %s" % ("on" if b["mapcache"] else "off")
     if AB and b["soundcore1"] is not None:
         g += ", soundcore1 %s" % ("on" if b["soundcore1"] else "off")
+    if AB and b["walls"] is not None:
+        g += ", walls %s" % ("on" if b["walls"] else "off")
     return g
 
 
@@ -228,7 +232,7 @@ def main():
     ap.add_argument("--keep-first", action="store_true", help="keep the first block after a game start")
     ap.add_argument("--blocks", action="store_true", help="list each block too")
     ap.add_argument("--slow", action="store_true", help="list the slow frames the log has a line for")
-    ap.add_argument("--options", action="store_true", help="group the blocks by their logic options, map cache state and sound pass core too")
+    ap.add_argument("--options", action="store_true", help="group the blocks by their logic options, map cache and walls state and sound pass core too")
     args = ap.parse_args()
     global AB
     AB = args.options

@@ -111,6 +111,9 @@ struct FarSet
 
 bool sOn;
 bool sRead;
+bool sWalls;
+bool sWallsRead;
+bool sWallsBuilt; // sWalls when the chunks were built
 s32 sLayer;
 bool sFrameOn; // the cache takes lids in this frame
 bool sLit;
@@ -488,7 +491,7 @@ void Scan(Chunk& c, s32 x0, s32 y0)
                 {
                     cell = kGameOther;
                 }
-                else
+                else if (sWallsBuilt)
                 {
                     BlockFaces(pBlock, (u8)z, (u8)lx, (u8)ly);
                 }
@@ -840,11 +843,12 @@ void BeginFrame()
     FreePending();
     const u32 colours = gpMapRenderer->mColourT1 | (gpMapRenderer->mColourT2 << 8) | (gpMapRenderer->mColourT3 << 16) |
                         (gpMapRenderer->mRightColour << 24);
-    if (MapCacheMesh::FreedTextures() != sFreed || colours != sColours)
+    if (MapCacheMesh::FreedTextures() != sFreed || colours != sColours || sWallsBuilt != WallsEnabled())
     {
         DropAll();
         sFreed = MapCacheMesh::FreedTextures();
         sColours = colours;
+        sWallsBuilt = WallsEnabled();
     }
     sLit = (gLightingDrawFlag & kFlagLighting) && MapCacheMesh::Lit();
     sBuildsLeft = kBuildsPerFrame;
@@ -902,6 +906,23 @@ void SetEnabled(bool on)
 {
     sOn = on;
     sRead = true;
+}
+
+bool WallsEnabled()
+{
+    if (!sWallsRead)
+    {
+        const char* pEnv = getenv("GTA2_3DS_MAPCACHE_WALLS");
+        sWalls = !pEnv || atoi(pEnv) != 0;
+        sWallsRead = true;
+    }
+    return sWalls;
+}
+
+void SetWalls(bool on)
+{
+    sWalls = on;
+    sWallsRead = true;
 }
 
 void BeginLayer(s32 z, s32 minX, s32 minY, s32 maxX, s32 maxY)

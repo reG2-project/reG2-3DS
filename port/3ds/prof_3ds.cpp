@@ -104,19 +104,22 @@ u32 sSectionTicks;
 u64 sLastFrame;
 bool sPmu;
 u32 sEventPair;
-// GTA2_3DS_PROF_AB, comma separated: "logic" (or 1, logic_opts.hpp), "mapcache", "soundcore1" (sound_job.cpp, as on).
-// Each as set in one block of lines and off in the next: every combination in a cycle of 2, 4 or 8 blocks.
+// GTA2_3DS_PROF_AB, comma separated: "logic" (or 1, logic_opts.hpp), "mapcache", "soundcore1" (sound_job.cpp, as on),
+// "walls" (the map cache's walls, its lids kept). Each as set in one block of lines and off in the next: every
+// combination in a cycle of 2 to 16 blocks.
 enum
 {
     kABLogic = 1,
     kABMapCache = 2,
-    kABSoundCore1 = 4
+    kABSoundCore1 = 4,
+    kABWalls = 8
 };
 u32 sAB;
 u32 sABCycle = 1;
 u32 sBlocks;
 signed char sOptions[PortLogic::kOptionCount];
 bool sMapCache;
+bool sWalls;
 // The player's place (Place), per block of lines and per frame. Speed in blocks per step; moves past
 // kTeleport blocks in one step are left out.
 const float kTeleport = 4.0f;
@@ -316,6 +319,10 @@ u32 ParseAB(const char* p)
         {
             ab |= kABSoundCore1;
         }
+        else if (n == 5 && !strncmp(p, "walls", n))
+        {
+            ab |= kABWalls;
+        }
         p = pEnd ? pEnd + 1 : 0;
     }
     return ab;
@@ -342,6 +349,11 @@ void SetAB()
     {
         const bool off = (sBlocks >> bit++) & 1;
         PortSoundJob::SetEnabled(!off);
+    }
+    if (sAB & kABWalls)
+    {
+        const bool off = (sBlocks >> bit++) & 1;
+        PortMapCache::SetWalls(!off && sWalls);
     }
 }
 
@@ -458,10 +470,10 @@ void Print()
     {
         options |= PortLogic::On(static_cast<PortLogic::Option>(i)) ? 1u << i : 0;
     }
-    Log3DS_Printf("prof: %lu frames, %lu steps, %.0f scopes and %.0f sections per frame (%.2f ms); last log write %lu bytes in %.2f ms; options %lu mapcache %d soundcore1 %d\n",
+    Log3DS_Printf("prof: %lu frames, %lu steps, %.0f scopes and %.0f sections per frame (%.2f ms); last log write %lu bytes in %.2f ms; options %lu mapcache %d soundcore1 %d walls %d\n",
                   sFrames, sSteps, (double)sScopes / sFrames, (double)sSections / sFrames,
                   Ms((u64)sScopes * sScopeTicks + (u64)sSections * sSectionTicks) / sFrames, logBytes, Ms(logTicks), options,
-                  PortMapCache::Enabled() ? 1 : 0, PortSoundJob::Enabled() ? 1 : 0);
+                  PortMapCache::Enabled() ? 1 : 0, PortSoundJob::Enabled() ? 1 : 0, PortMapCache::WallsEnabled() ? 1 : 0);
     if (sWhere.steps)
     {
         Log3DS_Printf("prof place: from=%.1f,%.1f to=%.1f,%.1f z=%.1f model=%d speed=%.2f/%.2f cam=%.2f/%.2f/%.2f slow=%lu/%lu\n",
@@ -631,7 +643,8 @@ void Reset()
             options |= sOptions[i] ? 1u << i : 0;
         }
         sMapCache = PortMapCache::Enabled();
-        sABCycle = (sAB & kABLogic ? 2 : 1) * (sAB & kABMapCache ? 2 : 1) * (sAB & kABSoundCore1 ? 2 : 1);
+        sWalls = PortMapCache::WallsEnabled();
+        sABCycle = (sAB & kABLogic ? 2 : 1) * (sAB & kABMapCache ? 2 : 1) * (sAB & kABSoundCore1 ? 2 : 1) * (sAB & kABWalls ? 2 : 1);
         if (sAB & kABLogic)
         {
             Log3DS_Printf("prof: A/B per block: logic options %lu, then off\n", options);
@@ -644,6 +657,10 @@ void Reset()
         {
             PortSoundJob::SetEnabled(true);
             Log3DS_Printf("prof: A/B per block: sound pass on the system core, then on the game's\n");
+        }
+        if (sAB & kABWalls)
+        {
+            Log3DS_Printf("prof: A/B per block: map cache walls %d, then off (chunks built again on a change)\n", sWalls ? 1 : 0);
         }
         const char* pPmu = getenv("GTA2_3DS_PROF_PMU");
         if (gOn && pPmu && atoi(pPmu) > 0)
