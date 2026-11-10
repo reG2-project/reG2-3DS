@@ -28,6 +28,8 @@ u32 StepsBeforeDraw();
 // Logic steps run so far, and where the current draw sits between the last two (1: on the last).
 u32 StepCount();
 f32 DrawAlpha();
+// Whether the draws move the sprites to between two steps (a FRAME LIMIT other than 30).
+bool Interpolated();
 
 // Two values a draw changes, put back at the end of the scope unless a logic step ran before this draw.
 template <typename T>
