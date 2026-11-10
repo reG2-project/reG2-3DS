@@ -1,6 +1,7 @@
 #include "sound_obj.hpp"
 #if defined(GTA2_PORT)
 #include "../port/src/prof.hpp"
+#include "../port/src/sound_job.hpp"
 #else
 #define PORT_PROF(part)
 #endif
@@ -3609,6 +3610,13 @@ void sound_obj::Service()
                 mVocals.mFifthFrameFlag = false;
             }
         }
+#if defined(GTA2_PORT)
+        PortViewLatchSoundTurn();
+        if (!mIsPaused && PortSoundJob::Defer())
+        {
+            return;
+        }
+#endif
         ServiceSoundEffects();
     }
 }

@@ -9,6 +9,7 @@
 #include <string>
 #include "port_platform.hpp"
 #include "../../src/prof.hpp"
+#include "../../src/sound_job.hpp"
 #include "../../renderer/gl_context.hpp"
 
 namespace
@@ -288,6 +289,8 @@ LRESULT WINAPI DispatchMessageA(const MSG* pMsg)
     {
         return 0;
     }
+    // A message can reach the game's or the sound's state (focus: the sound's release).
+    PortSoundJob::Join();
     return sMainWindow->mProc(pMsg->hwnd, pMsg->message, pMsg->wParam, pMsg->lParam);
 }
 

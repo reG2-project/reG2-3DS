@@ -54,6 +54,7 @@ intptr_t port_findfirst(const char* pattern, struct _finddata_t* pData)
 #include <strings.h>
 #include <unistd.h>
 #include <map>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -185,6 +186,9 @@ static bool ResolveHostPath(const char* path, char* out)
 // the drive's root would cost a few on each call (tens of milliseconds each on the 3DS).
 const char* port_resolve_path(const char* path, char* out)
 {
+    // The caches are shared: the 3DS's sound pass may open a stream on the system core.
+    static std::mutex sLock;
+    const std::lock_guard<std::mutex> hold(sLock);
     if (!IsDrivePath(path) || !ResolveHostPath((std::string("data\\") + (path + 3)).c_str(), out))
     {
         ResolveHostPath(path, out);

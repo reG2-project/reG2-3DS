@@ -388,4 +388,9 @@ f32 DrawAlpha()
 {
     return sInDraw && !Original() ? sAlpha : 1.0f;
 }
+
+bool Interpolated()
+{
+    return !Original();
+}
 } // namespace PortFrameLoop

@@ -752,6 +752,30 @@ queue), and the rest of the step reads the cars where the physics left them, so 
 results. Only work on state that nothing writes while it runs could go there, joined before the next step,
 and at the application's 30 % of that core it runs 3 to 5 times slower than here (the texture worker).
 
+The sound pass is such work. It runs at the end of the step (`Game::ExecuteGame`, after `UpdateGame`) and reads
+the cars, peds, objects, sprites, cranes, crushers, weapons, the map's columns and zones, the game camera and the
+step's collision queue; outside its own tables it writes only what nothing reads before the next step: the events
+it takes from the cars, peds and weapons, the crime report queue, the ped's scream timer, the CarInfo globals the
+physics sets again before use, and the map's zone iterator. At FRAME LIMIT 30 the draw writes none of what it
+reads (it moves no sprite, the CHINATOWN view turns the view camera and the pass uses the game camera), makes no
+`rand()` draw and no sound call. `GTA2_3DS_SOUND_CORE1=1` (`port/3ds/sound_job.cpp`, off by default) keeps the
+start of `sound_obj::Service` in the step (its 5 `rand()` draws, as newlib keeps the generator's state per thread,
+the pause test, the frame counter, the view's turn) and runs `ServiceSoundEffects` on a thread of the system core,
+with the main thread's FPSCR, while the frame draws; it is joined before the next step, before a window message
+(focus releases the sound), after a step that exits, and at any frame loop action but a draw. It stays in the step
+while paused, with the pause menu open (its draw plays sounds and changes settings), when the draws interpolate
+(they move the sprites) and outside the port's frame loop. The pass can allocate DSP buffers and open a stream on
+that thread, so the linear heap's calls and the path resolver's caches are under locks. The lockstep scenes
+(Azahar, Old 3DS mode; cars, peds and `rand()` every 50 steps, walk 2100 steps, drive 2600, day and night) match
+throughout. The sound queue's hash is one of two sequences, which part from step 600 walking and 1800 driving:
+two runs of the plain build of the same scene gave both, and each run with the option gave one of them.
+The main thread's step went from 2.50 to 2.20 ms walking by day, 2.55 to 2.17 by night, 2.55 to 2.23 driving by
+day and 2.59 to 2.20 by night (the sound part 0.38 to 0.025 ms). On the system core the pass started 0.6 ms after
+its hand-off on average (at most 4.6 to 8 ms), ran 0.67 to 0.71 ms (at most 5.8 walking, 32 to 34 driving, a
+station's first open), and the join waited in none of 1650 steps walking and 2 of 2250 driving (at most 21 ms).
+On a console the pass takes about 1 ms of the step: 3 to 5 ms there, plus the wait for its turn, inside a draw of
+14 ms. That needs a console to confirm.
+
 ### Pacing
 
 The screens refresh at 59.83 Hz (4481136 ticks of the system clock), so FRAME LIMIT 30 is a frame every 2

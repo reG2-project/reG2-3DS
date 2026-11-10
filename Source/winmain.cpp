@@ -66,6 +66,7 @@
 #include "TextTable.hpp"
 #if defined(GTA2_PORT)
 #include "../port/src/frame_loop.hpp"
+#include "../port/src/sound_job.hpp"
 #include "../port/src/prof.hpp"
 #endif
 
@@ -1473,7 +1474,12 @@ static bool PortRunGameFrame()
     bool exit_requested = false;
     bool drew_frame = false;
     bool updated_logic = false;
-    switch (PortFrameLoop::Next(gGame_0x40->GetFrameDurationMs(), sbForceGameUpdate, bSkip_draw))
+    const PortFrameLoop::Action action = PortFrameLoop::Next(gGame_0x40->GetFrameDurationMs(), sbForceGameUpdate, bSkip_draw);
+    if (action != PortFrameLoop::kDraw)
+    {
+        PortSoundJob::Join();
+    }
+    switch (action)
     {
         case PortFrameLoop::kStep:
             port_PumpForStep();
@@ -1486,7 +1492,13 @@ static bool PortRunGameFrame()
             PortFrameLoop::BeforeStep();
             {
                 PORT_PROF(kStep);
+                PortSoundJob::AllowInStep(true);
                 exit_requested = ExecuteGameTimed();
+                PortSoundJob::AllowInStep(false);
+            }
+            if (exit_requested)
+            {
+                PortSoundJob::Join();
             }
             PortFrameLoop::AfterStep();
             sbForceGameUpdate = false;

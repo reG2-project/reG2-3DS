@@ -73,6 +73,10 @@ s32 sPrevPitch;
 Car* spCar;
 f32 sStepCos = 1.0f;
 f32 sStepSin;
+// The turn the sound pass uses, taken as the pass starts: it may end after the next Step().
+bool sSoundValid;
+f32 sSoundCos = 1.0f;
+f32 sSoundSin;
 
 bool sDrawn;
 f32 sCos;
@@ -520,13 +524,20 @@ void PortViewTurnPoint640(Fix16& x, Fix16& y)
     }
 }
 
+void PortViewLatchSoundTurn()
+{
+    PortView::sSoundValid = PortView::sValid;
+    PortView::sSoundCos = PortView::sStepCos;
+    PortView::sSoundSin = PortView::sStepSin;
+}
+
 void PortViewTurnSound(Fix16& x, Fix16& y)
 {
-    if (PortView::sValid)
+    if (PortView::sSoundValid)
     {
         const f32 fx = PortView::ToF(x);
         const f32 fy = PortView::ToF(y);
-        x = Fix16(PortView::sStepCos * fx - PortView::sStepSin * fy);
-        y = Fix16(PortView::sStepSin * fx + PortView::sStepCos * fy);
+        x = Fix16(PortView::sSoundCos * fx - PortView::sSoundSin * fy);
+        y = Fix16(PortView::sSoundSin * fx + PortView::sSoundCos * fy);
     }
 }
