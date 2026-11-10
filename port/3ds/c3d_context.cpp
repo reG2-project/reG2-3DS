@@ -93,6 +93,19 @@ C3D_RenderTarget* C3DContextTarget()
     return gTarget;
 }
 
+void C3DContextSetStereo(bool stereo)
+{
+    gfxSet3D(stereo);
+    C3D_RenderTargetSetOutput(0, GFX_TOP, stereo ? GFX_LEFT : GFX_RIGHT, 0);
+    C3D_RenderTargetSetOutput(gTarget, GFX_TOP, stereo ? GFX_RIGHT : GFX_LEFT, sTopFlags);
+}
+
+void C3DContextTransferLeft()
+{
+    const u32 dim = GX_BUFFER_DIM(240, 400);
+    GX_DisplayTransfer((u32*)gTarget->frameBuf.colorBuf, dim, (u32*)gfxGetFramebuffer(GFX_TOP, GFX_LEFT, NULL, NULL), dim, sTopFlags);
+}
+
 C3D_RenderTarget* C3DContextBottomTarget()
 {
     return gBottom;

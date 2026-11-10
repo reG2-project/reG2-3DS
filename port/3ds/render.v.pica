@@ -23,11 +23,13 @@
 .out outclr color
 .out outtc0 texcoord0
 
-; v0 = (x, y, rhw), v1 = r, g, b, a bytes, v2 = (u, v), v3 = world (x, y, z) and shade 0..1, or -1 unlit
+; v0 = (x, y, rhw), v1 = r, g, b, a bytes, v2 = (u, v), v3 = world (x, y, z) and shade 0..1, or -1 unlit,
+; v4 = the eye (a fixed attribute, C3DRenderer's stereo): clip y moves by v4.x * (w - v4.y) where v4.z <= w < v4.w
 .alias inpos v0
 .alias inclr v1
 .alias intex v2
 .alias inworld v3
+.alias ineye v4
 
 .proc main
     mov r0, zeros
@@ -41,7 +43,15 @@
 
     max r2, tiny, inpos.zzzz
     rcp r2, r2.x
-    mul outpos, r1, r2.xxxx
+    mul r1, r1, r2.xxxx
+    ; the eye's parallax at the world's depths only: the HUD's w is 1 or 10000
+    add r3, r1.wwww, -ineye.yyyy
+    mul r3, ineye.xxxx, r3
+    sge r4, r1.wwww, ineye.zzzz
+    slt r5, r1.wwww, ineye.wwww
+    mul r4, r4, r5
+    mad r1.y, r3, r4, r1
+    mov outpos, r1
     mov outtc0, intex
 
     cmp zeros, le, le, inworld.wwww

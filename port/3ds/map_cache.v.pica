@@ -20,14 +20,22 @@
 .out outclr color
 .out outtc0 texcoord0
 
-; v0 = local x, local y and shade bytes, v1 = (u, v)
+; v0 = local x, local y and shade bytes, v1 = (u, v), v2 = the eye as render.v.pica's v4
 .alias inpos v0
 .alias intex v1
+.alias ineye v2
 
 .proc main
     mul r0, projection[0], inpos.xxxx
     mad r0, inpos.yyyy, projection[1], r0
-    add outpos, projection[2], r0
+    add r1, projection[2], r0
+    add r3, r1.wwww, -ineye.yyyy
+    mul r3, ineye.xxxx, r3
+    sge r4, r1.wwww, ineye.zzzz
+    slt r5, r1.wwww, ineye.wwww
+    mul r4, r4, r5
+    mad r1.y, r3, r4, r1
+    mov outpos, r1
     mov outtc0, intex
 
     ; the colour bytes (shade, shade, shade, 255)

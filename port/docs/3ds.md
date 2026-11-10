@@ -222,6 +222,43 @@ one), is drawn by the game once: while its text stays the same, the renderer cop
 hashes of those batches' vertices made when they were kept (with a brief shown, the signature takes 0.03 ms per
 frame in Azahar rather than 0.09 when it hashed them every time).
 
+### Stereo
+
+With the 3D slider up (`osGet3DSliderState`), the top screen shows a picture per eye (`gfxSet3D`), and the CPU
+still draws once. The frame's commands from its start to the end of the top screen's draws (the world, the HUD left
+on the top screen, the FPS overlay) are written once, as for one eye, and the GPU runs them twice: after a command
+list of its own that sets the left eye's parallax, then, once the top target has been transferred to the left eye's
+framebuffer, after their end has set the right eye's. citro3d's frame end then transfers the target to the right
+eye's framebuffer with the bottom screen's (`C3DContextSetStereo` links the top target to `GFX_RIGHT`). One render
+target serves both eyes, so no VRAM is taken. The second run starts from the state the first one left, so a stereo
+frame writes at its start what its draws use and citro3d would otherwise leave out as unchanged: the shader program
+(`shaderProgramConfigure`) and the vertex uniforms (about 2 KB of commands); BeginFrame and ApplyState set the rest at
+the first draw.
+
+The parallax is in the vertex shaders (`render.v.pica` and `map_cache.v.pica`): the eye is a fixed vertex attribute
+(v4 and v2), written into the command buffer at the frame's start and at the end of the top screen's commands
+(citro3d writes its fixed attributes at the next draw, which would be inside the commands that run twice). A vertex
+at depth w (the game's 1 / rhw: camera z + 8 - z, `sprite.cpp`) moves along the screen by e (1 - w0 / w), so in clip
+space by e (w - w0). The screen plane w0 is the player's depth, eased over a few frames
+(`stereo_game.cpp`): the street around the player is at screen depth, what stands higher (buildings, roofs, the
+player on a bridge) comes out, what lies lower goes in. The HUD stays at screen depth: the game draws it at w = 10000
+(zone and car names, messages, arrows) and the port's 2D draws at w = 1 (the frontend, the CPU surface, the FPS
+overlay), while the world lies between 2 and 8 walking and up to about 22 zoomed out, so the shaders move only w in
+[1.01, 1000). Each eye moves by the slider times `GTA2_3DS_STEREO` pixels (3 by default, 0 keeps the screen 2D) per
+unit of 1 - w0 / w: walking in bil, roofs come out by 4 to 7 pixels between the eyes at full slider. The frames are
+in stereo only while the last one drew something at the world's depths: the frontend stays 2D (the parallax barrier
+off), the pause menu shows over the city in stereo, at screen depth.
+
+In Azahar, walking in bil, the draw takes 2.85 ms per frame and the present 0.39 with the slider at 0 and at its top
+alike, as without the stereo: the second eye costs the CPU a few microseconds. The GPU draws the top screen twice and
+transfers it once more; Azahar does not time the GPU, but on the console, where a frame took 4 to 5 ms of GPU time, that
+makes about 8 to 10, inside the 33 ms of a frame. Azahar shows both eyes with its stereoscopic mode side by side
+(`render_3d=1` in `qt-config.ini`), its depth (`factor_3d`) being the slider.
+
+citro3d's library is built with short enums (GCC's default for `arm-none-eabi`), the port with int ones: a
+`C3D_RenderTarget`'s fields after its frame buffer's enums are not where the port's compiler looks for them, so
+`c3d_context.cpp` keeps the top target's transfer flags itself.
+
 ## Build
 
 ```bash
@@ -319,7 +356,8 @@ the same in New 3DS mode, which runs the same clock; Azahar leaves out the GPU's
 `GTA2_AUDIO_DRIVER=dummy` runs the sound without the DSP, `GTA2_3DS_VRAM=0` keeps the textures in linear memory
 (`GTA2_3DS_STATS` logs what VRAM holds, the DMA copies and the waits for them), `GTA2_3DS_UPLOAD_WORKER=0` makes the textures' levels on
 the main thread (see Renderer; `GTA2_3DS_STATS` logs the worker's time and the jobs the main thread wrote), `GTA2_3DS_MINIMAP=wide` or `off` sets the
-minimap's place (see Renderer). To boot into a city, the registry's `Debug` keys
+minimap's place (see Renderer) and `GTA2_3DS_STEREO=<pixels>` the stereo's strength (see Stereo, 0 for none).
+To boot into a city, the registry's `Debug` keys
 `skip_frontend`, `mapname`, `stylename` and `scriptname` (see `Source/debug.cpp`).
 
 `GTA2_3DS_PROF=150` (`port/3ds/prof_3ds.cpp`) logs every 150 frames of a game where the main thread's time goes.
