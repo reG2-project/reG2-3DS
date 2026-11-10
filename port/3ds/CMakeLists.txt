@@ -60,6 +60,25 @@ add_executable(gta2 ${lib_src} ${ROOT}/test.cpp ${ROOT}/StdAfx.cpp ${ROOT}/Sourc
 set_target_properties(gta2 PROPERTIES SUFFIX .elf)
 set_source_files_properties(${PORT}/compat/src/miles.cpp ${PORT}/compat/src/miles3d.cpp PROPERTIES COMPILE_DEFINITIONS BUILD_MSS)
 set_source_files_properties(${ROOT}/Source/3rdParty/bink.cpp PROPERTIES COMPILE_DEFINITIONS BUILD_BINK)
+# Console test builds: extra flags for the renderer, and for it with the per-frame game code (cars' physics,
+# sprites, map), e.g. -O2 in a MinSizeRel build. Full LTO keeps each function's optsize from its own file.
+set(GTA2_3DS_FLAGS "" CACHE STRING "Extra compile flags for every file")
+set(GTA2_3DS_RENDER_FLAGS "" CACHE STRING "Extra compile flags for the port's renderer files")
+set(GTA2_3DS_HOT_FLAGS "" CACHE STRING "Extra compile flags for the renderer and the game's per-frame files")
+set(render_src ${PORT}/renderer/gbh_api.cpp ${PORT}/renderer/vid_system.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/c3d_renderer.cpp ${CMAKE_CURRENT_LIST_DIR}/c3d_context.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/map_cache.cpp ${CMAKE_CURRENT_LIST_DIR}/map_cache_mesh.cpp)
+set(hot_src ${PORT}/src/lights.cpp ${PORT}/src/shadows.cpp)
+foreach(f CarPhysics collide sprite SpriteGrid MapRenderer SpriteRenderer map_0x370 gbh_graphics fix16 Fix16_Point Fix16_Rect ang16)
+    list(APPEND hot_src ${ROOT}/Source/${f}.cpp)
+endforeach()
+if(GTA2_3DS_FLAGS)
+    target_compile_options(gta2 PRIVATE "SHELL:${GTA2_3DS_FLAGS}")
+endif()
+separate_arguments(render_flags UNIX_COMMAND "${GTA2_3DS_RENDER_FLAGS}")
+separate_arguments(hot_flags UNIX_COMMAND "${GTA2_3DS_HOT_FLAGS}")
+set_property(SOURCE ${render_src} APPEND PROPERTY COMPILE_OPTIONS ${render_flags} ${hot_flags})
+set_property(SOURCE ${hot_src} APPEND PROPERTY COMPILE_OPTIONS ${hot_flags})
 target_compile_options(gta2 PRIVATE -include ${PORT}/compat/prelude.hpp
     -fno-builtin-wcslen -fno-builtin-wcscpy -fno-builtin-wcscmp -fno-builtin-wcsncmp -fno-builtin-wcschr
     -fno-builtin-wmemcpy -fno-builtin-wmemset -fno-builtin-wmemcmp)
@@ -83,9 +102,10 @@ set(icon ${CMAKE_CURRENT_BINARY_DIR}/icon.png)
 add_custom_command(OUTPUT ${icon}
     COMMAND python3 ${CMAKE_CURRENT_LIST_DIR}/make_icon.py ${icon}
     DEPENDS ${CMAKE_CURRENT_LIST_DIR}/make_icon.py VERBATIM)
+set(GTA2_3DS_TITLE "GTA2" CACHE STRING "The Homebrew Launcher's title, at most 64 characters")
 set(smdh ${CMAKE_CURRENT_BINARY_DIR}/gta2.smdh)
 add_custom_command(OUTPUT ${smdh}
-    COMMAND ${DEVKITPRO}/tools/bin/smdhtool --create "GTA2" "Grand Theft Auto 2, from the gta2_re decompilation. Needs the PC game's data."
+    COMMAND ${DEVKITPRO}/tools/bin/smdhtool --create "${GTA2_3DS_TITLE}" "Grand Theft Auto 2, from the gta2_re decompilation. Needs the PC game's data."
             "gta2_re" ${icon} ${smdh}
     DEPENDS ${icon} VERBATIM)
 add_custom_command(OUTPUT gta2.3dsx

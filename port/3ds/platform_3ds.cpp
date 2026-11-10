@@ -171,6 +171,20 @@ static bool TryLaunchFolder()
     return TryFolder(dir);
 }
 
+// gta2_log.txt, or gta2_log_<name>.txt for a .3dsx not named gta2 (so builds side by side keep their logs).
+static void LogName(const char* pPath, char* pOut, size_t size)
+{
+    const char* pName = pPath ? strrchr(pPath, '/') : NULL;
+    pName = pName ? pName + 1 : pPath;
+    const size_t len = pName ? strcspn(pName, ".") : 0;
+    if (len == 0 || (len == 4 && strncmp(pName, "gta2", 4) == 0))
+    {
+        snprintf(pOut, size, "gta2_log.txt");
+        return;
+    }
+    snprintf(pOut, size, "gta2_log_%.*s.txt", (int)(len < 64 ? len : 64), pName);
+}
+
 // A message on the top screen until START, before SDL owns the screens.
 static void ShowError(const char* text)
 {
@@ -265,7 +279,9 @@ __attribute__((constructor(100))) static void StartUp()
         return;
     }
     // The log: stderr and SDL's, unbuffered so that it survives a crash.
-    freopen("gta2_log.txt", "w", stderr);
+    char logName[96];
+    LogName(__system_argc > 0 ? __system_argv[0] : NULL, logName, sizeof(logName));
+    freopen(logName, "w", stderr);
     setvbuf(stderr, NULL, _IONBF, 0);
     SDL_SetLogOutputFunction(LogToStderr, NULL);
     LoadEnvironment();
