@@ -90,7 +90,7 @@ const f32 kWorldDepthMin = 1.01f;
 const f32 kWorldDepthMax = 1000.0f;
 // Each eye's shift in pixels at full slider, per unit of 1 - w0 / w (GTA2_3DS_STEREO; 0 keeps the top screen 2D), and
 // how fast the screen plane's depth w0 follows the player's, per frame.
-const f32 kStereoPx = 3.0f;
+const f32 kStereoPx = 2.5f;
 const f32 kEyeDepthEase = 0.25f;
 const s32 kMaxTexSize = 1024;
 // The bottom screen is drawn in one frame of that many (the game leaves its HUD draws out of the others), and only

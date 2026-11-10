@@ -260,7 +260,7 @@ space by e (w - w0). The screen plane w0 is the player's depth, eased over a few
 player on a bridge) comes out, what lies lower goes in. The HUD stays at screen depth: the game draws it at w = 10000
 (zone and car names, messages, arrows) and the port's 2D draws at w = 1 (the frontend, the CPU surface, the FPS
 overlay), while the world lies between 2 and 8 walking and up to about 22 zoomed out, so the shaders move only w in
-[1.01, 1000). Each eye moves by the slider times `GTA2_3DS_STEREO` pixels (3 by default, 0 keeps the screen 2D) per
+[1.01, 1000). Each eye moves by the slider times `GTA2_3DS_STEREO` pixels (2.5 by default, 0 keeps the screen 2D) per
 unit of 1 - w0 / w: walking in bil, roofs come out by 4 to 7 pixels between the eyes at full slider. The frames are
 in stereo only while the last one drew something at the world's depths: the frontend stays 2D (the parallax barrier
 off), the pause menu shows over the city in stereo, at screen depth.
@@ -482,8 +482,8 @@ the same buttons on foot and in a vehicle; SDL's 3DS mapping gives the buttons b
 | L | MODERN: held, the player keeps his facing (backs off while firing with R) | brake, reverse |
 | B | jump | handbrake |
 | A | get in | get out |
-| Y, X | specials 1 and 2 | specials 1 (horn, siren) and 2 |
-| D-pad left, right | previous, next weapon | the roof gun's turn (fire truck, tank, gun jeep), else the weapons |
+| Y, X | previous, next weapon | previous, next weapon |
+| D-pad left, right | specials 1 and 2 | the roof gun's turn (fire truck, tank, gun jeep), else specials 1 (horn, siren) and 2 |
 | D-pad up, down | special 3, nothing | special 3, attack |
 | START | pause menu, with the city's map on the bottom screen: drag it with the stylus, + and - zoom | |
 | SELECT | back in menus | the next radio station (the PC's F1) |
@@ -495,7 +495,7 @@ CLASSIC D-PAD moves on the d-pad instead, and the circle pad takes what the d-pa
 | Button | On foot | In a vehicle |
 |---|---|---|
 | D-pad | up, down forward, back; left, right turn; diagonals both | left, right steer; up special 3, down attack |
-| Circle pad left, right | previous, next weapon | the roof gun's turn, else the weapons |
+| Circle pad left, right | specials 1 and 2 | the roof gun's turn, else specials 1 and 2 |
 | Circle pad up | special 3 | |
 | L | next weapon | brake, reverse |
 
@@ -505,8 +505,8 @@ CONTROLS (pause menu or OPTIONS) chooses MODERN, the default, CLASSIC, the origi
 CLASSIC D-PAD, the same on the d-pad; the choice is `port_console_controls` in the registry (1, 0 and 2),
 apart from the PC's `port_controls`. MODERN is TWIN STICK
 (`port/src/twin_stick.cpp`): without an aim the player turns to the way he walks; while L is held his
-facing stays the one he had at the press (`port_HoldFacing`), and the C-stick's aim comes first. Shots go
-where he faces, without the original's lock on a ped near the line of fire (CLASSIC keeps it). CLASSIC reads
+facing stays the one he had at the press (`port_HoldFacing`), and the C-stick's aim comes first. Shots keep
+the original's lock on a ped near the line of fire, except while the C-stick aims (`PortTwinStick::FreeAim`). CLASSIC reads
 the circle pad as the original's arrows by the way it points past the dead zone, an 8-way gate: up or down
 alone within 30 degrees of straight, left or right alone within 22.5, both in between, so a diagonal runs and
 turns (a threshold on each axis misses the diagonals of a round gate). On foot, in either style, the circle
@@ -514,7 +514,7 @@ pad pushed less than 0.55 of its range walks at the peds' walk speed, with their
 in `Char::UpdateWalking`), so the player can turn on the spot; further, he runs. The dead zone is 0.25, and the
 circle pad gives about 0.96 at the end of its travel, diagonals too (Azahar: 154 of the 160 that SDL's 3DS
 driver takes as full, 109 on each axis on a diagonal), so a run is reached a little past half way (not in CLASSIC D-PAD, where the d-pad runs). In MODERN and
-CLASSIC only the circle pad moves, so that the d-pad keeps the weapons; L on foot in CLASSIC D-PAD gives the
+CLASSIC only the circle pad moves, so that the d-pad keeps the specials; L on foot in CLASSIC D-PAD gives the
 next weapon without leaving the d-pad or R. The original's SPECIAL 1 with left or right still turns a roof gun. In the menus B
 or START selects and A or SELECT goes back; the hints name the buttons as the console prints them
 (`PortPlatform::PadButtonName`).

@@ -367,16 +367,12 @@ bool ConsoleDown(int control, bool car, int twin, bool roofGun, bool dpad)
             return Button(SDL_GAMEPAD_BUTTON_SOUTH);
         case 7:
         case 8:
-            if (dpad)
-            {
-                // On foot L gives the next weapon too, the index finger's quick change.
-                return (!roofGun && StickArrow(control == 7 ? 2 : 3)) || (control == 8 && !car && l);
-            }
-            return !roofGun && Button(control == 7 ? SDL_GAMEPAD_BUTTON_DPAD_LEFT : SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
+            // In CLASSIC D-PAD, L on foot gives the next weapon too, the index finger's quick change.
+            return Button(control == 7 ? SDL_GAMEPAD_BUTTON_WEST : SDL_GAMEPAD_BUTTON_NORTH) || (dpad && control == 8 && !car && l);
         case 9:
-            return Button(SDL_GAMEPAD_BUTTON_WEST);
         case 10:
-            return Button(SDL_GAMEPAD_BUTTON_NORTH);
+            return !roofGun && (dpad ? StickArrow(control == 9 ? 2 : 3)
+                                     : Button(control == 9 ? SDL_GAMEPAD_BUTTON_DPAD_LEFT : SDL_GAMEPAD_BUTTON_DPAD_RIGHT));
         default:
             return dpad && !car ? StickArrow(0) : Button(SDL_GAMEPAD_BUTTON_DPAD_UP);
     }
