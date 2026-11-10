@@ -222,6 +222,8 @@ Fix16 PortViewWidthFactor();
 // The CHINATOWN camera's turn (port/src/view.cpp): the map area drawn, and sound offsets turned with the view.
 void PortViewTurnedExtent(Fix16& width, Fix16& height);
 void PortViewTurnSound(Fix16& x, Fix16& y);
+// Takes the turn PortViewTurnSound uses until the next call: at the start of each sound pass.
+void PortViewLatchSoundTurn();
 // A point of the 640x480 projection (IsCoordsPosVisible) turned with the view.
 void PortViewTurnPoint640(Fix16& x, Fix16& y);
 // A camera zoom with the player's zoom setting applied, for everything that depends on the view's size.
