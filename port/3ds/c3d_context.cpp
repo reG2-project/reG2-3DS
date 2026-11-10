@@ -10,6 +10,9 @@ const size_t kCmdBufSize = 0x100000;
 
 C3D_RenderTarget* gTarget;
 C3D_RenderTarget* gBottom;
+// The top target's display transfer flags. Read from here: citro3d's library has short enums and the port int ones,
+// so C3D_RenderTarget's fields after its frame buffer are not where the port's compiler puts them.
+u32 sTopFlags;
 // The top screen's refreshes counted at the last wait.
 u32 sLastTop;
 // The frame loop has waited for this frame's refresh.
@@ -159,9 +162,9 @@ IGLContext* CreateGLContext(SDL_Window*, const char** ppError)
         *ppError = "C3D_RenderTargetCreate failed";
         return 0;
     }
-    const u32 flags = GX_TRANSFER_FLIP_VERT(0) | GX_TRANSFER_OUT_TILED(0) | GX_TRANSFER_RAW_COPY(0) | GX_TRANSFER_IN_FORMAT(GX_TRANSFER_FMT_RGBA8) |
-                      GX_TRANSFER_OUT_FORMAT(gfxGetScreenFormat(GFX_TOP)) | GX_TRANSFER_SCALING(GX_TRANSFER_SCALE_NO);
-    C3D_RenderTargetSetOutput(gTarget, GFX_TOP, GFX_LEFT, flags);
+    sTopFlags = GX_TRANSFER_FLIP_VERT(0) | GX_TRANSFER_OUT_TILED(0) | GX_TRANSFER_RAW_COPY(0) | GX_TRANSFER_IN_FORMAT(GX_TRANSFER_FMT_RGBA8) |
+                GX_TRANSFER_OUT_FORMAT(gfxGetScreenFormat(GFX_TOP)) | GX_TRANSFER_SCALING(GX_TRANSFER_SCALE_NO);
+    C3D_RenderTargetSetOutput(gTarget, GFX_TOP, GFX_LEFT, sTopFlags);
     // SDL draws nothing on the bottom screen: no window is on it.
     gBottom = C3D_RenderTargetCreate(240, 320, GPU_RB_RGBA8, -1);
     if (gBottom)
