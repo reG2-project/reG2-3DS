@@ -344,6 +344,24 @@ silent (about 2 minutes): a fast car by night and by day and the tank firing int
 in ste, a walk in ste, the frontend and the pause menu. It merges their counts into `gta2.proftext` with the
 host's `llvm-profdata` (about 650 KB, 140 KB compressed in git).
 
+devkitARM's `3dsx.ld` lays `.text` out in input order, so the 139 functions of `.text.hot` (700 KB) lie all over
+the game's 1.5 MB. `-DGTA2_3DS_HOT_LAYOUT=ON` (off by default) passes `port/3ds/pgo/hot_order.ld` to ld as
+`--section-ordering-file`: crt0 first (3dsxtool wants the entry point at the start), then the functions of the
+LTO object's call graph profile (`.llvm.call-graph-profile`, the PGO counts after inlining, newlib, libctru and
+citro3d callees included) in the C3 order of lld's `--call-graph-profile-sort`, the rest of `.text.hot`, the
+other code, and `.text.unlikely` last. Only the order changes: the same sections, of the same sizes. Every link
+writes `gta2.map` and `lto.o` into the build folder, from which `python3 port/3ds/pgo/hot_order.py <build folder>`
+rewrites the order (after a new profile; ld skips the names gone from the code).
+
+The cache simulator (Linux port, night drive and walk in ste) can map its blocks onto the ARM code through both
+builds' line tables: each block onto the ARM instructions of its source lines, in the inlined copy in the hottest
+section. 98 % of the logic step's line fetches fall in `.text.hot`, 209 KB of lines in 572 KB of functions. The
+order changes little there: the step's instruction misses 2 to 4 % more (shifting every function by 16 bytes
+alone gives 2 %), the draw's shared code 17 to 21 % fewer, the 4 KB pages touched per step 189 to 183, main
+TLB misses on code 9 to 13 % fewer and on the instruction micro TLB 6 % more (8 entries, 64 2-way, LRU,
+assumed). The step stays bound by capacity (each car's code), not by placement; only the console can tell
+(`GTA2_3DS_PROF_PMU`'s main TLB misses and instruction stalls, two builds side by side).
+
 ### Sound
 
 The console's DSP firmware (`dspfirm.cdc`) is Nintendo's and not distributed. OpenDSP
