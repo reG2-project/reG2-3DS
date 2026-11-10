@@ -10,6 +10,7 @@
 #include "stereo_game.hpp"
 #include <3ds.h>
 #include <citro3d.h>
+#include <arm_acle.h>
 #include <algorithm>
 #include <atomic>
 #include <math.h>
@@ -172,7 +173,8 @@ u32 Premultiply(u32 c)
     {
         return a ? c : 0;
     }
-    return Div255((c & 0xFF) * a) | (Div255(((c >> 8) & 0xFF) * a) << 8) | (Div255(((c >> 16) & 0xFF) * a) << 16) | (a << 24);
+    const u32 rb = __uxtb16(c) * a + 0x00800080, g = ((c >> 8) & 0xFF) * a + 128;
+    return ((__uxtab16(rb, rb >> 8) >> 8) & 0x00FF00FF) | ((g + (g >> 8)) & 0xFF00) | (c & 0xFF000000);
 }
 
 // The RTexelBits of texels as stored: premultiplied when blended.
@@ -236,9 +238,8 @@ constexpr RoundTables kRound;
 // Red and blue, then green and alpha, are summed two at a time in 16-bit lanes.
 u32 Average(u32 a, u32 b, u32 c, u32 d, const u8* const* round)
 {
-    const u32 m = 0x00FF00FF;
-    const u32 rb = (((a & m) + (b & m) + (c & m) + (d & m) + 0x00020002) >> 2) & m;
-    const u32 ga = ((((a >> 8) & m) + ((b >> 8) & m) + ((c >> 8) & m) + ((d >> 8) & m) + 0x00020002) >> 2) & m;
+    const u32 rb = (__uxtab16(__uxtab16(__uxtab16(__uxtb16(a), b), c), d) + 0x00020002) >> 2;
+    const u32 ga = (__uxtab16(__uxtab16(__uxtab16(__uxtb16(__ror(a, 8)), __ror(b, 8)), __ror(c, 8)), __ror(d, 8)) + 0x00020002) >> 2;
     return round[0][rb & 0xFF] | (round[1][ga & 0xFF] << 8) | (round[2][rb >> 16] << 16) | ((u32)round[3][ga >> 16] << 24);
 }
 
@@ -249,17 +250,38 @@ struct SourceLevel
     const u32* mRgba;
     s32 mWidth, mHeight, mCw, mCh;
     bool mPremultiply;
+    u32* mRows; // two rows of w texels, for those that differ from the caller's
 
-    const u32* Row(s32 y) const
+    const u32* Row(s32 y, s32 w) const
     {
-        const s32 cy = y < mCh ? y : mCh - 1;
-        return mRgba + (size_t)(mCh == mHeight ? cy : (s32)((long long)cy * mHeight / mCh)) * mWidth;
-    }
-    u32 At(const u32* pRow, s32 x) const
-    {
-        const s32 cx = x < mCw ? x : mCw - 1;
-        const u32 c = pRow[mCw == mWidth ? cx : (s32)((long long)cx * mWidth / mCw)];
-        return mPremultiply ? Premultiply(c) : c;
+        const s32 cy = y < mCh ? y : mCh - 1, cw = mCw, width = mWidth;
+        const u32* pRow = mRgba + (size_t)(mCh == mHeight ? cy : (s32)((long long)cy * mHeight / mCh)) * width;
+        if (cw == w && cw == width && !mPremultiply)
+        {
+            return pRow;
+        }
+        u32* pOut = mRows + (y & 1) * w;
+        for (s32 x = 0; cw != width && x < cw; x++)
+        {
+            pOut[x] = pRow[(s32)((long long)x * width / cw)];
+        }
+        pRow = cw != width ? pOut : pRow;
+        if (mPremultiply)
+        {
+            for (s32 x = 0; x < cw; x++)
+            {
+                pOut[x] = Premultiply(pRow[x]);
+            }
+        }
+        else if (pRow != pOut)
+        {
+            memcpy(pOut, pRow, (size_t)cw * 4);
+        }
+        for (s32 x = cw; x < w; x++)
+        {
+            pOut[x] = pOut[cw - 1];
+        }
+        return pOut;
     }
 };
 
@@ -269,8 +291,7 @@ struct ScratchLevel
     const u32* mTexels;
     s32 mWidth;
 
-    const u32* Row(s32 y) const { return mTexels + (size_t)y * mWidth; }
-    u32 At(const u32* pRow, s32 x) const { return pRow[x]; }
+    const u32* Row(s32 y, s32) const { return mTexels + (size_t)y * mWidth; }
 };
 
 // Where a level goes: tiled storage mWidth texels wide, the level's corner at (mX, mY), both even.
@@ -287,17 +308,17 @@ void WriteTiles(const LevelDst& dst, s32 w, s32 y0, s32 y1, const Source& src, C
 {
     for (s32 y = y0; y < y1; y += 2)
     {
-        const u32* pRow0 = src.Row(y);
-        const u32* pRow1 = src.Row(y + 1);
+        const u32* pRow0 = src.Row(y, w);
+        const u32* pRow1 = src.Row(y + 1, w);
         const s32 ty = y + dst.mY;
         T* pTiles = (T*)dst.mData + (size_t)(ty >> 3) * (dst.mWidth >> 3) * 64 + ((u32)kMorton[ty & 7] << 1);
         u32* pOut = pHalf ? pHalf + (size_t)(y / 2) * (w / 2) : 0;
-        for (s32 x = 0; x < w; x += 2)
+        // A 2x2 block is 4 consecutive texels in Morton order; the next block's x bits take a carry over y's (0x2A).
+        u32 mx = (u32)(dst.mX >> 3) * 64 + kMorton[dst.mX & 7];
+        for (s32 x = 0; x < w; x += 2, mx = ((mx | 0x2A) + 4) & ~0x2Au)
         {
-            const u32 a = src.At(pRow0, x), b = src.At(pRow0, x + 1), c = src.At(pRow1, x), d = src.At(pRow1, x + 1);
-            // A 2x2 block is 4 consecutive texels in Morton order.
-            const s32 tx = x + dst.mX;
-            T* p = pTiles + (tx >> 3) * 64 + kMorton[tx & 7];
+            const u32 a = pRow0[x], b = pRow0[x + 1], c = pRow1[x], d = pRow1[x + 1];
+            T* p = pTiles + mx;
             p[0] = conv(a);
             p[1] = conv(b);
             p[2] = conv(c);
@@ -363,16 +384,22 @@ void FillBorder(T* pDst, s32 dstW, s32 x0, s32 y0, s32 size, s32 border)
     for (s32 y = -border; y < size + border; y++)
     {
         const s32 sy = y < 0 ? 0 : y < size ? y : size - 1;
-        for (s32 x = -border; x < size + border; x++)
-        {
-            if (y == sy && x == 0)
+        // TiledIndex is the sum of its x part (y = 0) and its y part (x = 0).
+        T* pRow = pDst + TiledIndex(0, iy + y, dstW);
+        const T* pSrc = pDst + TiledIndex(0, iy + sy, dstW);
+        const T left = pSrc[TiledIndex(ix, 0, 0)], right = pSrc[TiledIndex(ix + size - 1, 0, 0)];
+        // Columns [from, to) copied from pFrom's, else set to v; the next column's x bits take a carry over y's (0x2A).
+        const auto fill = [&](s32 from, s32 to, const T* pFrom, T v) {
+            u32 tx = TiledIndex(ix + from, 0, 0);
+            for (s32 x = from; x < to; x++, tx = ((tx | 0x2A) + 1) & ~0x2Au)
             {
-                x = size - 1;
-                continue;
+                pRow[tx] = pFrom ? pFrom[tx] : v;
             }
-            const s32 sx = x < 0 ? 0 : x < size ? x : size - 1;
-            pDst[TiledIndex(ix + x, iy + y, dstW)] = pDst[TiledIndex(ix + sx, iy + sy, dstW)];
-        }
+        };
+        fill(-border, 0, 0, left);
+        // A row of the level itself has only its sides to fill.
+        fill(0, y == sy ? 0 : size, pSrc, 0);
+        fill(size, size + border, 0, right);
     }
 }
 
@@ -381,6 +408,7 @@ struct UploadScratch
 {
     std::vector<u32> mLevel;      // the next mip level being made
     std::vector<u32> mSlotTexels; // a slot's level made apart from its page
+    std::vector<u32> mRows;       // SourceLevel's rows
 };
 
 enum
@@ -834,7 +862,8 @@ static bool WriteTexels(const UploadJob& job, UploadScratch& scratch, const std:
         scratch.mLevel.resize((size_t)(job.mTw / 2) * (job.mTh / 2));
         pHalf = &scratch.mLevel[0];
     }
-    const SourceLevel src = {job.mRgba, job.mWidth, job.mHeight, job.mCw, job.mCh, job.mPremultiply};
+    scratch.mRows.resize((size_t)job.mTw * 2);
+    const SourceLevel src = {job.mRgba, job.mWidth, job.mHeight, job.mCw, job.mCh, job.mPremultiply, &scratch.mRows[0]};
     // One pass per level: each writes its texels and averages the next level into the scratch buffer.
     for (s32 l = 0; l <= job.mLevels; l++)
     {
