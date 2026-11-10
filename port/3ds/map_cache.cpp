@@ -39,6 +39,8 @@ const u32 kFlagLighting = 0x8000;
 const s32 kBuildsPerFrame = 1;
 // Frames between looks at the textures of the lids a chunk left to the game.
 const u32 kPartialRebuild = 30;
+// Lights past the shader's that may reach a chunk before it is left to the game whole.
+const s32 kMaxFarLights = 24;
 
 struct Group
 {
@@ -74,6 +76,7 @@ struct Chunk
     bool dirty;
     u8 layers;      // a bit per layer with cached lids
     u8 drawn;       // the layers the cache draws in drawnFrame
+    u16 farRows;    // the current layer's rows left to the game: a light past the shader's may reach them
     u32 drawnFrame;
     u32 usedFrame;
     u32 checkedFrame;
@@ -516,6 +519,35 @@ void Build(Chunk& c, s32 cx, s32 cy)
     sBuildMax = took > sBuildMax ? took : sBuildMax;
 }
 
+// The chunk's rows at the height top that a light past the shader's may reach, which gbh_api.cpp lights on the
+// CPU (a lid's box as near as NearLights finds it, with a margin): all of them when the shader cannot light it.
+u16 FarRows(f32 x0, f32 y0, f32 top)
+{
+    f32 lights[kMaxFarLights * 4];
+    const s32 n = MapCacheMesh::FarLights(x0, y0, top, x0 + kChunkSize, y0 + kChunkSize, top, lights, kMaxFarLights);
+    if (n < 0)
+    {
+        return 0xFFFF;
+    }
+    u16 rows = 0;
+    for (s32 i = 0; i < n; i++)
+    {
+        const f32* pLight = &lights[i * 4];
+        const f32 dz = fabsf(pLight[2] - top) - 0.01f;
+        const f32 left = pLight[3] - (dz > 0.0f ? dz * dz : 0.0f);
+        const f32 reach = sqrtf(left > 0.0f ? left : 0.0f) + 0.05f;
+        s32 r0 = (s32)floorf(pLight[1] - reach - y0);
+        s32 r1 = (s32)floorf(pLight[1] + reach - y0);
+        r0 = r0 < 0 ? 0 : r0;
+        r1 = r1 >= kChunkSize ? kChunkSize - 1 : r1;
+        if (r0 <= r1)
+        {
+            rows |= (u16)(((2u << r1) - 1) & ~((1u << r0) - 1));
+        }
+    }
+    return rows;
+}
+
 // A texture of a lid left to the game has been converted since.
 bool Converted(Chunk& c)
 {
@@ -705,6 +737,7 @@ void BeginLayer(s32 z, s32 minX, s32 minY, s32 maxX, s32 maxY)
                 }
             }
             c.usedFrame = sFrame;
+            c.farRows = 0;
             if (c.drawnFrame != sFrame)
             {
                 c.drawnFrame = sFrame;
@@ -715,18 +748,23 @@ void BeginLayer(s32 z, s32 minX, s32 minY, s32 maxX, s32 maxY)
                 continue;
             }
             const f32 x0 = (f32)(cx << kChunkShift), y0 = (f32)(cy << kChunkShift), top = (f32)(z + 1);
-            bool cpuLight = false;
+            u16 farRows = 0;
             if (sLit)
             {
                 PORT_PROF(kDrawMapCacheLight);
-                cpuLight = MapCacheMesh::NeedsCpuLight(x0, y0, top, x0 + kChunkSize, y0 + kChunkSize, top);
+                farRows = FarRows(x0, y0, top);
             }
-            if (cpuLight)
+            if (farRows == 0xFFFF)
             {
                 sCpuLit++;
                 PORT_PROF_COUNT(kMcCpuLit, 1);
                 continue;
             }
+            for (u16 rows = farRows; rows; rows &= rows - 1)
+            {
+                PORT_PROF_COUNT(kMcFarRows, 1);
+            }
+            c.farRows = farRows;
             c.drawn |= (u8)(1u << z);
             PORT_PROF_COUNT(kMcDrawn, 1);
         }
@@ -752,13 +790,14 @@ bool TakeLid(u16 lid)
     {
         return false;
     }
-    const u16 cached = c.lids[(z * kChunkSize + (y & (kChunkSize - 1))) * kChunkSize + (x & (kChunkSize - 1))];
-    if (cached == lid)
+    const s32 ly = y & (kChunkSize - 1);
+    const u16 cached = c.lids[(z * kChunkSize + ly) * kChunkSize + (x & (kChunkSize - 1))];
+    if (cached == lid && !((c.farRows >> ly) & 1))
     {
         PORT_PROF_COUNT(kMcLids, 1);
         return true;
     }
-    if (cached)
+    if (cached && cached != lid)
     {
         // Changed without Invalidate: drawn by the game now, built again in the next frame.
         sMismatches++;
@@ -785,7 +824,7 @@ bool SkipCell(s32 x, s32 y)
         return false;
     }
     // A cached lid is drawn by EndLayer only in the chunks it draws this frame.
-    const bool skip = !c.lids[(sLayer * kChunkSize + ly) * kChunkSize + lx] || (c.drawn >> sLayer) & 1;
+    const bool skip = !c.lids[(sLayer * kChunkSize + ly) * kChunkSize + lx] || ((c.drawn >> sLayer) & 1 && !((c.farRows >> ly) & 1));
     sSkipped += skip ? 1 : 0;
     PORT_PROF_COUNT(kMcSkipped, skip ? 1 : 0);
     return skip;
@@ -837,29 +876,42 @@ void EndLayer(s32 z)
                 {
                     continue;
                 }
-                const s32 r0 = rowMin - wy < 0 ? 0 : rowMin - wy;
-                const s32 r1 = rowMax - wy >= kChunkSize ? kChunkSize - 1 : rowMax - wy;
-                if (r0 > r1 || g.rows[r1 + 1] == g.rows[r0])
+                const s32 rowFirst = rowMin - wy < 0 ? 0 : rowMin - wy;
+                const s32 rowLast = rowMax - wy >= kChunkSize ? kChunkSize - 1 : rowMax - wy;
+                // A draw per run of rows the game leaves to the mesh.
+                for (s32 r = rowFirst; r <= rowLast;)
                 {
-                    continue;
+                    while (r <= rowLast && (c.farRows >> r) & 1)
+                    {
+                        r++;
+                    }
+                    const s32 r0 = r;
+                    while (r <= rowLast && !((c.farRows >> r) & 1))
+                    {
+                        r++;
+                    }
+                    if (g.rows[r] == g.rows[r0])
+                    {
+                        continue;
+                    }
+                    MapCacheMesh::Draw d;
+                    d.pVerts = c.pVerts;
+                    d.first = g.first + g.rows[r0];
+                    d.count = g.rows[r] - g.rows[r0];
+                    d.pTex = g.pTex;
+                    d.blend = g.blend;
+                    d.noMip = noMip;
+                    d.scale = scale;
+                    d.x0 = ox * scale + centreX;
+                    d.y0 = oy * scale + centreY;
+                    d.rhw = rhw;
+                    d.wx = (f32)wx;
+                    d.wy = (f32)wy;
+                    d.wz = (f32)(z + 1);
+                    sDraws.push_back(d);
+                    sQuadsDrawn += (u32)d.count / 6;
+                    PORT_PROF_COUNT(kMcQuads, (u32)d.count / 6);
                 }
-                MapCacheMesh::Draw d;
-                d.pVerts = c.pVerts;
-                d.first = g.first + g.rows[r0];
-                d.count = g.rows[r1 + 1] - g.rows[r0];
-                d.pTex = g.pTex;
-                d.blend = g.blend;
-                d.noMip = noMip;
-                d.scale = scale;
-                d.x0 = ox * scale + centreX;
-                d.y0 = oy * scale + centreY;
-                d.rhw = rhw;
-                d.wx = (f32)wx;
-                d.wy = (f32)wy;
-                d.wz = (f32)(z + 1);
-                sDraws.push_back(d);
-                sQuadsDrawn += (u32)d.count / 6;
-                PORT_PROF_COUNT(kMcQuads, (u32)d.count / 6);
             }
         }
     }

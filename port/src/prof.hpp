@@ -156,6 +156,7 @@ enum Count
     kMcBuilds,
     kMcDrawn,
     kMcCpuLit,
+    kMcFarRows,
     kMcQuads,
     kMcLids,
     kMcSkipped,

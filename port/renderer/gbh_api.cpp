@@ -1777,16 +1777,30 @@ bool port_MapCacheLit()
     return true;
 }
 
-// Whether the shader cannot light the world box as RenderVertsUnturned would: no shader lights, or a light past them reaches it.
-bool port_MapCacheNeedsCpuLight(f32 x0, f32 y0, f32 z0, f32 x1, f32 y1, f32 z1)
+// The lights past the shader's that LightCorners finds near the world box: x, y, z and the squared radius with
+// NearLights' margin, four floats each, at most max. -1 when the shader lights nothing, or more lights reach it.
+s32 port_MapCacheFarLights(f32 x0, f32 y0, f32 z0, f32 x1, f32 y1, f32 z1, f32* pOut, s32 max)
 {
     if (!gShaderLights || !gRenderer || gRenderer->Options().mPerPixelLighting)
     {
-        return true;
+        return -1;
     }
     Vert box[2];
     memset(box, 0, sizeof(box));
     box[0].x = x0, box[0].y = y0, box[0].z = z0;
     box[1].x = x1, box[1].y = y1, box[1].z = z1;
-    return NearLights(box, 2, gShaderLightsEnd) != 0;
+    const u32 n = NearLights(box, 2, gShaderLightsEnd);
+    if (n > (u32)max)
+    {
+        return -1;
+    }
+    for (u32 i = 0; i < n; i++)
+    {
+        const LightInternal& l = gLights[gNearLights[i]];
+        pOut[i * 4] = l.mX;
+        pOut[i * 4 + 1] = l.mY;
+        pOut[i * 4 + 2] = l.mZ;
+        pOut[i * 4 + 3] = l.mRadiusSquared * 1.001f;
+    }
+    return (s32)n;
 }

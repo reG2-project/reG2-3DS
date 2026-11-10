@@ -38,7 +38,7 @@ const char* const kPartNames[] = {
 const char* const kCountNames[] = {
     "drive", "cars.visible", "peds.onscreen", "map.lookups", "collide.tests", "grid.cells", "steps", "prims",
     "drawcalls", "vertices", "states", "binds", "uploads", "lights", "litprims", "lighttests", "litverts", "nearlights", "tiles", "sprites", "ambient", "pumps", "events", "late", "refreshes",
-    "mc.checks", "mc.builds", "mc.drawn", "mc.cpulit", "mc.quads", "mc.lids", "mc.skipped"};
+    "mc.checks", "mc.builds", "mc.drawn", "mc.cpulit", "mc.farrows", "mc.quads", "mc.lids", "mc.skipped"};
 static_assert(sizeof(kPartNames) / sizeof(kPartNames[0]) == kPartCount, "a name per part");
 static_assert(sizeof(kCountNames) / sizeof(kCountNames[0]) == kCountCount, "a name per count");
 

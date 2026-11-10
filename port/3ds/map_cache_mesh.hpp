@@ -46,8 +46,9 @@ RTexture* TileTexture(STexture* pTexture, bool alpha);
 bool Texture(RTexture* pTex, TexturePlace* pPlace);
 // Whether draws with FLAG_LIGHTING are lit now (the shader's lights uploaded if so).
 bool Lit();
-// Whether the shader cannot light the box as gbh_api.cpp would: a light past its own reaches it.
-bool NeedsCpuLight(float x0, float y0, float z0, float x1, float y1, float z1);
+// The lights past the shader's own that reach the box, which gbh_api.cpp lights with on the CPU: x, y, z and squared
+// reach, four floats each, at most max. -1 when the shader cannot light the box at all.
+int32_t FarLights(float x0, float y0, float z0, float x1, float y1, float z1, float* pOut, int32_t max);
 // In order after the gbh_* draws so far.
 void DrawAll(const Draw* pDraws, int32_t count, bool lit);
 // Counts the textures freed: one a mesh points at may be gone.
