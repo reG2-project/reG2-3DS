@@ -9,7 +9,8 @@ a game start (its load) is left out unless --keep-first. A group's first line sp
 (logic: a step's time by the steps per frame; timers: what the timers added). Per part: the average per step
 (logic) or per frame (the rest), the largest block average, the largest single step or frame, the average
 without the parts listed under it, and the calls per step or frame. --blocks lists each block's main figures.
---options groups the blocks by the logic options they ran with (GTA2_3DS_PROF_AB=1 alternates them).
+--options groups the blocks by the logic options and the map cache state they ran with (GTA2_3DS_PROF_AB=logic,
+=mapcache or =logic,mapcache alternates them).
 With GTA2_3DS_PROF_PMU=1 each block counted one pair of CPU events too: the step parts' events per step, then
 the same without the parts under them, averaged over the blocks that counted each event.
 """
@@ -82,9 +83,11 @@ def parse(path, keep_first, writes):
                 if write and int(write.group(1)):
                     writes.append((int(write.group(1)), float(write.group(2))))
                 options = re.search(r"options (\d+)", line)
+                mapcache = re.search(r"mapcache (\d)", line)
                 block = {"frames": int(m.group(1)), "steps": int(m.group(2)), "step": {}, "frame": {}, "count": {},
                          "timers": float(timers.group(1)) if timers else 0.0, "pmu": {},
-                         "options": int(options.group(1)) if options else None}
+                         "options": int(options.group(1)) if options else None,
+                         "mapcache": int(mapcache.group(1)) if mapcache else None}
                 continue
             if block is None:
                 continue
@@ -116,7 +119,11 @@ def group_of(b):
     lit = b["count"].get("litprims", [0])[0]
     d = "drive" if drive > 0.9 else ("walk" if drive < 0.1 else "mixed")
     g = "%s %s" % (d, "night" if lit > 0 else "day")
-    return g if b["options"] is None or not AB else "%s, options %d" % (g, b["options"])
+    if AB and b["options"] is not None:
+        g += ", options %d" % b["options"]
+    if AB and b["mapcache"] is not None:
+        g += ", mapcache %s" % ("on" if b["mapcache"] else "off")
+    return g
 
 
 def depth(name, names):
@@ -185,7 +192,7 @@ def main():
     ap.add_argument("log")
     ap.add_argument("--keep-first", action="store_true", help="keep the first block after a game start")
     ap.add_argument("--blocks", action="store_true", help="list each block too")
-    ap.add_argument("--options", action="store_true", help="group the blocks by their logic options too")
+    ap.add_argument("--options", action="store_true", help="group the blocks by their logic options and map cache state too")
     args = ap.parse_args()
     global AB
     AB = args.options

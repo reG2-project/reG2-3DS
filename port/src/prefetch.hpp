@@ -1,4 +1,4 @@
-// Pool walks ask for the next items' memory while they update the current one (GTA2_3DS_PREFETCH=0: off).
+// Pool walks ask for the next items' memory while they update the current one (GTA2_3DS_PREFETCH=1: on).
 #pragma once
 #include "logic_opts.hpp"
 

@@ -1,4 +1,4 @@
-// Port-only shortcuts in the game logic that leave its results the same, each on unless its variable is 0
+// Port-only shortcuts in the game logic that leave its results the same, each off unless its variable is 1
 // (names in logic_opts.cpp), so that one build compares them on and off.
 #pragma once
 
