@@ -340,6 +340,14 @@ void AfterStep()
     PORT_PROF_COUNT(kDrive, pPed && pPed->mCar ? 1 : 0);
     PORT_PROF_COUNT(kCarsVisible, gCarManager_6C ? (u8)gCarManager_6C->mVisibleCarsCount : 0);
     PORT_PROF_COUNT(kPedsOnScreen, gPedManager ? (u8)gPedManager->mNumPedsOnScreen : 0);
+    if (PortProf::gOn && gGame_0x40 && gGame_0x40->mDrawPlayer)
+    {
+        if (const Sprite* pSprite = PlayerSprite())
+        {
+            PORT_PROF_PLACE(pSprite->mXy.x.ToFloat(), pSprite->mXy.y.ToFloat(), pSprite->mZpos.ToFloat(),
+                            gGame_0x40->mDrawPlayer->mViewCamera.mCurPos.mZ.ToFloat(), pPed->mCar ? pPed->mCar->GetCarInfoIdx() : -1);
+        }
+    }
     PORT_PROF_END_STEP();
 }
 

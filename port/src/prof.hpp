@@ -187,6 +187,8 @@ unsigned SamplePrimitive();
 void AddMs(Part part, float ms);
 // Reads GTA2_3DS_PROF the first time; drops what was measured since the last frame (the frontend's, a load).
 void Reset();
+// The local player's point in blocks after a step, the camera's height, and his vehicle's model or -1.
+void Place(float x, float y, float z, float cameraZ, int carModel);
 void EndStep();
 void EndFrame();
 
@@ -278,6 +280,7 @@ extern unsigned gCounts[kCountCount];
 void Section(Part part);
 void EndSection();
 void AddMs(Part part, float ms);
+void Place(float x, float y, float z, float cameraZ, int carModel);
 void EndStep();
 void EndFrame();
 } // namespace PortProf
@@ -297,5 +300,6 @@ void EndFrame();
 #define PORT_PROF_END() (PortProf::gOn && PortProf::gPrimScale != PortProf::kSkip ? PortProf::EndSection() : (void)0)
 #define PORT_PROF_COUNT(count, n) (PortProf::gOn ? (void)(PortProf::gCounts[PortProf::count] += (n)) : (void)0)
 #define PORT_PROF_ADD_MS(part, ms) (PortProf::gOn ? PortProf::AddMs(PortProf::part, (ms)) : (void)0)
+#define PORT_PROF_PLACE(x, y, z, cameraZ, carModel) (PortProf::gOn ? PortProf::Place((x), (y), (z), (cameraZ), (carModel)) : (void)0)
 #define PORT_PROF_END_STEP() (PortProf::gOn ? PortProf::EndStep() : (void)0)
 #define PORT_PROF_END_FRAME() (PortProf::gOn ? PortProf::EndFrame() : (void)0)

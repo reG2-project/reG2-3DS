@@ -117,6 +117,25 @@ u32 sABCycle = 1;
 u32 sBlocks;
 signed char sOptions[PortLogic::kOptionCount];
 bool sMapCache;
+// The player's place (Place), per block of lines and per frame. Speed in blocks per step; moves past
+// kTeleport blocks in one step are left out.
+const float kTeleport = 4.0f;
+struct Where
+{
+    float x0, y0, x, y, z;
+    float dist, maxDist, frameDist;
+    float cam, camMin, camMax, camNow;
+    u32 steps, frameSteps;
+    int model;
+};
+Where sWhere;
+// Frames over sSlowMs (GTA2_3DS_PROF_SLOW, 0 for none) get a line, up to kSlowLines per block.
+const u32 kSlowLines = 8;
+float sSlowMs = 45.0f;
+u32 sSlow;
+u32 sSlowLogged;
+// The step parts' times in this frame's steps.
+u64 sFrameStep[kStepParts];
 // What a tick read, a scope and a section count of the two events.
 u32 sTickEvents[2];
 u32 sScopeEvents[2];
@@ -443,6 +462,12 @@ void Print()
                   sFrames, sSteps, (double)sScopes / sFrames, (double)sSections / sFrames,
                   Ms((u64)sScopes * sScopeTicks + (u64)sSections * sSectionTicks) / sFrames, logBytes, Ms(logTicks), options,
                   PortMapCache::Enabled() ? 1 : 0, PortSoundJob::Enabled() ? 1 : 0);
+    if (sWhere.steps)
+    {
+        Log3DS_Printf("prof place: from=%.1f,%.1f to=%.1f,%.1f z=%.1f model=%d speed=%.2f/%.2f cam=%.2f/%.2f/%.2f slow=%lu/%lu\n",
+                      sWhere.x0, sWhere.y0, sWhere.x, sWhere.y, sWhere.z, sWhere.model, sWhere.dist / sWhere.steps,
+                      sWhere.maxDist, sWhere.cam / sWhere.steps, sWhere.camMin, sWhere.camMax, sSlow, sSlowLogged);
+    }
     PrintParts("step", 0, kStepParts, steps);
     PrintParts("frame", kStepParts, kPartCount, sFrames);
     if (sPmu)
@@ -461,12 +486,79 @@ void Print()
     {
         sParts[sStack[i].part].active = true;
     }
+    sWhere.steps = 0;
+    sSlow = 0;
+    sSlowLogged = 0;
     sSteps = 0;
     sFrames = 0;
     sScopes = 0;
     sSections = 0;
 }
+void PrintSlow(u64 ticks)
+{
+    const Where& w = sWhere;
+    Add("prof slow: %.1f ms, %lu steps, at %.1f,%.1f model %d speed %.2f cam %.2f:", Ms(ticks), w.frameSteps, w.x, w.y,
+        w.model, w.frameSteps ? w.frameDist / w.frameSteps : 0.0f, w.camNow);
+    // The largest parts, step ones over the frame's steps, nested ones inside their parents' time.
+    const u64 kMin = SYSCLOCK_ARM11 / 1000;
+    bool shown[kPartCount] = {};
+    for (int n = 0; n < 10; n++)
+    {
+        u64 best = kMin;
+        u32 pick = kPartCount;
+        for (u32 i = 0; i < kPartCount; i++)
+        {
+            const u64 t = i < kStepParts ? sFrameStep[i] : sParts[i].cur;
+            if (i != kFrame && i != kCalibrate && !shown[i] && t >= best)
+            {
+                best = t;
+                pick = i;
+            }
+        }
+        if (pick == kPartCount)
+        {
+            break;
+        }
+        shown[pick] = true;
+        Add(" %s=%.1f", kPartNames[pick], Ms(best));
+    }
+    const Count counts[] = {kPrims, kTiles, kUploads, kLitPrims, kLightTests, kMcBuilds, kMcCpuLit, kMcFarRows};
+    for (Count c : counts)
+    {
+        Add(" %s=%lu", kCountNames[c], gCounts[c]);
+    }
+    EndLine();
+}
 } // namespace
+
+void Place(float x, float y, float z, float cameraZ, int carModel)
+{
+    Where& w = sWhere;
+    const float dx = x - w.x;
+    const float dy = y - w.y;
+    float d = dx * dx + dy * dy;
+    d = w.steps && d < kTeleport * kTeleport ? __builtin_sqrtf(d) : 0.0f;
+    if (!w.steps)
+    {
+        w.x0 = x;
+        w.y0 = y;
+        w.dist = w.maxDist = w.cam = 0;
+        w.camMin = w.camMax = cameraZ;
+    }
+    w.x = x;
+    w.y = y;
+    w.z = z;
+    w.model = carModel;
+    w.dist += d;
+    w.frameDist += d;
+    w.maxDist = d > w.maxDist ? d : w.maxDist;
+    w.cam += cameraZ;
+    w.camNow = cameraZ;
+    w.camMin = cameraZ < w.camMin ? cameraZ : w.camMin;
+    w.camMax = cameraZ > w.camMax ? cameraZ : w.camMax;
+    w.steps++;
+    w.frameSteps++;
+}
 
 // The stack is the main thread's: scopes on other threads (the sound pass on the system core) are left untimed.
 int Push(Part part, unsigned scale)
@@ -529,6 +621,8 @@ void Reset()
         const char* pSample = getenv("GTA2_3DS_PROF_SAMPLE");
         sSample = pSample && atoi(pSample) > 0 ? (u32)atoi(pSample) : sSample;
         gOn = sInterval > 0;
+        const char* pSlow = getenv("GTA2_3DS_PROF_SLOW");
+        sSlowMs = pSlow ? (float)atof(pSlow) : sSlowMs;
         sAB = gOn ? ParseAB(getenv("GTA2_3DS_PROF_AB")) : 0;
         u32 options = 0;
         for (u32 i = 0; i < PortLogic::kOptionCount && sAB; i++)
@@ -567,11 +661,18 @@ void Reset()
         sParts[i].cur = 0;
     }
     memset(gCounts, 0, sizeof(gCounts));
+    memset(sFrameStep, 0, sizeof(sFrameStep));
+    sWhere.frameDist = 0;
+    sWhere.frameSteps = 0;
     sLastFrame = 0;
 }
 
 void EndStep()
 {
+    for (u32 i = 0; i < kStepParts; i++)
+    {
+        sFrameStep[i] += sParts[i].cur;
+    }
     Fold(0, kStepParts, 0, kStepCounts);
     sSteps++;
     gCounts[kSteps]++;
@@ -587,9 +688,22 @@ void EndFrame()
         sParts[kFrame].cur += now - sLastFrame;
         sParts[kFrame].self += (s64)(now - sLastFrame);
         sParts[kFrame].calls++;
+        if (sSlowMs > 0 && Ms(now - sLastFrame) > sSlowMs)
+        {
+            sSlow++;
+            if (sSlowLogged < kSlowLines)
+            {
+                sSlowLogged++;
+                Scope log(kLog);
+                PrintSlow(now - sLastFrame);
+            }
+        }
     }
     sLastFrame = now;
     Fold(kStepParts, kPartCount, kStepCounts, kCountCount);
+    memset(sFrameStep, 0, sizeof(sFrameStep));
+    sWhere.frameDist = 0;
+    sWhere.frameSteps = 0;
     if (++sFrames >= sInterval)
     {
         {

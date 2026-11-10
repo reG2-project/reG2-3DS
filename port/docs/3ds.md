@@ -456,7 +456,13 @@ comma separated list of them in a cycle of four or eight blocks, every combinati
 kept in memory and written 8 KB at a time by a thread of their own on the system core, below the sound's feed and the
 texture worker, and the rest at exit (`port/3ds/log_3ds.cpp`): on an Old 3DS such a write to the SD card takes up to
 a fifth of a second, which on the game's thread would stutter every 15 s. The `prof:` lines give the last write's size and time;
-should the writer fall 32 KB behind, a `log:` line counts the lines dropped.
+should the writer fall 32 KB behind, a `log:` line counts the lines dropped. Each block has a `prof place:` line:
+the player's point in blocks at its start and end, his vehicle's model (-1 on foot), his speed in blocks per step
+(average and most) and the camera's height (average, least, most: 1 standing, about 3.8 at an R-type's top speed).
+A frame over `GTA2_3DS_PROF_SLOW` ms (45 by default, 0 for none) gets a `prof slow:` line, up to 8 a block: its
+time, steps, the player's point, speed and camera height, its ten largest parts (step ones over its steps, nested
+ones inside their parents) and a few counts. `prof_summary.py --blocks` shows the place per block, `--slow` the
+slow frames.
 
 Azahar (2126.2) runs the `.3dsx` without firmware or system files, in Old or New 3DS mode. It passes
 no arguments, so the game folder there is always `sdmc:/3ds/gta2/`. The start

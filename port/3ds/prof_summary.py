@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Summarises the GTA2_3DS_PROF lines of a gta2_log.txt into tables.
 
-  python3 prof_summary.py gta2_log.txt [--keep-first] [--blocks]
+  python3 prof_summary.py gta2_log.txt [--keep-first] [--blocks] [--slow]
 
 Each block of lines (one per GTA2_3DS_PROF frames) goes to a group: walk or drive (the player in a car on
 more than 90 % of the block's steps, mixed in between), day or night (lit primitives). The first block after
 a game start (its load) is left out unless --keep-first. A group's first line splits the frame's wall time
 (logic: a step's time by the steps per frame; timers: what the timers added). Per part: the average per step
 (logic) or per frame (the rest), the largest block average, the largest single step or frame, the average
-without the parts listed under it, and the calls per step or frame. --blocks lists each block's main figures.
+without the parts listed under it, and the calls per step or frame. --blocks lists each block's main figures,
+with the player's place at its end (blocks), his vehicle model, speed (blocks per second) and the camera's height.
+--slow lists the frames over GTA2_3DS_PROF_SLOW ms (45 by default) the log has a line for, with their largest parts.
 --options groups the blocks by the logic options, the map cache state and where the sound pass ran
 (GTA2_3DS_PROF_AB=logic, =mapcache, =soundcore1 or a comma separated list of them alternates them).
 With GTA2_3DS_PROF_PMU=1 each block counted one pair of CPU events too: the step parts' events per step, then
@@ -19,6 +21,9 @@ import re
 import sys
 
 VALUE = re.compile(r"(\S+)=([-\d.]+)/([-\d.]+)(?:/([-\d.]+)/([-\d.]+))?")
+PLACE = re.compile(r"prof place: from=([-\d.]+),([-\d.]+) to=([-\d.]+),([-\d.]+) z=([-\d.]+) model=(-?\d+) "
+                   r"speed=([\d.]+)/([\d.]+) cam=([\d.]+)/([\d.]+)/([\d.]+) slow=(\d+)/(\d+)")
+STEPS_PER_S = 30.0
 PMU = re.compile(r"(\S+)=([-\d.]+)/([-\d.]+)/([-\d.]+)/([-\d.]+)")
 
 # Shown beside the rows whose place in the tree does not tell what they hold.
@@ -77,13 +82,17 @@ EVENTS = {0x0: "i miss", 0x1: "i stall", 0x2: "d stall", 0x7: "mispred", 0x8: "i
           0xD: "d wmiss", 0x10: "tlb miss"}
 
 
-def parse(path, keep_first, writes):
+def parse(path, keep_first, writes, slow):
     blocks = []
     block = None
     skip = False
+    pending = []
     with open(path, errors="replace") as f:
         for line in f:
             line = line.rstrip("\n")
+            if line.startswith("prof slow:"):
+                pending.append(line[len("prof slow: "):])
+                continue
             if line.startswith("prof: every"):
                 skip = not keep_first
                 continue
@@ -100,9 +109,17 @@ def parse(path, keep_first, writes):
                          "timers": float(timers.group(1)) if timers else 0.0, "pmu": {},
                          "options": int(options.group(1)) if options else None,
                          "mapcache": int(mapcache.group(1)) if mapcache else None,
-                         "soundcore1": int(soundcore1.group(1)) if soundcore1 else None}
+                         "soundcore1": int(soundcore1.group(1)) if soundcore1 else None, "place": None}
+                slow.extend((len(blocks), l) for l in pending)
+                pending = []
                 continue
             if block is None:
+                continue
+            m = PLACE.match(line)
+            if m:
+                v = [float(x) for x in m.groups()]
+                block["place"] = {"x": v[2], "y": v[3], "model": int(v[5]), "speed": v[6] * STEPS_PER_S,
+                                  "maxspeed": v[7] * STEPS_PER_S, "cam": v[8], "cammax": v[10], "slow": int(v[11])}
                 continue
             m = re.match(r"prof pmu step (\d+),(\d+):", line)
             if m:
@@ -207,12 +224,14 @@ def main():
     ap.add_argument("log")
     ap.add_argument("--keep-first", action="store_true", help="keep the first block after a game start")
     ap.add_argument("--blocks", action="store_true", help="list each block too")
+    ap.add_argument("--slow", action="store_true", help="list the slow frames the log has a line for")
     ap.add_argument("--options", action="store_true", help="group the blocks by their logic options, map cache state and sound pass core too")
     args = ap.parse_args()
     global AB
     AB = args.options
     writes = []
-    blocks = parse(args.log, args.keep_first, writes)
+    slow = []
+    blocks = parse(args.log, args.keep_first, writes, slow)
     if not blocks:
         sys.exit("no GTA2_3DS_PROF blocks in %s" % args.log)
     for line in open(args.log, errors="replace"):
@@ -224,13 +243,21 @@ def main():
     g = lambda d, k: d.get(k, [0])[0]
     if args.blocks:
         cols = ["step", "draw", "draw.map", "prim", "prim.light", "pump.pad", "wait.vsync", "wait.gpu", "gpu"]
-        print("\n  %3s %-12s %5s %5s %6s" % ("#", "group", "steps", "fps", "max") + "".join(" %10s" % c for c in cols))
+        print("\n  %3s %-12s %5s %5s %6s" % ("#", "group", "steps", "fps", "max") + "".join(" %10s" % c for c in cols) +
+              "  %13s %5s %5s %4s %4s" % ("at", "model", "speed", "cam", "slow"))
         for i, b in enumerate(blocks):
             st, fr, c = b["step"], b["frame"], b["count"]
             fps = 1000.0 / g(fr, "frame") if g(fr, "frame") else 0
             vals = [g(st, k) if k in st else g(fr, k) for k in cols]
+            p = b["place"]
+            where = "  %6.1f,%6.1f %5s %5.1f %4.1f %4d" % (p["x"], p["y"], p["model"] if p["model"] >= 0 else "-", p["speed"],
+                                                       p["cam"], p["slow"]) if p else ""
             print("  %3d %-12s %5.2f %5.1f %6.1f" % (i, group_of(b), g(c, "steps"), fps, fr.get("frame", [0, 0])[1]) +
-                  "".join(" %10.2f" % v for v in vals))
+                  "".join(" %10.2f" % v for v in vals) + where)
+    if args.slow:
+        print("\nslow frames (block #: ms, steps, place, model, blocks per step, camera height: parts in ms, counts)")
+        for i, line in slow:
+            print("  %3d %s" % (i, line))
     groups = {}
     for b in blocks:
         groups.setdefault(group_of(b), []).append(b)
