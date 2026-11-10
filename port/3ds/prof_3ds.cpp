@@ -267,8 +267,10 @@ void Calibrate()
 void NextEvents()
 {
     const u32* pPair = kEventPairs[sEventPair];
-    svcControlPerformanceCounter(NULL, PERFCOUNTEROP_SET_EVENT, PERFCOUNTERREG_CORE_COUNT_REG_0, pPair[0]);
-    svcControlPerformanceCounter(NULL, PERFCOUNTEROP_SET_EVENT, PERFCOUNTERREG_CORE_COUNT_REG_1, pPair[1]);
+    // libctru's wrapper always stores the result: a NULL output faults on the console (Azahar lets it pass).
+    u64 unused;
+    svcControlPerformanceCounter(&unused, PERFCOUNTEROP_SET_EVENT, PERFCOUNTERREG_CORE_COUNT_REG_0, pPair[0]);
+    svcControlPerformanceCounter(&unused, PERFCOUNTEROP_SET_EVENT, PERFCOUNTERREG_CORE_COUNT_REG_1, pPair[1]);
     Calibrate();
     const Reading now = Read();
     for (int i = 0; i < sDepth; i++)
