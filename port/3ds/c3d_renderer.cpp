@@ -1988,6 +1988,16 @@ void C3DRenderer::Impl::ApplyState(u32 state, const ScreenRect& scissor)
     mStateValid = true;
 }
 
+// Texture unit 0 as C3Di_SetTex sets it, its cache cleared, straight into the command buffer.
+static void WriteTexUnit0(const C3D_Tex* pTex3)
+{
+    const u32 tex[] = {pTex3->border, GPUCMD_HEADER(1, 0xF, GPUREG_TEXUNIT0_BORDER_COLOR) | (4 << 20),
+                       pTex3->dim, pTex3->param, pTex3->lodParam, osConvertVirtToPhys(pTex3->data) >> 3,
+                       (u32)pTex3->fmt, GPUCMD_HEADER(0, 0xF, GPUREG_TEXUNIT0_TYPE),
+                       0x10000, GPUCMD_HEADER(0, 0x4, GPUREG_TEXUNIT_CONFIG)};
+    GPUCMD_AddRawCommands(tex, sizeof(tex) / 4);
+}
+
 // A batch's draw: count vertices from the first, in fours. When only its texture differs from the last draw's, that
 // texture's registers and the draw go straight into the command buffer, as citro3d writes them; C3D_DrawElements
 // would also go through every uniform.
@@ -2023,14 +2033,10 @@ void C3DRenderer::Impl::Draw(RTexture* pTex, u32 state, const ScreenRect& scisso
         C3D_DrawElements(GPU_TRIANGLES, count / 4 * 6, C3D_UNSIGNED_SHORT, mIndices + first / 4 * 6);
         return;
     }
-    // Texture unit 0 as C3Di_SetTex sets it, its cache cleared, then C3D_DrawElements' commands.
+    // The texture, then C3D_DrawElements' commands.
     if (rebind)
     {
-        const u32 tex[] = {pTex3->border, GPUCMD_HEADER(1, 0xF, GPUREG_TEXUNIT0_BORDER_COLOR) | (4 << 20),
-                           pTex3->dim, pTex3->param, pTex3->lodParam, osConvertVirtToPhys(pTex3->data) >> 3,
-                           (u32)pTex3->fmt, GPUCMD_HEADER(0, 0xF, GPUREG_TEXUNIT0_TYPE),
-                           0x10000, GPUCMD_HEADER(0, 0x4, GPUREG_TEXUNIT_CONFIG)};
-        GPUCMD_AddRawCommands(tex, sizeof(tex) / 4);
+        WriteTexUnit0(pTex3);
     }
     const u32 draw[] = {GPU_GEOMETRY_PRIM, GPUCMD_HEADER(0, 0x2, GPUREG_PRIMITIVE_CONFIG),
                         1, GPUCMD_HEADER(0, 0xF, GPUREG_RESTART_PRIMITIVE),
@@ -2785,6 +2791,8 @@ s32 sUniMeshLit;
 // DrawMeshes' ticks: the batch before, the switch to the mesh program, the draws, the switch back, and in the
 // draws, C3D_DrawArrays for the first draw (it uploads the program) and for the others.
 uint64_t sMeshTicks[6];
+std::vector<u32> sMeshStates;
+const u32 kDrawn = 0xFFFFFFFFu;
 }
 
 u32 C3DRenderer::MeshFrame()
@@ -2886,47 +2894,106 @@ bool C3DRenderer::DrawMeshes(const MeshDraw* pDraws, s32 count, bool lit)
     sMeshTicks[1] += t1 - t;
     t = t1;
     PORT_PROF_SECTION(kDrawMapCacheDrawCalls);
+    // The draws by state, in their order within one (lids do not overlap). The first of a state goes through
+    // citro3d; the others write what changes (texture, chunk) and C3D_DrawArrays' commands, as Impl::Draw does.
+    sMeshStates.resize((size_t)count);
     for (s32 i = 0; i < count; i++)
     {
         const MeshDraw& d = pDraws[i];
         RTexture* pTex = d.pTex && d.pTex->mValid ? d.pTex : 0;
         u32 state = (d.blend ? RS_BLEND_ALPHA : 0) | RS_FILTER_LINEAR | (pTex ? 0 : RS_NO_TEXTURE);
         state |= pTex && pTex->mPremultiplied ? kStatePremultiplied : 0;
-        state |= d.noMip ? kStateNoMip : 0;
-        p->ApplyState(state, p->mClip);
-        RTexture* pBind = pTex ? (pTex->mPage ? &pTex->mPage->mTex : pTex) : p->mWhite;
-        if (pTex)
+        sMeshStates[i] = state | (d.noMip ? kStateNoMip : 0);
+    }
+    const C3D_Tex* pLastTex = 0;
+    u32 lastParam = 0, lastLod = 0;
+    for (s32 run = 0, n = 0; run < count; run++)
+    {
+        const u32 state = sMeshStates[run];
+        for (s32 i = run; i < count && state != kDrawn; i++)
         {
-            pTex->mUsedFrame = p->mFrame;
-            pBind->mUsedFrame = p->mFrame;
-        }
-        C3D_Tex* pTex3 = &pBind->mTex;
-        C3D_TexSetFilter(pTex3, GPU_LINEAR, GPU_LINEAR);
-        C3D_TexSetFilterMipmap(pTex3, GPU_LINEAR);
-        pTex3->maxLevel = d.noMip ? 0 : pBind->mLevels;
-        C3D_TexBind(0, pTex3);
-        // render.v.pica's clip position (x, y, -0.5, 1) / rhw of the logical pixel, as affine in the local (x, y).
-        const f32 w = 1.0f / (d.rhw > 0.0000001f ? d.rhw : 0.0000001f);
-        const f32 k = w * d.scale;
-        C3D_FVUnifSet(GPU_VERTEX_SHADER, p->mUniProjection, k * m.r[0].x, k * m.r[1].x, 0.0f, 0.0f);
-        C3D_FVUnifSet(GPU_VERTEX_SHADER, p->mUniProjection + 1, k * m.r[0].y, k * m.r[1].y, 0.0f, 0.0f);
-        C3D_FVUnifSet(GPU_VERTEX_SHADER, p->mUniProjection + 2, w * (m.r[0].x * d.x0 + m.r[0].y * d.y0 + m.r[0].w),
-                      w * (m.r[1].x * d.x0 + m.r[1].y * d.y0 + m.r[1].w), -0.5f * w, w);
-        C3D_FVUnifSet(GPU_VERTEX_SHADER, p->mUniProjection + 3, d.wx - p->mLightOriginX, d.wy - p->mLightOriginY, d.wz, 0.0f);
-        if (d.pVerts != pBuffer)
-        {
-            C3D_BufInfo* pBuf = C3D_GetBufInfo();
-            BufInfo_Init(pBuf);
-            BufInfo_Add(pBuf, d.pVerts, sizeof(MeshVertex), 2, 0x10);
+            if (sMeshStates[i] != state)
+            {
+                continue;
+            }
+            sMeshStates[i] = kDrawn;
+            const bool raw = i != run;
+            const MeshDraw& d = pDraws[i];
+            RTexture* pTex = d.pTex && d.pTex->mValid ? d.pTex : 0;
+            RTexture* pBind = pTex ? (pTex->mPage ? &pTex->mPage->mTex : pTex) : p->mWhite;
+            if (pTex)
+            {
+                pTex->mUsedFrame = p->mFrame;
+                pBind->mUsedFrame = p->mFrame;
+            }
+            C3D_Tex* pTex3 = &pBind->mTex;
+            C3D_TexSetFilter(pTex3, GPU_LINEAR, GPU_LINEAR);
+            C3D_TexSetFilterMipmap(pTex3, GPU_LINEAR);
+            pTex3->maxLevel = d.noMip ? 0 : pBind->mLevels;
+            // render.v.pica's clip position (x, y, -0.5, 1) / rhw of the logical pixel, as affine in the local (x, y).
+            // The first two rows are the layer's, the same for all its draws.
+            const f32 w = 1.0f / (d.rhw > 0.0000001f ? d.rhw : 0.0000001f);
+            const f32 k = w * d.scale;
+            const bool moved = d.pVerts != pBuffer;
+            if (!raw || moved)
+            {
+                C3D_FVUnifSet(GPU_VERTEX_SHADER, p->mUniProjection + 2, w * (m.r[0].x * d.x0 + m.r[0].y * d.y0 + m.r[0].w),
+                              w * (m.r[1].x * d.x0 + m.r[1].y * d.y0 + m.r[1].w), -0.5f * w, w);
+                C3D_FVUnifSet(GPU_VERTEX_SHADER, p->mUniProjection + 3, d.wx - p->mLightOriginX, d.wy - p->mLightOriginY, d.wz, 0.0f);
+            }
+            const u64 td = svcGetSystemTick();
+            if (!raw)
+            {
+                p->ApplyState(state, p->mClip);
+                C3D_TexBind(0, pTex3);
+                C3D_FVUnifSet(GPU_VERTEX_SHADER, p->mUniProjection, k * m.r[0].x, k * m.r[1].x, 0.0f, 0.0f);
+                C3D_FVUnifSet(GPU_VERTEX_SHADER, p->mUniProjection + 1, k * m.r[0].y, k * m.r[1].y, 0.0f, 0.0f);
+                if (moved)
+                {
+                    C3D_BufInfo* pBuf = C3D_GetBufInfo();
+                    BufInfo_Init(pBuf);
+                    BufInfo_Add(pBuf, d.pVerts, sizeof(MeshVertex), 2, 0x10);
+                }
+                C3D_DrawArrays(GPU_TRIANGLES, d.first, d.count);
+            }
+            else
+            {
+                if (pTex3 != pLastTex || pTex3->param != lastParam || pTex3->lodParam != lastLod)
+                {
+                    WriteTexUnit0(pTex3);
+                }
+                if (moved)
+                {
+                    // The two rows as C3D_UpdateUniforms uploads them (left dirty: uploaded again with the next state's
+                    // draw or the switch back), and the buffer's offset from BufInfo_Init's base.
+                    const u32 config = 0x80000000u | (u32)(p->mUniProjection + 2);
+                    GPUCMD_AddWrite(GPUREG_VSH_FLOATUNIFORM_CONFIG, config);
+                    GPUCMD_AddWrites(GPUREG_VSH_FLOATUNIFORM_DATA, (u32*)&C3D_FVUnif[GPU_VERTEX_SHADER][p->mUniProjection + 2], 8);
+                    GPUCMD_AddWrite(GPUREG_ATTRIBBUFFER0_OFFSET, osConvertVirtToPhys(d.pVerts) - 0x18000000u);
+                }
+                const u32 draw[] = {GPU_TRIANGLES, GPUCMD_HEADER(0, 0x2, GPUREG_PRIMITIVE_CONFIG),
+                                    1, GPUCMD_HEADER(0, 0xF, GPUREG_RESTART_PRIMITIVE),
+                                    0x80000000u, GPUCMD_HEADER(0, 0xF, GPUREG_INDEXBUFFER_CONFIG),
+                                    (u32)d.count, GPUCMD_HEADER(0, 0xF, GPUREG_NUMVERTICES),
+                                    (u32)d.first, GPUCMD_HEADER(0, 0xF, GPUREG_VERTEX_OFFSET),
+                                    1, GPUCMD_HEADER(0, 0x1, GPUREG_GEOSTAGE_CONFIG2),
+                                    0, GPUCMD_HEADER(0, 0x1, GPUREG_START_DRAW_FUNC0),
+                                    1, GPUCMD_HEADER(0, 0xF, GPUREG_DRAWARRAYS),
+                                    1, GPUCMD_HEADER(0, 0x1, GPUREG_START_DRAW_FUNC0),
+                                    0, GPUCMD_HEADER(0, 0x1, GPUREG_GEOSTAGE_CONFIG2),
+                                    1, GPUCMD_HEADER(0, 0xF, GPUREG_VTX_FUNC)};
+                GPUCMD_AddRawCommands(draw, sizeof(draw) / 4);
+            }
+            sMeshTicks[n++ == 0 ? 4 : 5] += svcGetSystemTick() - td;
             pBuffer = d.pVerts;
+            pLastTex = pTex3;
+            lastParam = pTex3->param;
+            lastLod = pTex3->lodParam;
+            mDrawCalls++;
+            mVertices += (u32)d.count;
+            PORT_PROF_COUNT(kDrawCalls, 1);
+            PORT_PROF_COUNT(kVertices, (u32)d.count);
         }
-        const u64 td = svcGetSystemTick();
-        C3D_DrawArrays(GPU_TRIANGLES, d.first, d.count);
-        sMeshTicks[i == 0 ? 4 : 5] += svcGetSystemTick() - td;
-        mDrawCalls++;
-        mVertices += (u32)d.count;
-        PORT_PROF_COUNT(kDrawCalls, 1);
-        PORT_PROF_COUNT(kVertices, (u32)d.count);
     }
     t1 = svcGetSystemTick();
     sMeshTicks[2] += t1 - t;
