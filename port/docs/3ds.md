@@ -876,6 +876,33 @@ Even inexact, the split buys little: with the AI and the physics each in a pass 
 instruction misses fall 23 % driving and 15 % walking, against 31 % for the exact code layout (PGO), and its
 data misses rise 12 and 9 %.
 
+Map zones by position. `Map_0x370::GetZoneAtPosOfType`, `GetNavZoneAtPos`, `GetFirstZoneAtPos` and `GetNextZone`
+(with a position) test every zone of the map in turn, about 150 in ste, and a step asks about 40 times: each
+ped's public transport test, the traffic and ped spawners' densities, the player's zones, the HUD. A Linux
+sampling profile of the step put them at 2.5 %. `port/src/zone_index.cpp` lists, when the map's zone list is
+built, the zones whose rect meets each 8x8 block cell, in the list's order; the lookups test only those
+(`Map_0x370::PortFirstZoneAtPos`) and leave `mCurZoneIdx` where the full scan does, which `GetNextZone` and
+`GetCurrentZoneInfo` read. The port's screen settings (`PortSettings::Screen`) are kept from their first read:
+each read opened the registry key, a few times a step (the aim camera, the lights) and a frame (the day and
+night cycle). In Azahar (lockstep, four scenes) the step is 0.10 to 0.23 ms shorter: the peds 0.11 to 0.15,
+traffic 0.02, the HUD 0.01, the players (the settings) 0.02; about 0.4 ms on an Old 3DS. Checks: a test build
+that runs both zone lookups at every call found no difference in the zone or in `mCurZoneIdx` (168,000 calls,
+Linux drive and walk), and the hashes match (Azahar: four scenes; Linux: drive and walk, night 2000 and day
+3000 steps, with the sound queue).
+
+Divisions are a small item now. In the Linux drive (steps 300 to 1950) a step makes 173 `Fix16` divisions
+(and the draw 21 a frame), on the VFP (above), about 45 cycles each: 0.03 ms of the console's 7.7. The 293
+`Fix16 / int` a step divide by constants, which the compiler turns into multiplies (no `__divsi3` call
+from them in the ARM build), and `rng::get_int`'s modulo (`__aeabi_idivmod`) runs 46 times a step. No other
+64-bit division in the game logic but one in the sound pass's skid sound. Their share of a Linux sampling
+profile of the step: 0.1 %.
+
+A sprite grid index was tried and left out: per row, a bitmap of the occupied x cells and each cell's
+address, so that the row walks (`RemoveFromRowBuckets`, `AddToRowBuckets`, `GetFirstXCellInRow`, ...)
+start at their x rather than at the row's head. A walk passes 2 cells or more on average before its x (45 % none),
+and the index costs an access to the bitmap, one to the cell table and one to the cell before: in Azahar the
+parked cars' visit took 0.09 ms more, and on Linux the step as long.
+
 The system core cannot take the car physics either: each car's physics is a link in that chain (the next
 cars' AI, the peds it runs over, the objects, explosions and particles it makes, `rand()`, the collision sound
 queue), and the rest of the step reads the cars where the physics left them, so any overlap changes the
