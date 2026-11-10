@@ -12,6 +12,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#if defined(__3DS__)
+// With the console's other measurements, written by a thread of their own (port/3ds/log_3ds.cpp).
+void Log3DS_Printf(const char* format, ...) __attribute__((format(printf, 1, 2)));
+#define StatsPrintf Log3DS_Printf
+#else
+#define StatsPrintf(...) fprintf(stderr, __VA_ARGS__)
+#endif
+
 #if defined(GTA2_PORT_SDL)
 unsigned long long port_NowNs();
 void port_DelayNs(unsigned long long ns);
@@ -123,7 +131,7 @@ void Stats(unsigned long long now)
         u32 jumped;
         u32 snapped;
         PortInterp::TakeCounts(&moved, &jumped, &snapped);
-        fprintf(stderr, "loop: %.2f steps/s, %.1f frames/s (frame limit %u), %.2f ms per step, %.2f ms per draw, sprites per frame: %.1f in between, %.2f jumped, %.2f snapped round\n",
+        StatsPrintf("loop: %.2f steps/s, %.1f frames/s (frame limit %u), %.2f ms per step, %.2f ms per draw, sprites per frame: %.1f in between, %.2f jumped, %.2f snapped round\n",
                 sStatsSteps / seconds, sStatsDraws / seconds, sMaxFps, sStatsStepNs / 1e6 / (sStatsSteps ? sStatsSteps : 1),
                 sStatsDrawNs / 1e6 / (sStatsDraws ? sStatsDraws : 1), moved / (f64)(sStatsDraws ? sStatsDraws : 1),
                 jumped / (f64)(sStatsDraws ? sStatsDraws : 1), snapped / (f64)(sStatsDraws ? sStatsDraws : 1));
