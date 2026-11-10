@@ -11,6 +11,9 @@ bool Defer();
 void Join();
 // Only the steps of the port's frame loop hand their pass on, as it joins it before anything else.
 void AllowInStep(bool allow);
+// Whether steps hand their pass on; a change joins the pass in flight first (GTA2_3DS_PROF_AB, between blocks).
+void SetEnabled(bool on);
+bool Enabled();
 #else
 inline bool Defer()
 {
@@ -21,6 +24,13 @@ inline void Join()
 }
 inline void AllowInStep(bool)
 {
+}
+inline void SetEnabled(bool)
+{
+}
+inline bool Enabled()
+{
+    return false;
 }
 #endif
 } // namespace PortSoundJob
