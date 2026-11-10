@@ -12,5 +12,9 @@ namespace Minimap
 u32 Update(C3DRenderer& renderer);
 // Draws the map in the tube frame `frame` (outer edges, bottom screen pixels) after an Update that returned non 0.
 void Draw(C3DRenderer& renderer, HudTheme::Sink& sink, const HudTheme::Rect& frame);
+// While the pause menu is open: the whole city on the bottom screen, centred on the player as it opens, panned by
+// dragging the stylus and zoomed by two buttons on it. Returns its signature as Update does, 0 when it does not show.
+u32 UpdatePause(C3DRenderer& renderer);
+void DrawPause(C3DRenderer& renderer, HudTheme::Sink& sink);
 void Shutdown(C3DRenderer& renderer);
 } // namespace Minimap

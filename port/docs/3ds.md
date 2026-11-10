@@ -164,7 +164,7 @@ width and scrolls when longer. `port/3ds/hud_theme.*` draws a recessed panel beh
 frame, over a dark backdrop made once per city from its most common plain pavement tile (one 8 KB
 texture, 2 draws per frame). The world stays on the top screen, with the zone and car names, pickup
 texts, big messages and arrows. The frontend and the pause menu stay on the top screen, legible but small
-(4 to 5 pixels high); the bottom screen is black there.
+(4 to 5 pixels high); the bottom screen is black in the frontend and shows the city's map in the pause menu.
 
 The bottom screen's last row holds the brief on the left and a minimap on the right (`port/3ds/minimap*`):
 the tube frame E of the design study (`port/docs/minimap`), north up, 21x21 blocks around the player at 4
@@ -212,11 +212,26 @@ The game's headers and the renderer's clash, so `minimap_game.cpp` reads the gam
 `GTA2_3DS_MINIMAP=wide` gives the map the whole row while no brief shows; `off` leaves it out and gives the
 row to the brief.
 
+While the pause menu is open, the bottom screen shows the whole city instead of the HUD
+(`Minimap::UpdatePause`, `DrawPause`): the same layers and markers from the same textures, the map scaled
+through its UVs at 1, 2 (the default), 4 or 8 pixels per block, centred on the player as the menu opens.
+A marker off the screen goes on its edge, on the ray from the screen's middle. Dragging the stylus pans it
+(`hidTouchRead`), held within the city, which stays in the middle at 1 pixel per block where it is narrower
+than the screen. Two buttons bottom right, squares of the frame's tube around the pause font's `+` and its
+bar for the `-` (the font has none), zoom on a press, sunk while held and dimmed at the last zoom; the zoom
+stays for the next pause. Under 2 pixels per block the map is filtered, so a pixel is the mean of a block's
+2x2 texels. It adds no texture: the two glyphs go in the markers' sheet. It is drawn in every frame in
+which it changes, to follow the stylus. SDL's 3DS driver makes mouse events of touches only for a window full
+screen on the bottom screen, which the game has none of, so touches reach neither the game nor the menu.
+
 The bottom screen is drawn only when what it shows changed, in every other frame at most (15 per second at
 30): a signature of the HUD's batches (vertices, textures and their uploads, states), its panels, the
 brief's scroll and the minimap's state (the player's position to the pixel, heading in 64 steps, gang and
-markers). citro3d transfers and swaps a screen only when its target was drawn on, so otherwise the screen
-keeps its last frame. The game leaves the bottom screen's HUD draws out of the frames in between
+markers). A change of the minimap alone waits until 100 ms after the last draw (`kMinimapMs`): at 30 frames
+per second it is drawn in every fourth frame (7.5 per second) rather than every other one, as its draw is most
+of the screen's cost; any other change (numbers, the brief, its scroll and face) is drawn at once, with the
+minimap as it then is. citro3d transfers and swaps a screen only when its target was drawn on, so otherwise
+the screen keeps its last frame. The game leaves the bottom screen's HUD draws out of the frames in between
 (`PortHudScreen::Drawn`, `IRenderer::HudScreenDue`). The brief's text, drawn glyph by glyph (136 draws for a long
 one), is drawn by the game once: while its text stays the same, the renderer copies the vertices and batches it kept
 (`PortHudScreen::Keep`, `IRenderer::KeepHudGroup`), unless one of their textures changed; the signature takes the
@@ -407,7 +422,8 @@ Tests: `test/pad_input.txt` presses buttons, one `<first frame> <last frame> <he
 (frames as `port_FrameCount` counts them), for example `150 170 8` for START; the `KEY_CPAD_*` and
 `KEY_CSTICK_*` bits push the circle pad and the C-stick all the way, and two more numbers push the circle pad
 part of the way, as `hidCircleRead` gives it (up positive, about 154 at the end of the travel), for example
-`600 700 0 -109 109` for up and left. `GTA2_TEST_CAR=<frame>:<model>[:<dx>:<dy>]`
+`600 700 0 -109 109` for up and left. With `KEY_TOUCH` (100000) the two numbers are the stylus's point on the
+bottom screen, and two more its point on the last frame, for a drag: `900 960 100000 160 120 60 60`. `GTA2_TEST_CAR=<frame>:<model>[:<dx>:<dy>]`
 puts a car of that model (54 the tank) beside the player at that frame, who then gets in.
 
 ## Buttons
@@ -425,7 +441,7 @@ the same buttons on foot and in a vehicle; SDL's 3DS mapping gives the buttons b
 | Y, X | specials 1 and 2 | specials 1 (horn, siren) and 2 |
 | D-pad left, right | previous, next weapon | the roof gun's turn (fire truck, tank, gun jeep), else the weapons |
 | D-pad up, down | special 3, nothing | special 3, attack |
-| START | pause menu | |
+| START | pause menu, with the city's map on the bottom screen: drag it with the stylus, + and - zoom | |
 | SELECT | back in menus | the next radio station (the PC's F1) |
 | ZR, ZL (New 3DS) | attack, nothing | attack, nothing |
 | C-stick (New 3DS) | MODERN: aims (TWIN STICK's aim) | MODERN: turns the roof gun |

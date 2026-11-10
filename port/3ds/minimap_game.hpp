@@ -44,6 +44,7 @@ struct View
 
 // False without a player in a city.
 bool ReadView(View* pView);
+bool PauseMenuOpen();
 // Each block's top as a colour (RGB565, its lid tile's, lighter when taller) and its height; returns the colour
 // given where no block has a lid.
 u16 ReadGround(u16* pColours, u8* pHeights);

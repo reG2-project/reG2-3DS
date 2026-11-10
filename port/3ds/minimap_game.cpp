@@ -1,4 +1,5 @@
 #include "minimap_game.hpp"
+#include "../src/pause_menu.hpp"
 #include "Game.hpp"
 #include "Gang.hpp"
 #include "Hud.hpp"
@@ -419,6 +420,11 @@ void ReadOwners(const u8* pArrows, u8* pOwners)
             memset(pOwners + y * kMapSize + pZone->mX, v, (pZone->mX + pZone->mW < kMapSize ? pZone->mW : kMapSize - pZone->mX));
         }
     }
+}
+
+bool PauseMenuOpen()
+{
+    return PortPauseMenu::IsOpen();
 }
 
 u32 ArrowColour(s32 arrow)
