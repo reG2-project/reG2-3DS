@@ -55,6 +55,12 @@ void port_SetGameFlip(bool)
 } // namespace
 #endif
 
+#if defined(__3DS__)
+// The top screen's refreshes since the last call, once the next one has come, and their period (port/3ds/c3d_context.cpp).
+unsigned port_WaitRefresh();
+unsigned long long port_RefreshNs();
+#endif
+
 namespace PortFrameLoop
 {
 namespace
@@ -74,6 +80,14 @@ f32 sAlpha;
 bool sInDraw;
 u32 sDrawSteps;
 u32 sMaxFps = 30;
+#if defined(__3DS__)
+// Pacing on the refresh: the refreshes since the frame began and those not stepped yet, the frame's steps and draw to come.
+bool sRefreshStarted;
+u32 sRefreshes;
+u32 sUnstepped;
+u32 sStepsDue;
+bool sDrawDue;
+#endif
 
 // GTA2_LOOP_TRACE=<file>: the player's position after each step, the drawn camera and player each frame.
 // GTA2_LOOP_STATS=1: steps and frames per second, and the time each takes, on stderr.
@@ -91,6 +105,55 @@ bool Original()
 {
     return sMaxFps == 30;
 }
+
+#if defined(__3DS__)
+// The frame limit as a whole number of refreshes: the nearest one, at least 1.
+u32 RefreshesPerFrame(unsigned long long refreshNs)
+{
+    const u32 n = static_cast<u32>(1e9 / sMaxFps / refreshNs + 0.5);
+    return n ? n : 1;
+}
+
+u32 RefreshesPerStep(unsigned long long refreshNs)
+{
+    const u32 n = static_cast<u32>((sStepNs + refreshNs / 2) / refreshNs);
+    return n ? n : 1;
+}
+
+// Frames begin just after a refresh, every RefreshesPerFrame, and the logic steps every RefreshesPerStep (2: 29.9
+// steps per second at 59.83 Hz, the original's 30.3 slowed by 1.3 %). The only wait is the one for the refresh.
+Action NextOnRefresh()
+{
+    if (sStepsDue)
+    {
+        sStepsDue--;
+        return kStep;
+    }
+    if (sDrawDue)
+    {
+        sDrawDue = false;
+        return kDraw;
+    }
+    const unsigned long long refreshNs = port_RefreshNs();
+    const u32 perFrame = RefreshesPerFrame(refreshNs);
+    const u32 refreshes = port_WaitRefresh();
+    sRefreshes = sRefreshStarted ? sRefreshes + refreshes : perFrame;
+    sRefreshStarted = true;
+    if (sRefreshes < perFrame)
+    {
+        return kIdle;
+    }
+    // A frame late by less than its slot drops the delay; a longer stall is caught up, kMaxStepsPerDraw at most.
+    sUnstepped += sRefreshes < 2 * perFrame ? perFrame : sRefreshes;
+    sRefreshes = 0;
+    const u32 perStep = RefreshesPerStep(refreshNs);
+    sStepsDue = sUnstepped / perStep < kMaxStepsPerDraw ? sUnstepped / perStep : kMaxStepsPerDraw;
+    sUnstepped %= perStep;
+    sAlpha = static_cast<f32>(sUnstepped) / perStep;
+    sDrawDue = true;
+    return NextOnRefresh();
+}
+#endif
 
 Sprite* PlayerSprite()
 {
@@ -165,6 +228,12 @@ void Reset()
     sStarted = false;
     sAccumulated = 0;
     sStepsSinceDraw = 0;
+#if defined(__3DS__)
+    sRefreshStarted = false;
+    sUnstepped = 0;
+    sStepsDue = 0;
+    sDrawDue = false;
+#endif
     PortInterp::Clear();
     PortView::Clear();
     ApplySettings();
@@ -191,6 +260,12 @@ Action Next(s32 stepMs, bool forceStep, bool noDraw)
         sAccumulated = 0;
         return kStep;
     }
+#if defined(__3DS__)
+    if (sMaxFps)
+    {
+        return NextOnRefresh();
+    }
+#endif
     if (sAccumulated >= sStepNs)
     {
         if (sStepsSinceDraw < kMaxStepsPerDraw)

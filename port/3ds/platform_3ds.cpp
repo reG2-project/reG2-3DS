@@ -221,6 +221,7 @@ extern "C" bool __wrap_SDL_ShowSimpleMessageBox(SDL_MessageBoxFlags, const char*
 }
 
 void port_Suspend(bool suspended);
+void port_ResyncRefresh();
 
 // HOME Menu, power button and sleep: called on the main thread within aptMainLoop, which returns
 // only once the game is back; citro3d's and ndsp's hooks keep the GPU and DSP state.
@@ -233,6 +234,7 @@ void port_3dsAptHook(APT_HookType hook, void*)
     else if (hook == APTHOOK_ONRESTORE || hook == APTHOOK_ONWAKEUP)
     {
         port_Suspend(false);
+        port_ResyncRefresh();
     }
 }
 

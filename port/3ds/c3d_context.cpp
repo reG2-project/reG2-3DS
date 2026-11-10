@@ -12,6 +12,8 @@ C3D_RenderTarget* gTarget;
 C3D_RenderTarget* gBottom;
 // The top screen's refreshes counted at the last wait.
 u32 sLastTop;
+// The frame loop has waited for this frame's refresh.
+bool sWaited;
 
 // gfxInit (done by SDL) set up the top screen; C3DRenderer::Present ends the citro3d frame, which
 // transfers the target to the screen and swaps, so SwapBuffers has nothing left to do.
@@ -41,19 +43,8 @@ class C3DContext : public IGLContext
     void SwapBuffers() {}
     void MakeCurrent() {}
 };
-} // namespace
-
-C3D_RenderTarget* C3DContextTarget()
-{
-    return gTarget;
-}
-
-C3D_RenderTarget* C3DContextBottomTarget()
-{
-    return gBottom;
-}
-
-void C3DContextFrameSync()
+// C3D_FrameSync's wait, timed in two: the top screen's next refresh, then the bottom screen's.
+void WaitRefresh()
 {
     const u32 top = C3D_FrameCounter(0);
     const u32 bottom = C3D_FrameCounter(1);
@@ -73,6 +64,45 @@ void C3DContextFrameSync()
     }
     PORT_PROF_COUNT(kRefreshes, C3D_FrameCounter(0) - sLastTop);
     sLastTop = C3D_FrameCounter(0);
+}
+} // namespace
+
+C3D_RenderTarget* C3DContextTarget()
+{
+    return gTarget;
+}
+
+C3D_RenderTarget* C3DContextBottomTarget()
+{
+    return gBottom;
+}
+
+void C3DContextFrameSync()
+{
+    if (!sWaited)
+    {
+        WaitRefresh();
+    }
+    sWaited = false;
+}
+
+unsigned port_WaitRefresh()
+{
+    const u32 last = sLastTop;
+    WaitRefresh();
+    sWaited = true;
+    return sLastTop - last;
+}
+
+void port_ResyncRefresh()
+{
+    sLastTop = C3D_FrameCounter(0);
+}
+
+unsigned long long port_RefreshNs()
+{
+    // 4481136 ticks of the system clock per refresh: 59.83 Hz.
+    return 4481136ull * 1000000000ull / SYSCLOCK_ARM11;
 }
 
 // citro3d draws to the screen directly: no OpenGL window.
