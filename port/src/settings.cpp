@@ -349,9 +349,26 @@ s32 ScreenDefault(Id id)
     return id == kLighting || id == kExplodingScores || id == kVsync || id == kClock || id == kAimCamera ? 1 : 0;
 }
 
+// Each read opens the registry key, and the step and the frame ask for several: kept from the first read, as
+// SetScreen is the only writer of these values.
+s32 sScreen[kCount];
+bool sScreenRead[kCount];
+
 s32 Screen(Id id)
 {
-    return gRegistry.Get_Screen_Setting(ScreenName(id), ScreenDefault(id));
+    if (!sScreenRead[id])
+    {
+        sScreen[id] = gRegistry.Get_Screen_Setting(ScreenName(id), ScreenDefault(id));
+        sScreenRead[id] = true;
+    }
+    return sScreen[id];
+}
+
+void SetScreen(Id id, s32 value)
+{
+    gRegistry.Set_Screen_Setting(ScreenName(id), value);
+    sScreen[id] = value;
+    sScreenRead[id] = true;
 }
 
 // Steps of the camera zoom: 0 is the original's, each step closer magnifies by kZoomStep.
@@ -1058,18 +1075,18 @@ void Change(Id id, s32 delta)
             break;
         }
         case kBloom:
-            gRegistry.Set_Screen_Setting(ScreenName(id), Clamp(Screen(id) + delta, 0, 10));
+            SetScreen(id, Clamp(Screen(id) + delta, 0, 10));
             ApplyRenderOptions();
             break;
         case kHeadlights:
         case kLightEffects:
         case kClock:
         case kAimCamera:
-            gRegistry.Set_Screen_Setting(ScreenName(id), Screen(id) ? 0 : 1);
+            SetScreen(id, Screen(id) ? 0 : 1);
             break;
         case kCamera:
             sCamera = !ChinatownCamera();
-            gRegistry.Set_Screen_Setting(ScreenName(id), sCamera);
+            SetScreen(id, sCamera);
             break;
         case kFrameLimit:
         {
@@ -1078,17 +1095,17 @@ void Change(Id id, s32 delta)
             {
                 i++;
             }
-            gRegistry.Set_Screen_Setting(ScreenName(id), kMaxFpsValues[Wrap(i + delta, kNumMaxFpsValues)]);
+            SetScreen(id, kMaxFpsValues[Wrap(i + delta, kNumMaxFpsValues)]);
             PortFrameLoop::ApplySettings();
             break;
         }
 #if defined(GTA2_PORT_SDL)
         case kVsync:
-            gRegistry.Set_Screen_Setting(ScreenName(id), Screen(id) ? 0 : 1);
+            SetScreen(id, Screen(id) ? 0 : 1);
             port_ApplyVsync();
             break;
         case kTextureFilter:
-            gRegistry.Set_Screen_Setting(ScreenName(id), Wrap(Clamp(Screen(id), 0, kNumTextureFilters - 1) + delta, kNumTextureFilters));
+            SetScreen(id, Wrap(Clamp(Screen(id), 0, kNumTextureFilters - 1) + delta, kNumTextureFilters));
             ApplyRenderOptions();
             break;
         case kPreset:
@@ -1098,7 +1115,7 @@ void Change(Id id, s32 delta)
             const s32 preset = current == kCustom ? (delta < 0 ? kClassic : kEnhanced) : (current == kClassic ? kEnhanced : kClassic);
             for (s32 i = 0; i < kNumPresetValues; i++)
             {
-                gRegistry.Set_Screen_Setting(ScreenName(kPresetValues[i].mId), PresetTarget(kPresetValues[i], preset));
+                SetScreen(kPresetValues[i].mId, PresetTarget(kPresetValues[i], preset));
             }
             ApplyRenderOptions();
             break;
@@ -1111,7 +1128,7 @@ void Change(Id id, s32 delta)
             {
                 i = Wrap(i + delta, kNumMsaaValues);
             } while (kMsaaValues[i] > max);
-            gRegistry.Set_Screen_Setting(ScreenName(id), kMsaaValues[i]);
+            SetScreen(id, kMsaaValues[i]);
             ApplyRenderOptions();
             break;
         }
@@ -1126,29 +1143,29 @@ void Change(Id id, s32 delta)
 #endif
         case kZoom:
             SetZoom(Zoom() + delta);
-            gRegistry.Set_Screen_Setting(ScreenName(id), sZoom);
+            SetScreen(id, sZoom);
             break;
         case kHudScale:
             sHudScale = Clamp(HudScalePercent() + delta * 10, kMinHudScale, kMaxHudScale);
-            gRegistry.Set_Screen_Setting(ScreenName(id), sHudScale);
+            SetScreen(id, sHudScale);
             RefreshHud();
             break;
         case kSafeArea:
             sSafeArea = Clamp(SafeAreaPercent() + delta, 0, kMaxSafeArea);
-            gRegistry.Set_Screen_Setting(ScreenName(id), sSafeArea);
+            SetScreen(id, sSafeArea);
             RefreshHud();
             break;
         case kCameraTilt:
             sCameraTilt = Clamp(CameraTilt() + delta, 0, kMaxCameraTilt);
-            gRegistry.Set_Screen_Setting(ScreenName(id), sCameraTilt);
+            SetScreen(id, sCameraTilt);
             break;
         case kCameraTurnSpeed:
             sCameraTurnSpeed = Clamp(CameraTurnSpeed() + delta, 0, kMaxCameraTurnSpeed);
-            gRegistry.Set_Screen_Setting(ScreenName(id), sCameraTurnSpeed);
+            SetScreen(id, sCameraTurnSpeed);
             break;
         case kCameraRotation:
             sCameraFollows = !CameraFollows();
-            gRegistry.Set_Screen_Setting(ScreenName(id), sCameraFollows);
+            SetScreen(id, sCameraFollows);
             break;
         case kControls:
         {
@@ -1161,21 +1178,21 @@ void Change(Id id, s32 delta)
                 i++;
             }
             sControls = order[Wrap(i + delta, count)];
-            gRegistry.Set_Screen_Setting(ScreenName(id), sControls);
+            SetScreen(id, sControls);
             break;
         }
         case kLighting:
-            gRegistry.Set_Screen_Setting(ScreenName(id), Wrap(Clamp(Screen(id), 0, kNumLightings - 1) + delta, kNumLightings));
+            SetScreen(id, Wrap(Clamp(Screen(id), 0, kNumLightings - 1) + delta, kNumLightings));
             Init_FrameRateLightingAndExplodingScores();
             break;
         case kDayLength:
-            gRegistry.Set_Screen_Setting(ScreenName(id), Clamp(DayLength() + delta, kMinDayLength, kMaxDayLength));
+            SetScreen(id, Clamp(DayLength() + delta, kMinDayLength, kMaxDayLength));
             break;
         case kStartTime:
-            gRegistry.Set_Screen_Setting(ScreenName(id), Clamp(StartTime() + delta, 0, 23));
+            SetScreen(id, Clamp(StartTime() + delta, 0, 23));
             break;
         default:
-            gRegistry.Set_Screen_Setting(ScreenName(id), Screen(id) ? 0 : 1);
+            SetScreen(id, Screen(id) ? 0 : 1);
             if (id == kExplodingScores)
             {
                 Init_FrameRateLightingAndExplodingScores();
