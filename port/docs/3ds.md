@@ -99,7 +99,9 @@ RGB5A1, else RGBA8), padded to a power of two. The gbh_* layer tells the format 
 entry's bits (`RTexelBits`), and the frontend's TGA images are known to be opaque 5-6-5, so only the
 port's few own textures are scanned; each level is then written in one
 pass that premultiplies, converts, pads, writes Morton order and averages the next level into a
-scratch buffer. The CPU surface is composited through an RGB5A1 texture. The screens' framebuffers are RGB (`GSP_BGR8_OES`, SDL sets RGBA8): an LCD
+scratch buffer. The ARM11's SIMD instructions sum two channels at a time for the averages (`UXTAB16`) and
+premultiply red and blue in one multiply's 16-bit lanes; Morton offsets step by a carry over the other axis's
+bits, in the levels and in the slots' borders. The CPU surface is composited through an RGB5A1 texture. The screens' framebuffers are RGB (`GSP_BGR8_OES`, SDL sets RGBA8): an LCD
 ignores alpha, but Azahar hands it on to its window, where pixels drawn with alpha 0 (the menus' black panels,
 the frontend's black) let what is behind show through. One frame of vertices lives
 in linear memory; texture frees wait for the GPU.
@@ -705,6 +707,12 @@ worst frame:
 
 The worker wrote 72 and 64 % of the jobs (busy at most 5 % of the time); the frames over 42 ms stay at 3 %,
 Azahar's own hitches. Azahar is 4 to 6 times optimistic on the console, so its milliseconds are a guide only.
+
+The level making alone (`WriteTexels`, Azahar's ticks, the same jobs written by both versions, in the explosion
+scene and a night drive): a 64x64 car slot (RGBA4, premultiplied) 360k to 203k, a 64x64 tile slot 326k to 151k,
+a 128x128 sprite 844k to 638k, a 32x32 one 53k to 42k, the frontend's 256x256 images half. Every byte of the 2673
+jobs' levels and borders came out the same, and the frames dumped match. On the console a car's 1.2 to 2.5 ms
+would be 0.7 to 1.5 ms.
 
 The draw's primitives: on an Old 3DS driving at night (`GTA2_3DS_PROF`, 26 fps), the draw took 14.9 ms of CPU
 per frame, 11 ms of it in its 346 primitives (235 tiles, 51 sprites), about 30 us each, nearly all in the
