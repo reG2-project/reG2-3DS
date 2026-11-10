@@ -1,7 +1,8 @@
 // Scripted buttons for tests, as GTA2_INPUT is for keys: test/pad_input.txt in the game folder holds
 // lines "<first frame> <last frame> <hex KEY_* mask> [<dx> <dy>]", frames as port_FrameCount counts them. The
 // KEY_CPAD_* and KEY_CSTICK_* bits push the circle pad and the C-stick all the way; dx and dy, the circle pad's
-// own values (hidCircleRead's, up positive), push it part of the way.
+// own values (hidCircleRead's, up positive), push it part of the way. With KEY_TOUCH they are the stylus's point on
+// the bottom screen instead, and two more numbers its point on the last frame, for a drag.
 // GTA2_TEST_SUSPEND=<frame>,<seconds>: HOME's suspend and resume at that frame, with the main thread held
 // in between as aptMainLoop holds it, then the steps run in the second after the resume are logged.
 #include <3ds.h>
@@ -17,6 +18,7 @@ extern "C" u32 __real_hidKeysDown();
 extern "C" u32 __real_hidKeysUp();
 extern "C" void __real_hidCircleRead(circlePosition* pPos);
 extern "C" void __real_irrstCstickRead(circlePosition* pPos);
+extern "C" void __real_hidTouchRead(touchPosition* pPos);
 
 namespace
 {
@@ -27,6 +29,8 @@ struct Press
     unsigned long keys;
     int dx;
     int dy;
+    int ex;
+    int ey;
 };
 
 std::vector<Press> sPresses;
@@ -35,6 +39,8 @@ u32 sHeld;
 u32 sPrevHeld;
 s16 sCircleX; // a press's dx and dy
 s16 sCircleY;
+u16 sTouchX;
+u16 sTouchY;
 unsigned sSuspendFrame;
 unsigned sSuspendSeconds;
 u64 sResumeMs;
@@ -56,8 +62,11 @@ void Load()
     while (fgets(line, sizeof(line), f))
     {
         Press p = {};
-        if (sscanf(line, "%u %u %lx %d %d", &p.first, &p.last, &p.keys, &p.dx, &p.dy) >= 3)
+        const int n = sscanf(line, "%u %u %lx %d %d %d %d", &p.first, &p.last, &p.keys, &p.dx, &p.dy, &p.ex, &p.ey);
+        if (n >= 3)
         {
+            p.ex = n >= 7 ? p.ex : p.dx;
+            p.ey = n >= 7 ? p.ey : p.dy;
             sPresses.push_back(p);
         }
     }
@@ -96,6 +105,13 @@ extern "C" void __wrap_hidScanInput()
         if (frame >= p.first && frame <= p.last)
         {
             sHeld |= p.keys;
+            if (p.keys & KEY_TOUCH)
+            {
+                const int span = p.last > p.first ? p.last - p.first : 1, t = frame - p.first;
+                sTouchX = static_cast<u16>(p.dx + (p.ex - p.dx) * t / span);
+                sTouchY = static_cast<u16>(p.dy + (p.ey - p.dy) * t / span);
+                continue;
+            }
             sCircleX = p.dx ? static_cast<s16>(p.dx) : sCircleX;
             sCircleY = p.dy ? static_cast<s16>(p.dy) : sCircleY;
         }
@@ -144,4 +160,14 @@ extern "C" void __wrap_irrstCstickRead(circlePosition* pPos)
 {
     __real_irrstCstickRead(pPos);
     PushStick(pPos, KEY_CSTICK_RIGHT, KEY_CSTICK_LEFT, KEY_CSTICK_UP, KEY_CSTICK_DOWN);
+}
+
+extern "C" void __wrap_hidTouchRead(touchPosition* pPos)
+{
+    __real_hidTouchRead(pPos);
+    if (pPos && (sHeld & KEY_TOUCH))
+    {
+        pPos->px = sTouchX;
+        pPos->py = sTouchY;
+    }
 }

@@ -358,7 +358,8 @@ Tests: `test/pad_input.txt` presses buttons, one `<first frame> <last frame> <he
 (frames as `port_FrameCount` counts them), for example `150 170 8` for START; the `KEY_CPAD_*` and
 `KEY_CSTICK_*` bits push the circle pad and the C-stick all the way, and two more numbers push the circle pad
 part of the way, as `hidCircleRead` gives it (up positive, about 154 at the end of the travel), for example
-`600 700 0 -109 109` for up and left. `GTA2_TEST_CAR=<frame>:<model>[:<dx>:<dy>]`
+`600 700 0 -109 109` for up and left. With `KEY_TOUCH` (100000) the two numbers are the stylus's point on the
+bottom screen, and two more its point on the last frame, for a drag: `900 960 100000 160 120 60 60`. `GTA2_TEST_CAR=<frame>:<model>[:<dx>:<dy>]`
 puts a car of that model (54 the tank) beside the player at that frame, who then gets in.
 
 ## Buttons
