@@ -914,6 +914,26 @@ start at their x rather than at the row's head. A walk passes 2 cells or more on
 and the index costs an access to the bitmap, one to the cell table and one to the cell before: in Azahar the
 parked cars' visit took 0.09 ms more, and on Linux the step as long.
 
+Explosion chains (`GTA2_TEST_BOOM`, Running; the hook works in the Linux port too). A Linux sampling profile of
+steps 1250 to 1650 puts the particles at 14 % of the step and the objects at 9 %. A quarter of the particles' time
+is `SpriteGrid::DoRemove` on grid 3 (particles only): a step removes 300 to 400 sprites, each found by walking
+its row (3.6 cells) and then its cell's links (15 to 18, the smoke piles up in a few cells), 5,800 links a step.
+Keeping, for grid 3, each link's predecessor and each sprite's link and cell (170 lines in `SpriteGrid.cpp`)
+removes in constant time with the same lists (every removal took the shortcut; grid 3's order hashed the same,
+and the cars and peds): the Linux step was 2 % shorter during the chain, and Azahar's particles 0.02 ms longer,
+the bookkeeping on every add and removal costing more instructions than the short walks it saves. Left out; on
+the console the walks' cache misses might make it a gain, which only a measurement there would show. The rest
+of the particles is their own update (the circular bursts 40 %, sprite sizes and depth), and the objects'
+time goes to their collisions against grid 1 (rows of 4.7 cells, as outside chains) and their movement, with
+no repeated work of the zone kind.
+
+The trains cost the same everywhere (about 0.45 ms on the console for 2 trains): every step each carriage is
+taken out of the sprite grid and put back (a quarter of the trains' time on Linux), the engine runs its AI and
+physics, and each carriage is placed 2 blocks behind the one before by `AdvanceAlongRailway(Checked)`, a block by
+block walk of the rails reading the map's columns and arrows (a third). The carriages move every step, so no
+result carries over between steps; within a step each walk starts where the previous one ended, but sharing that
+start would mean rewriting the matched rail walk. Left as it is.
+
 The system core cannot take the car physics either: each car's physics is a link in that chain (the next
 cars' AI, the peds it runs over, the objects, explosions and particles it makes, `rand()`, the collision sound
 queue), and the rest of the step reads the cars where the physics left them, so any overlap changes the
