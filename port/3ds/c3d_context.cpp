@@ -1,5 +1,6 @@
 #include "c3d_context.hpp"
 #include "../renderer/gl_context.hpp"
+#include "../src/prof.hpp"
 #include <3ds.h>
 
 namespace
@@ -9,6 +10,8 @@ const size_t kCmdBufSize = 0x100000;
 
 C3D_RenderTarget* gTarget;
 C3D_RenderTarget* gBottom;
+// The top screen's refreshes counted at the last wait.
+u32 sLastTop;
 
 // gfxInit (done by SDL) set up the top screen; C3DRenderer::Present ends the citro3d frame, which
 // transfers the target to the screen and swaps, so SwapBuffers has nothing left to do.
@@ -48,6 +51,28 @@ C3D_RenderTarget* C3DContextTarget()
 C3D_RenderTarget* C3DContextBottomTarget()
 {
     return gBottom;
+}
+
+void C3DContextFrameSync()
+{
+    const u32 top = C3D_FrameCounter(0);
+    const u32 bottom = C3D_FrameCounter(1);
+    {
+        PORT_PROF_EXCLUDED(kWaitVsync);
+        while (C3D_FrameCounter(0) == top)
+        {
+            gspWaitForAnyEvent();
+        }
+    }
+    {
+        PORT_PROF_EXCLUDED(kWaitBottom);
+        while (C3D_FrameCounter(1) == bottom)
+        {
+            gspWaitForAnyEvent();
+        }
+    }
+    PORT_PROF_COUNT(kRefreshes, C3D_FrameCounter(0) - sLastTop);
+    sLastTop = C3D_FrameCounter(0);
 }
 
 // citro3d draws to the screen directly: no OpenGL window.

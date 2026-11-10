@@ -24,10 +24,10 @@ const char* const kPartNames[] = {
     "inputs", "pump", "pump.pad", "idle", "draw", "draw.sort", "draw.setup", "draw.map", "draw.scores",
     "draw.hud", "draw.end", "prim", "prim.uv", "prim.turn", "prim.clip", "prim.resolve",
     "prim.setup", "prim.light", "prim.verts", "prim.c3d", "flush", "present", "present.bottom", "present.overlay",
-    "present.frameend", "tex.convert", "tex.upload", "wait.vsync", "wait.gpu", "gpu", "c3d.cpu", 0};
+    "present.frameend", "tex.convert", "tex.upload", "wait.vsync", "wait.bottom", "wait.gpu", "gpu", "c3d.cpu", 0};
 const char* const kCountNames[] = {
     "drive", "cars.visible", "peds.onscreen", "steps", "prims", "drawcalls", "vertices", "states", "binds", "uploads",
-    "lights", "litprims", "lighttests", "litverts", "nearlights", "tiles", "sprites", "ambient", "pumps", "events", "late"};
+    "lights", "litprims", "lighttests", "litverts", "nearlights", "tiles", "sprites", "ambient", "pumps", "events", "late", "refreshes"};
 static_assert(sizeof(kPartNames) / sizeof(kPartNames[0]) == kPartCount, "a name per part");
 static_assert(sizeof(kCountNames) / sizeof(kCountNames[0]) == kCountCount, "a name per count");
 
@@ -76,7 +76,7 @@ u64 sLastFrame;
 
 bool Excluded(u32 part)
 {
-    return part == kTexConvert || part == kTexUpload || part == kWaitVsync || part == kWaitGpu;
+    return part == kTexConvert || part == kTexUpload || part == kWaitVsync || part == kWaitBottom || part == kWaitGpu;
 }
 
 double Ms(double ticks)
