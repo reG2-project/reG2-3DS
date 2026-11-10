@@ -609,6 +609,34 @@ most, when it changed. The game now leaves the bottom screen's draws out of the 
 brief's text once (see Renderer). Azahar, bil: standing with a long brief, 1.6 to 1.8 ms became 0.32 (at most
 3.3 ms in a frame, now 0.66); without it 0.37 became 0.21; driving 0.44 became 0.24 (at most 1.6, now 0.75).
 
+The map (`draw.map`, about 10 ms a frame on the console driving at night, 300 primitives with the sprites drawn
+between its layers). `GTA2_3DS_MAPCACHE=1` (off by default, `port/3ds/map_cache.cpp`) builds the flat lids of each
+16x16 block chunk once into a mesh in linear memory, drawn at the end of their layer by a vertex shader of its own
+(`map_cache.v.pica`), a draw call per chunk and atlas page: a lid only overlaps the faces of nearer blocks of its
+layer, which the walk draws first, so the picture stays the same. Animated or remapped tiles, textures not converted
+yet, chunks that a light past the shader's 44 reaches and the turned view stay with the game. The walk then leaves out
+of its draw list the cells whose `RenderBlockAt` would draw nothing, or nothing but such a lid (a bit per cell and
+layer kept with the chunk, on the heap). Azahar, frozen frames in ste, `draw.map` in ms:
+
+| | game | lids cached | and the cells left out | cells walked |
+|---|---|---|---|---|
+| driving at night | 2.17 | 1.81 | 1.67 | 9 of 528 |
+| driving by day | 1.93 | 1.63 | 1.48 | 9 of 528 |
+| driving at night, elsewhere | 2.49 | 2.21 | 2.10 | 27 of 496 |
+| standing at night | 1.69 | 1.37 | 1.26 | 40 of 560 |
+| driving by day, elsewhere | 2.27 | | 1.93 | 27 of 496 |
+| standing by day | 1.52 | | 1.17 | 40 of 560 |
+| a car's lamps near (lids left to the game) | 2.41 | | 2.44 | 110 of 500 |
+
+The pictures are those of the game's own path, at most 27 pixels 1 off in a channel (the lids' projection). A built chunk takes 14 KB of linear memory in these
+scenes (2 or 3 chunks drawn), at most 48 are kept. Left to the game, and why: the walls of the walked cells, 9 to 22
+primitives a frame here in 4 to 9 (chunk, layer, page) groups, 0.06 to 0.38 ms in Azahar with the slopes' sides (the
+frame without any wall, `skip_left` and the like in the registry). A mesh of them would need the walk's order
+where faces overlap (dominance order per quadrant around the camera, the camera's row and column walked) and
+would still cost a draw call per group, 7 to 13 us in Azahar against about 12 for a wall through the gbh_* layer:
+at best 0.15 ms of Azahar's 0.38, for several hundred lines. Slopes and diagonals draw 0 to 5 primitives a frame.
+The meshes' own cost is 0.19 ms a frame in Azahar, half of it the first draw after the switch of shader program.
+
 The bottom screen's CPU time per frame (`GTA2_3DS_STATS`, walking, Old 3DS mode): 0.38 to 0.42 ms
 (0.45 to 0.51 at most) when it was drawn every frame without a minimap; with the minimap and drawn only
 on a change, 0.05 ms standing (5 frames of 150 drawn, for the clock), 0.18 to 0.44 ms walking (up to 75
