@@ -783,8 +783,8 @@ The meshes' own cost is 0.19 ms a frame in Azahar, half of it the first draw aft
 On the console (night drive, `GTA2_3DS_PROF_AB=mapcache`) the cache took 76 lids a frame from the game but saved
 only 0.3 ms of `draw.map`, and its worst blocks were worse. `draw.map.cache` times it per frame: the checks of the
 chunks' tile mappings and texture versions, the builds (blocks, quads, sort, mesh), the test of the lights past the
-shader's, and the draws (the game's batch, the switch to the mesh program, the draw calls, the switch back, both
-switches updating citro3d's context themselves so that their uploads show there); `mc.*` count the chunks checked,
+shader's, and the draws (the game's batch, the switch to the mesh program, the draw calls, the switch back);
+`mc.*` count the chunks checked,
 built, drawn and left to the game, the rows left for a light, the lids drawn, taken and left out of the walk. Its
 log line showed where the time went: a build took 5.1 ms (7.2 at most) in one frame, 5 to 22 of them in 150 frames
 driving; the draws 0.6 ms a frame; the checks and light tests 0.3; and at night 3 chunk layers a frame went back to
@@ -796,8 +796,21 @@ chunk's two uniform rows and buffer offset, and C3D_DrawArrays' commands themsel
 once per chunk and frame, for the chunks on screen. Azahar, `draw.map` in ms: frozen at night in ste with 47 lights,
 1.93 without the cache, 2.36 with it before, 1.85 now; the scripted night drive 1.87 without it, 1.75 now (before,
 slower than without it in most blocks). With the shader at 32 lights (a test build) the frozen frames are the
-game's to the pixel. Left: two program switches per layer with lids, about 20 us each in Azahar, and a draw through
-citro3d per state and layer.
+game's to the pixel.
+
+The two vertex shaders are one shbin (`render.v.pica`, then `map_cache.v.pica` with `.entry mesh`): one code upload,
+the same constants and outputs. DrawMeshes switches by writing the entry point, the vertex inputs and buffer 0 itself,
+with the layer's two projection rows and `meshLit`, and back the game's entry point, inputs and projection; citro3d's
+context stays on the game's program (BeginFrame's binding is written first when no draw has yet). A lid's draw goes
+through citro3d only for a state other than the one applied, and the game's next draw keeps the state and texture
+the last lid left. libctru's `DVLE_s` holds enums, whose size differs between its build and the port's
+(`--no-enum-size-warning`): the shbin's words are read directly, and the mesh's DVLE comes from a copy that lists it
+first. The cache reads the system tick (a system call) for its log line only with `GTA2_3DS_PROF`, about 50 reads a
+frame otherwise. Azahar, ms per frame, the profiler on: the scripted night drive (4.8 layers with lids a frame),
+`draw.map` 1.72 to 1.56 (1.85 without the cache), the cache's draws 0.48 to 0.32: switch 0.104 to 0.053, back 0.096
+to 0.021, calls 0.215 to 0.198; frozen at night in ste, `draw.map` 1.36 to 1.27, frames the same to the pixel. Left
+per layer with lids: the game's batch before, and a draw through citro3d for the lids' state and the game's after
+(ApplyState's changes and the context update, about 23 us in Azahar).
 
 The cache simulator (the Linux port, see the logic's memory traffic), zoomed out on a fast drive, per frame: the
 walk's draw list misses little (123 data, 52 instruction cache misses); `RenderBlockAt`'s map reads (base table,

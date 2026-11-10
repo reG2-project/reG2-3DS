@@ -1,5 +1,6 @@
 ; C3DRenderer::DrawMeshes' shader: map_cache.cpp's tiles, projected and lit as render.v.pica does the gbh_* vertices.
-; The uniforms up to anyLights sit in render.v.pica's registers, so its lights carry over; projection holds the draw's.
+; Assembled after render.v.pica into the same shbin: its uniforms up to anyLights and its constants sit in the same
+; registers, so the lights carry over; projection holds the draw's.
 
 ; The clip position per local x, per local y and at (0, 0); the world position of (0, 0) less the light origin.
 .fvec projection[4]
@@ -25,7 +26,8 @@
 .alias intex v1
 .alias ineye v2
 
-.proc main
+.entry mesh
+.proc mesh
     mul r0, projection[0], inpos.xxxx
     mad r0, inpos.yyyy, projection[1], r0
     add r1, projection[2], r0
