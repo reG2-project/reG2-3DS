@@ -87,6 +87,11 @@ keeps only those that reach that area (layer 0's, the widest, from `gbh_SetCamer
 R-type's top speed the camera rises to about 3.8 and the area grows: on the avenue south of the Loonies' easy phones
 in Downtown 64 lights a frame came in, more than the shader's 44, so the map cache left rows to the game and the CPU
 lit them (504 light tests a frame); 36 of them reach nothing drawn, and without them the CPU lights nothing there.
+With more lights than the shader's, `UploadLights` ranks them by the part of that area they reach (stable, so the
+frame's order otherwise): the game submits its lamps first and the port's blasts (6 blocks) and fires last, so in an
+explosion chain the blasts were the ones lit on the CPU. Ranked, the lights past the 44th are the small lamps at the
+area's edge (`GTA2_TEST_BOOM` in Azahar: 65 to 78 lights a frame, from 1000 light tests and 170 CPU-lit vertices a
+frame to 2 and 0). A light lit by the shader rather than the CPU differs by at most one level, as above.
 The game's vertices are in logical pixels with 1/w; the vertex shader
 outputs `(x*w, y*w, z*w, w)` so the PICA200 interpolates textures with perspective. Textures arrive
 as RGBA8 from the gbh_* layer and are stored in the smallest exact PICA format (RGB565, RGBA4,
@@ -499,7 +504,12 @@ part of the way, as `hidCircleRead` gives it (up positive, about 154 at the end 
 bottom screen, and two more its point on the last frame, for a drag: `900 960 100000 160 120 60 60`. `GTA2_TEST_CAR=<frame>:<model>[:<dx>:<dy>]`
 puts a car of that model (54 the tank, 42 the R-type) beside the player at that frame, who then gets in, and
 `GTA2_TEST_AT=<frame>:<x>:<y>[:<degrees>],...` moves the player there (in blocks), or his vehicle turned to that
-heading (0 north, 90 west, 180 south, 270 east); the log names what moved. The menus' presses of `padA.txt` reach
+heading (0 north, 90 west, 180 south, 270 east); the log names what moved. `GTA2_TEST_BOOM=<frame>:<cars>[:<spacing>]`
+parks that many cars (R-types and S-types) in two rows that far above and below the player (1.2 blocks by default),
+sets one burning every 20 steps and blows each up 75 steps after (`port_TestBoom`). On foot the camera takes about
+400 steps to follow a far `GTA2_TEST_AT`, and parked cars off the screen for 130 steps despawn, so the explosion chain
+of Speed is `GTA2_TEST_AT=700:87.5:33.5`, `GTA2_TEST_BOOM=1250:12:1.2` after the menus' presses, with the registry's
+`Debug` key `do_invulnerable` (the player stands among the blasts). The menus' presses of `padA.txt` reach
 the game too (A gets in and out of a car), so a drive starts after them: the avenue south of the Loonies' easy
 phones in Downtown, east then west, is `GTA2_TEST_AT=900:56:50.5,1150:56.5:50.5:270,1950:173:54.5:90`,
 `GTA2_TEST_CAR=950:42:1.5:0` and R held (`1160 1940 200`, `1960 2750 200`).
@@ -790,7 +800,8 @@ log line showed where the time went: a build took 5.1 ms (7.2 at most) in one fr
 driving; the draws 0.6 ms a frame; the checks and light tests 0.3; and at night 3 chunk layers a frame went back to
 the game whole for a light past the shader's 44. Now a build reads the blocks once, resolves a lid's tile once and
 sorts 8-byte keys (Azahar: 4.4 ms, now 1.2, at most 1.3); such a light leaves to the game only the rows it may
-reach, which it lights on the CPU as before; after the first draw of a state through citro3d (whose context update
+reach on the screen (the chunk's rows and columns in view at the layer's top, one more around), which it lights on
+the CPU as before; after the first draw of a state through citro3d (whose context update
 walks every uniform of both shader stages, 11 to 17 us a draw in Azahar), a layer's draws write the texture, the
 chunk's two uniform rows and buffer offset, and C3D_DrawArrays' commands themselves; and the lights are looked up
 once per chunk and frame, for the chunks on screen. Azahar, `draw.map` in ms: frozen at night in ste with 47 lights,
@@ -905,6 +916,23 @@ its hand-off on average (at most 4.6 to 8 ms), ran 0.67 to 0.71 ms (at most 5.8 
 station's first open), and the join waited in none of 1650 steps walking and 2 of 2250 driving (at most 21 ms).
 On a console the pass takes about 1 ms of the step: 3 to 5 ms there, plus the wait for its turn, inside a draw of
 14 ms. That needs a console to confirm.
+
+Explosion chains: walking at night in Downtown traffic around block (87, 33), machine-gunning cars that blew up
+in chains, an Old 3DS fell to 22 to 27 frames per second over whole blocks. 59 to 89 lights a frame came in (the
+blasts' and the fires' added to the lamps'), so the CPU lit what those past the shader's 44 reach: up to 1800 light
+tests a frame over a block, up to 132 rows a frame left by the map cache to the game's walk, and `draw.map` went from
+about 7 ms to 13 to 19. The step took 8 to 10.6 ms (the AI driven cars 3, the particles up to 1.8), texture uploads
+10 to 26 ms in single frames (10 to 39 of them: car damage, peds' frames in their remaps), and `flush`'s 9.8 ms over a
+block is the sampled primitive's time scaled by `GTA2_3DS_PROF_SAMPLE` (100000 there), not a cost. With
+`GTA2_TEST_BOOM` (Running) in Azahar, ranking the lights and leaving to the game only the rows a light past the 44th
+reaches on the screen took, over the blasts' blocks, 12 cars: `draw.map` from 4.25 and 4.75 ms to 3.16 and 3.49 (the
+ranking alone 3.30 and 3.62), light tests from 1000 to 2 a frame, rows left to the game from 17 to 20 to none, tiles
+drawn by the game from 77 to 60; 20 cars: 4.73, 4.84 and 5.52 ms to 3.41, 3.37 and 4.21, light tests from 1300 to
+2000 to 8 to 390. The top screen: one frame identical, one
+with 486 pixels one level off (lit by the shader rather than the CPU), one with 53 pixels in a column at a fire's edge
+up to 9 levels off. Azahar's 4 to 6 times on the console's CPU put the saving at 5 to 9 ms a frame in such blocks.
+Each run has 4 frames of 70 to 140 ms in Azahar alone, in `C3D_FrameBegin` (timed in `draw.map.cache`, the frame's
+first draw) as the first blasts draw, both before and after; the averages above leave them out.
 
 ### Pacing
 
