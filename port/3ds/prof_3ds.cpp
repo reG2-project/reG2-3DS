@@ -1,6 +1,7 @@
 #include "../src/prof.hpp"
 #include "log_3ds.hpp"
 #include <3ds.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -175,30 +176,52 @@ void Calibrate()
             sInterval, sSample, Ms(sTickTicks) * 1000.0, Ms(sScopeTicks) * 1000.0, Ms(sSectionTicks) * 1000.0);
 }
 
+// A line made in pieces goes to the log whole: other threads log too.
+char sLine[4096];
+u32 sLineUsed;
+
+__attribute__((format(printf, 1, 2))) void Add(const char* format, ...)
+{
+    va_list args;
+    va_start(args, format);
+    const int n = vsnprintf(sLine + sLineUsed, sizeof(sLine) - sLineUsed, format, args);
+    va_end(args);
+    if (n > 0)
+    {
+        sLineUsed = sLineUsed + n < sizeof(sLine) ? sLineUsed + n : sizeof(sLine) - 1;
+    }
+}
+
+void EndLine()
+{
+    Log3DS_Printf("%s\n", sLine);
+    sLineUsed = 0;
+}
+
 void PrintParts(const char* label, u32 first, u32 last, u32 units)
 {
-    Log3DS_Printf("prof %s:", label);
+    Add("prof %s:", label);
     for (u32 i = first; i < last; i++)
     {
         const Stat& s = sParts[i];
         if (s.calls && kPartNames[i])
         {
-            Log3DS_Printf(" %s=%.3f/%.3f/%.3f/%.1f", kPartNames[i], Ms(s.sum) / units, Ms(s.max), Ms(s.self) / units,
-                    (double)s.calls / units);
+            Add(" %s=%.3f/%.3f/%.3f/%.1f", kPartNames[i], Ms(s.sum) / units, Ms(s.max), Ms(s.self) / units,
+                (double)s.calls / units);
         }
     }
-    Log3DS_Printf("\n");
+    EndLine();
 }
 
 void PrintCounts(u32 first, u32 last, u32 units, bool newLine)
 {
     for (u32 i = first; i < last; i++)
     {
-        Log3DS_Printf(" %s=%.2f/%lu", kCountNames[i], (double)sCountSum[i] / units, sCountMax[i]);
+        Add(" %s=%.2f/%lu", kCountNames[i], (double)sCountSum[i] / units, sCountMax[i]);
     }
     if (newLine)
     {
-        Log3DS_Printf("\n");
+        EndLine();
     }
 }
 
@@ -215,7 +238,7 @@ void Print()
                   Ms((u64)sScopes * sScopeTicks + (u64)sSections * sSectionTicks) / sFrames, logBytes, Ms(logTicks));
     PrintParts("step", 0, kStepParts, steps);
     PrintParts("frame", kStepParts, kPartCount, sFrames);
-    Log3DS_Printf("prof count:");
+    Add("prof count:");
     PrintCounts(0, kStepCounts, steps, false);
     PrintCounts(kStepCounts, kCountCount, sFrames, true);
     memset(sParts, 0, sizeof(sParts));
