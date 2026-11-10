@@ -226,8 +226,11 @@ screen on the bottom screen, which the game has none of, so touches reach neithe
 The bottom screen is drawn only when what it shows changed, in every other frame at most (15 per second at
 30): a signature of the HUD's batches (vertices, textures and their uploads, states), its panels, the
 brief's scroll and the minimap's state (the player's position to the pixel, heading in 64 steps, gang and
-markers). citro3d transfers and swaps a screen only when its target was drawn on, so otherwise the screen
-keeps its last frame. The game leaves the bottom screen's HUD draws out of the frames in between
+markers). A change of the minimap alone waits until 100 ms after the last draw (`kMinimapMs`): at 30 frames
+per second it is drawn in every fourth frame (7.5 per second) rather than every other one, as its draw is most
+of the screen's cost; any other change (numbers, the brief, its scroll and face) is drawn at once, with the
+minimap as it then is. citro3d transfers and swaps a screen only when its target was drawn on, so otherwise
+the screen keeps its last frame. The game leaves the bottom screen's HUD draws out of the frames in between
 (`PortHudScreen::Drawn`, `IRenderer::HudScreenDue`). The brief's text, drawn glyph by glyph (136 draws for a long
 one), is drawn by the game once: while its text stays the same, the renderer copies the vertices and batches it kept
 (`PortHudScreen::Keep`, `IRenderer::KeepHudGroup`), unless one of their textures changed; the signature takes the

@@ -83,6 +83,8 @@ const s32 kMaxTexSize = 1024;
 // The bottom screen is drawn in one frame of that many (the game leaves its HUD draws out of the others), and only
 // when what it shows changed.
 const u32 kBottomEvery = 2;
+// A change of the minimap alone waits that long after the last draw (ms): its draw is most of the screen's cost.
+const u64 kMinimapMs = 100;
 // GLRenderer's default vertex offset: D3D pixel centres are on integers, the PICA's on halves.
 const f32 kPixelOffset = 0.5f - 1.0f / 2048.0f;
 // Batch state only: the batch's texture is premultiplied; its draws sample the first mip level only.
@@ -609,6 +611,9 @@ struct C3DRenderer::Impl : HudTheme::Sink
     // The signature of the bottom screen's last drawn frame, and that frame (0 before the first).
     u32 mBottomSig;
     u32 mBottomFrame;
+    // Its signature without the minimap, and when it was drawn (osGetTime).
+    u32 mBottomHudSig;
+    u64 mBottomMs;
     C3D_RenderTarget* mBottom;
     C3D_Mtx mBottomProjection;
     // The layout: kHudPanels and kHudGroups, with the brief's right edge for the minimap's mode.
@@ -664,7 +669,7 @@ struct C3DRenderer::Impl : HudTheme::Sink
     void Flush();
     void SetLights(const RLight* pLights, s32 count, const f32* pAmbient, f32 unlitAmbient);
     f32 ScrollOffset();
-    u32 BottomSignature(f32 scroll, u32 minimap) const;
+    u32 BottomSignature(f32 scroll, bool wide) const;
     bool BottomDue() const { return !mBottomFrame || mFrame % kBottomEvery == 0; }
     void DrawHud();
     void EndKeep();
@@ -1521,12 +1526,12 @@ static u32 VertsHash(const C3DVertex* pVerts, s32 count)
 }
 
 // What the bottom screen would show: its panels, scroll and HUD batches, with their vertices and textures.
-u32 C3DRenderer::Impl::BottomSignature(f32 scroll, u32 minimap) const
+u32 C3DRenderer::Impl::BottomSignature(f32 scroll, bool wide) const
 {
     u32 h = 2166136261u;
     const auto mix = [&h](u32 v) { h = (h ^ v) * 16777619u; };
     mix(mHudPanels);
-    mix(minimap);
+    mix(wide);
     mix((u32)(s32)scroll);
     for (size_t i = 0; i < mHudBatches.size(); i++)
     {
@@ -1566,8 +1571,10 @@ void C3DRenderer::Impl::DrawHud()
     // The minimap shows with the HUD, in game only.
     const u32 minimap = !pauseMap && mHudPanels && mMinimap != kMinimapOff ? Minimap::Update(*mOwner) : 0;
     const bool wide = mMinimap == kMinimapWide && !(mHudPanels & (1u << HudTheme::kBrief));
-    const u32 sig = pauseMap ? pauseMap : BottomSignature(scroll, minimap ^ wide);
-    if (mBottomFrame && sig == mBottomSig)
+    const u32 hud = pauseMap ? 0 : BottomSignature(scroll, wide);
+    const u32 sig = pauseMap ? pauseMap : (hud ^ minimap) * 16777619u;
+    const bool minimapWaits = !pauseMap && hud == mBottomHudSig && osGetTime() - mBottomMs < kMinimapMs;
+    if (mBottomFrame && (sig == mBottomSig || minimapWaits))
     {
         mHudBatches.clear();
         mHudPanels = 0;
@@ -1576,6 +1583,8 @@ void C3DRenderer::Impl::DrawHud()
     }
     mBottomSig = sig;
     mBottomFrame = mFrame;
+    mBottomHudSig = hud;
+    mBottomMs = osGetTime();
     C3D_RenderTargetClear(mBottom, C3D_CLEAR_COLOR, 0x000000FF, 0);
     C3D_FrameDrawOn(mBottom);
     mTargetW = kBottomW;
