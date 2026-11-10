@@ -81,8 +81,13 @@ differs from the CPU's lighting in 10 to 62 of its 96000 pixels, by one level. E
 28 + 17 per light instructions (unlit ones 2 more than before): with the console's night drive (180 lit
 primitives of 6 vertices, 44 lights) about 0.8 million per frame, some 0.8 ms of the four vertex units at one
 instruction per clock, against the 4.5 ms of GPU time it measured per frame (Azahar does not time the GPU). The lights the CPU tests a
-primitive against come from a 16x16 grid of the map cells they reach, built once per change. The game's
-vertices are in logical pixels with 1/w; the vertex shader
+primitive against come from a 16x16 grid of the map cells they reach, built once per change. The game hands over
+every light of the 4-block light grid cells 8 to 12 blocks around the blocks its map walk covers; `gbh_AddLight`
+keeps only those that reach that area (layer 0's, the widest, from `gbh_SetCamera`) or two blocks past it. At an
+R-type's top speed the camera rises to about 3.8 and the area grows: on the avenue south of the Loonies' easy phones
+in Downtown 64 lights a frame came in, more than the shader's 44, so the map cache left rows to the game and the CPU
+lit them (504 light tests a frame); 36 of them reach nothing drawn, and without them the CPU lights nothing there.
+The game's vertices are in logical pixels with 1/w; the vertex shader
 outputs `(x*w, y*w, z*w, w)` so the PICA200 interpolates textures with perspective. Textures arrive
 as RGBA8 from the gbh_* layer and are stored in the smallest exact PICA format (RGB565, RGBA4,
 RGB5A1, else RGBA8), padded to a power of two. The gbh_* layer tells the format from each palette

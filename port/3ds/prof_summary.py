@@ -74,6 +74,8 @@ NOTES = {
     "mc.lids": "lids the walk left to the meshes",
     "mc.skipped": "cells left out of the walk",
     "map.lookups": "map column reads, the draw's included",
+    "lights": "the game's and the port's, as submitted",
+    "lights.culled": "of those, reaching no block the map walks",
     "grid.cells": "sprite grid cells walked to reach a sprite's",
 }
 

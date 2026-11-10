@@ -141,6 +141,7 @@ enum Count
     kBinds,
     kUploads,
     kLightsAdded,
+    kLightsCulled,
     kLitPrims,
     kLightTests,
     kLitVerts,
