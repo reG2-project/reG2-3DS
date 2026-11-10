@@ -1259,8 +1259,7 @@ void C3DRenderer::Impl::BeginFrame()
     // C3D_FRAME_SYNCDRAW's two waits apart: the screens' next refresh, then the GPU.
     if (!sUncapped)
     {
-        PORT_PROF_EXCLUDED(kWaitVsync);
-        C3D_FrameSync();
+        C3DContextFrameSync();
     }
     {
         PORT_PROF_EXCLUDED(kWaitGpu);

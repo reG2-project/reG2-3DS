@@ -22,7 +22,8 @@ NOTES = {
     "idle": "sleeps until the next step or frame",
     "loop.next": "the frame loop's pacing, idle included",
     "log": "this log's lines, and its writes to the SD card",
-    "wait.vsync": "C3D_FrameSync, in the frame's first draw",
+    "wait.vsync": "the top screen's refresh",
+    "wait.bottom": "then the bottom screen's",
     "wait.gpu": "C3D_FrameBegin's wait for the GPU",
     "gpu": "C3D_GetDrawingTime, previous frame",
     "c3d.cpu": "C3D_GetProcessingTime, previous frame",
@@ -157,7 +158,7 @@ def main():
         avg = lambda kind, k: sum(g(b[kind], k) for b in bs) / len(bs)
         logic = sum(g(b["step"], "step") * g(b["count"], "steps") for b in bs) / len(bs)
         budget = [("logic", logic), ("draw", avg("frame", "draw")),
-                  ("wait.vsync", avg("frame", "wait.vsync")), ("wait.gpu", avg("frame", "wait.gpu")),
+                  ("wait.vsync", avg("frame", "wait.vsync")), ("wait.bottom", avg("frame", "wait.bottom")), ("wait.gpu", avg("frame", "wait.gpu")),
                   ("tex", avg("frame", "tex.convert") + avg("frame", "tex.upload")), ("pump", avg("frame", "pump")),
                   ("inputs", avg("frame", "inputs"))]
         if any("loop.next" in b["frame"] for b in bs):

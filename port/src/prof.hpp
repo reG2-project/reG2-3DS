@@ -83,6 +83,7 @@ enum Part
     kTexConvert,
     kTexUpload,
     kWaitVsync,
+    kWaitBottom,
     kWaitGpu,
     kGpu,
     kC3dCpu,
@@ -116,6 +117,7 @@ enum Count
     kPumps,
     kEvents,
     kLateFrames,
+    kRefreshes,
     kCountCount
 };
 
