@@ -1,4 +1,5 @@
 #include "../src/prof.hpp"
+#include "../src/logic_opts.hpp"
 #include "log_3ds.hpp"
 #include <3ds.h>
 #include <stdarg.h>
@@ -97,6 +98,10 @@ u32 sSectionTicks;
 u64 sLastFrame;
 bool sPmu;
 u32 sEventPair;
+// GTA2_3DS_PROF_AB=1: the logic options (logic_opts.hpp) set as asked in one block of lines, all off in the next.
+bool sAB;
+u32 sBlocks;
+signed char sOptions[PortLogic::kOptionCount];
 // What a tick read, a scope and a section count of the two events.
 u32 sTickEvents[2];
 u32 sScopeEvents[2];
@@ -364,9 +369,14 @@ void Print()
     u32 logBytes;
     u64 logTicks;
     Log3DS_LastWrite(&logBytes, &logTicks);
-    Log3DS_Printf("prof: %lu frames, %lu steps, %.0f scopes and %.0f sections per frame (%.2f ms); last log write %lu bytes in %.2f ms\n",
+    u32 options = 0;
+    for (u32 i = 0; i < PortLogic::kOptionCount; i++)
+    {
+        options |= PortLogic::On(static_cast<PortLogic::Option>(i)) ? 1u << i : 0;
+    }
+    Log3DS_Printf("prof: %lu frames, %lu steps, %.0f scopes and %.0f sections per frame (%.2f ms); last log write %lu bytes in %.2f ms; options %lu\n",
                   sFrames, sSteps, (double)sScopes / sFrames, (double)sSections / sFrames,
-                  Ms((u64)sScopes * sScopeTicks + (u64)sSections * sSectionTicks) / sFrames, logBytes, Ms(logTicks));
+                  Ms((u64)sScopes * sScopeTicks + (u64)sSections * sSectionTicks) / sFrames, logBytes, Ms(logTicks), options);
     PrintParts("step", 0, kStepParts, steps);
     PrintParts("frame", kStepParts, kPartCount, sFrames);
     if (sPmu)
@@ -452,6 +462,12 @@ void Reset()
         const char* pSample = getenv("GTA2_3DS_PROF_SAMPLE");
         sSample = pSample && atoi(pSample) > 0 ? (u32)atoi(pSample) : sSample;
         gOn = sInterval > 0;
+        const char* pAB = getenv("GTA2_3DS_PROF_AB");
+        sAB = gOn && pAB && atoi(pAB) > 0;
+        for (u32 i = 0; i < PortLogic::kOptionCount && sAB; i++)
+        {
+            sOptions[i] = PortLogic::On(static_cast<PortLogic::Option>(i)) ? 1 : 0;
+        }
         const char* pPmu = getenv("GTA2_3DS_PROF_PMU");
         if (gOn && pPmu && atoi(pPmu) > 0)
         {
@@ -497,8 +513,16 @@ void EndFrame()
             Scope log(kLog);
             Print();
         }
-        // A section open here would be taken by the calibration's.
-        if (sPmu && !(sDepth && sStack[sDepth - 1].section))
+        sBlocks++;
+        if (sAB)
+        {
+            for (u32 i = 0; i < PortLogic::kOptionCount; i++)
+            {
+                PortLogic::gOn[i] = sBlocks % 2 ? 0 : sOptions[i];
+            }
+        }
+        // A section open here would be taken by the calibration's. With sAB, each pair sees both settings.
+        if (sPmu && (!sAB || sBlocks % 2 == 0) && !(sDepth && sStack[sDepth - 1].section))
         {
             sEventPair = (sEventPair + 1) % kEventPairCount;
             NextEvents();
