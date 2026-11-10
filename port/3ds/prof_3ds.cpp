@@ -404,9 +404,10 @@ void Print()
 }
 } // namespace
 
+// The stack is the main thread's: scopes on other threads (the sound pass on the system core) are left untimed.
 int Push(Part part, unsigned scale)
 {
-    return PushAt(part, scale, false, 0);
+    return threadGetCurrent() ? -1 : PushAt(part, scale, false, 0);
 }
 
 void Pop(int index)
@@ -420,7 +421,7 @@ void Pop(int index)
 
 void Section(Part part)
 {
-    if (!gOn || gPrimScale == kSkip)
+    if (!gOn || gPrimScale == kSkip || threadGetCurrent())
     {
         return;
     }
@@ -434,7 +435,7 @@ void Section(Part part)
 
 void EndSection()
 {
-    if (gOn && gPrimScale != kSkip && sDepth && sStack[sDepth - 1].section)
+    if (gOn && gPrimScale != kSkip && !threadGetCurrent() && sDepth && sStack[sDepth - 1].section)
     {
         PopTop(Read());
     }
