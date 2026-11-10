@@ -319,10 +319,12 @@ minimap's place (see Renderer). To boot into a city, the registry's `Debug` keys
 Per logic step: the step and its parts (`Game::UpdateGame`'s services in order, the sound, one level deeper in
 the cars and the peds, the sprite collisions). Per frame: the input reading, the event pump and the pad, the
 sleeps, the draw (sprite sort, map, HUD, the gbh_* primitives with their lighting and their citro3d part, the
-batches' submission), the bottom screen, `C3D_FrameEnd`, texture conversion and uploads, the wait for the screens'
-refresh and the wait for the GPU apart, and citro3d's own GPU and CPU times. Counts: primitives, draw calls,
-vertices, texture binds, lights and the lights tried per vertex lit on the CPU, tiles, sprites, cars, peds, and whether the
-player drives. Each part gives its average, its most in one step or frame, its time without the parts under it,
+batches' submission), the bottom screen, `C3D_FrameEnd`, texture conversion and uploads, the waits for the top
+screen's refresh (`wait.vsync`, see Pacing), for the bottom screen's after it (`wait.bottom`) and for the GPU apart,
+and citro3d's own GPU and CPU times. Counts: primitives, draw calls,
+vertices, texture binds, lights and the lights tried per vertex lit on the CPU, tiles, sprites, cars, peds, whether the
+player drives, the steps per frame, the top screen's refreshes since the last frame (`refreshes`, 2 at FRAME LIMIT 30)
+and the frames over 42 ms after the last (`late`). Each part gives its average, its most in one step or frame, its time without the parts under it,
 and its calls. The timers' own cost, measured at the start, is taken out of the times and logged; one primitive
 in `GTA2_3DS_PROF_SAMPLE` (default 4) is timed, with what it runs, and counted for that many. Without the
 variable, a timer costs a test. `python3 port/3ds/prof_summary.py gta2_log.txt` sums a log up in tables,
@@ -622,6 +624,41 @@ the game's own state (doors, lights, despawning). The physics and the collisions
 cost of this kind (30 square roots a step, through the VFP; the grid's tests visit the cells under each
 sprite only); on hardware they are 6 times slower than in Azahar against 4 for the rest, which points to
 memory access (the map's columns and blocks, the grid's lists), which Azahar does not model.
+
+### Pacing
+
+The screens refresh at 59.83 Hz (4481136 ticks of the system clock), so FRAME LIMIT 30 is a frame every 2
+refreshes, 29.9 per second, while the original steps its logic every 33 ms, 30.3 per second. On the 3DS the
+frame loop runs on the top screen's refresh rather than on that timer (`NextOnRefresh` in
+`port/src/frame_loop.cpp`, the waits in `c3d_context.cpp`): it waits for the refresh (citro3d's frame counters),
+begins a frame every 2 refreshes (FRAME LIMIT 30; every refresh at 60, a test value the menu leaves out) and
+steps the logic every 2 refreshes, 29.9 steps per second, 1.3 % slower than the original, as console games
+run on their screen's clock. Waiting for the refresh is the frame loop's only sleep, and the frame's first draw
+then does not wait again. citro3d's frame end hook holds the frame until the refresh after its start before it
+goes to the GPU, so that it shows 2 refreshes after its start whatever its cost. A frame that ends late, but
+within its next slot, begins at the next refresh and the delay is dropped (no catch-up step: the game slows down
+by that much); after a longer stall the steps catch up, 4 at most. The refreshes during HOME or sleep are not
+counted. `GTA2_UNCAPPED` keeps the timer. The PC port is unchanged: this code is 3DS only.
+
+With the timer, the frame's start drifted across the refresh, and the wait for the refresh fell between the
+step and the draw: about every 2.6 s a frame came 1 refresh after the last and one 3 after, with 2 steps.
+An Old 3DS driving at night (`GTA2_3DS_PROF`) ran 29.3 frames per second, 1.03 steps per frame, 6 % of frames late,
+with 10.0 ms of `wait.vsync` and 2.2 of `loop.next` per frame. In Azahar, the drive at night, with busy loops
+in each step and draw (a measurement build) standing for the console's times or half of them:
+
+| Azahar, drive at night | Frames/s | Steps per frame | Frames off their 2 refreshes | Frame start after the refresh |
+|---|---|---|---|---|
+| timer, console-like (+6.4 ms a step, +6.0 a draw) | 29.4 | 1.03 | 4 % | 10.7 ms (0 to 16.7) |
+| refresh, console-like | 29.6 | 1.00 | 2 % | 0.01 ms |
+| timer, +3.5 and +3.5 ms | 30.2 | 1.01 | 3 % (1 refresh or 3) | 8.7 ms |
+| refresh, +3.5 and +3.5 ms | 29.9 | 1.00 | 0 % | 0.01 ms |
+
+The frames still off their slot took longer than 2 refreshes (steps or flips of 25 to 40 ms in Azahar, the same
+with either pacing). At FRAME LIMIT 60 (allowed in a measurement build) the frames run at 59.1 per
+second and the logic at 29.92 steps; after `GTA2_TEST_SUSPEND` the second after the resume runs 31 steps.
+On the console, `GTA2_3DS_PROF`: `refreshes` about 2.00 and `steps` 1.00 per frame, `late` near the share of
+frames whose work passes 33 ms, `loop.next` near 0 and its sleep in `wait.vsync`, `wait.bottom` near 0 (the
+bottom screen's refresh comes with the top's: if not, it is the time waiting for both costs).
 
 ## Next steps
 
