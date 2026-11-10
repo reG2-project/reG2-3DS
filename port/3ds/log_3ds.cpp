@@ -93,7 +93,7 @@ void Finish()
     LightLock_Unlock(&sLock);
 }
 
-// In a constructor: once the game runs, newlib's 32 atexit slots are full and atexit fails.
+// Registered early: exit runs the handlers in reverse order, so the lines the others log are written too.
 __attribute__((constructor(101))) void Init()
 {
     LightLock_Init(&sLock);

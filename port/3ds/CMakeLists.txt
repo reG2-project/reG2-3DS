@@ -26,6 +26,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_compile_options(
     -fms-extensions -fshort-wchar -fsigned-char
     -fno-strict-aliasing -fwrapv -ftrivial-auto-var-init=zero -fno-delete-null-pointer-checks -w -Wno-address-of-temporary -Wno-c++11-narrowing)
+# Static destructors would fill newlib's 32 atexit slots, so that the port's exit handlers fail, and would run
+# while the sound threads still use those statics.
+add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-fno-c++-static-destructors>)
 add_compile_definitions(_CRT_SECURE_NO_WARNINGS _CRT_NON_CONFORMING_SWPRINTFS GTA2_PORT GTA2_PORT_SDL __NT__)
 
 find_package(SDL3 REQUIRED CONFIG)
