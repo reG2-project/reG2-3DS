@@ -585,6 +585,7 @@ struct C3DRenderer::Impl : HudTheme::Sink
         u32 state;
         ScreenRect scissor;
         bool scroll;
+        u32 vertsHash; // VertsHash of its vertices, 0 until known
     };
     std::vector<HudBatch> mHudBatches;
     u32 mHudPanels; // a bit per HudTheme::Part drawn in this frame
@@ -1468,7 +1469,7 @@ void C3DRenderer::Impl::Flush()
     PORT_PROF(kFlush);
     if (mBatchRule)
     {
-        const HudBatch batch = {mBatchStart, n, mBatchTex, mBatchState, mBatchScissor, mBatchRule->scroll};
+        const HudBatch batch = {mBatchStart, n, mBatchTex, mBatchState, mBatchScissor, mBatchRule->scroll, 0};
         mHudBatches.push_back(batch);
         mBatchStart = mVertCount;
         return;
@@ -1509,6 +1510,17 @@ f32 C3DRenderer::Impl::ScrollOffset()
     return (f32)Round(overflow - scrolled);
 }
 
+static u32 VertsHash(const C3DVertex* pVerts, s32 count)
+{
+    u32 h = 2166136261u;
+    const u32* pWords = reinterpret_cast<const u32*>(pVerts);
+    for (size_t w = 0; w < count * (sizeof(C3DVertex) / 4); w++)
+    {
+        h = (h ^ pWords[w]) * 16777619u;
+    }
+    return h;
+}
+
 // What the bottom screen would show: its panels, scroll and HUD batches, with their vertices and textures.
 u32 C3DRenderer::Impl::BottomSignature(f32 scroll, u32 minimap) const
 {
@@ -1526,11 +1538,7 @@ u32 C3DRenderer::Impl::BottomSignature(f32 scroll, u32 minimap) const
         mix((u32)b.scissor.x0 | ((u32)b.scissor.y0 << 16));
         mix((u32)b.scissor.x1 | ((u32)b.scissor.y1 << 16));
         mix(b.scroll);
-        const u32* pWords = reinterpret_cast<const u32*>(mVerts + b.start);
-        for (size_t w = 0; w < b.count * (sizeof(C3DVertex) / 4); w++)
-        {
-            mix(pWords[w]);
-        }
+        mix(b.vertsHash ? b.vertsHash : VertsHash(mVerts + b.start, b.count));
     }
     return h;
 }
@@ -1622,6 +1630,7 @@ void C3DRenderer::Impl::EndKeep()
     for (size_t i = 0; i < mKeptBatches.size(); i++)
     {
         mKeptBatches[i].start -= mKeepingVert;
+        mKeptBatches[i].vertsHash = VertsHash(&mKeptVerts[mKeptBatches[i].start], mKeptBatches[i].count);
         mKeptVersions.push_back(mKeptBatches[i].tex ? mKeptBatches[i].tex->mVersion : 0);
     }
 }

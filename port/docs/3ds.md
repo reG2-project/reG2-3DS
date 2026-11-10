@@ -218,7 +218,9 @@ markers). citro3d transfers and swaps a screen only when its target was drawn on
 keeps its last frame. The game leaves the bottom screen's HUD draws out of the frames in between
 (`PortHudScreen::Drawn`, `IRenderer::HudScreenDue`). The brief's text, drawn glyph by glyph (136 draws for a long
 one), is drawn by the game once: while its text stays the same, the renderer copies the vertices and batches it kept
-(`PortHudScreen::Keep`, `IRenderer::KeepHudGroup`), unless one of their textures changed.
+(`PortHudScreen::Keep`, `IRenderer::KeepHudGroup`), unless one of their textures changed; the signature takes the
+hashes of those batches' vertices made when they were kept (with a brief shown, the signature takes 0.03 ms per
+frame in Azahar rather than 0.09 when it hashed them every time).
 
 ## Build
 
