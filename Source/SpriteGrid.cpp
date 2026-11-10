@@ -663,6 +663,86 @@ void SpriteGrid::AddToRowBuckets(s32 y_pos, Sprite* pSprite)
     }
 }
 
+#if defined(GTA2_PORT)
+// The grid that RemoveFromRegionBuckets with the rect left to bottom, then AddToRegionBuckets, would leave
+// with no grid use in between: mostly the sprite's links moved to the front of their cells.
+void SpriteGrid::ReAddToRegionBuckets(Sprite* pSprite, s32 left, s32 right, s32 top, s32 bottom)
+{
+    pSprite->UpdateCollisionBoundsIfNeeded();
+    pSprite->mpCollisionShape->SetCurrentRect();
+    if (gSpriteGrid_left != left || gSpriteGrid_right != right || gSpriteGrid_top != top || gSpriteGrid_bottom != bottom)
+    {
+        gSpriteGrid_left = left;
+        gSpriteGrid_right = right;
+        for (s32 y_pos = top; y_pos <= bottom; ++y_pos)
+        {
+            RemoveFromRowBuckets(y_pos, pSprite);
+        }
+        AddToRegionBuckets(pSprite);
+        return;
+    }
+    for (s32 y_pos = top; y_pos <= bottom; ++y_pos)
+    {
+        if (!MoveToFrontInRow(y_pos, pSprite))
+        {
+            RemoveFromRowBuckets(y_pos, pSprite);
+            AddToRowBuckets(y_pos, pSprite);
+        }
+    }
+}
+
+// False, with the row as it was, unless the cells gSpriteGrid_left to gSpriteGrid_right follow each other
+// in it and each holds the sprite.
+bool SpriteGrid::MoveToFrontInRow(s32 y_pos, Sprite* pSprite)
+{
+    const s32 kMaxCells = 8;
+    GridCell* apCells[kMaxCells];
+    GridSpriteLink* apPrevLinks[kMaxCells];
+    const s32 count = gSpriteGrid_right - gSpriteGrid_left + 1;
+    if (count <= 0 || count > kMaxCells)
+    {
+        return false;
+    }
+    GridCell* pCell = this->mRows[y_pos];
+    while (pCell && pCell->mX < gSpriteGrid_left)
+    {
+        pCell = pCell->mpNext;
+    }
+    for (s32 i = 0; i < count; ++i)
+    {
+        if (!pCell || pCell->mX != gSpriteGrid_left + i)
+        {
+            return false;
+        }
+        GridSpriteLink* pPrevLink = NULL;
+        GridSpriteLink* pLink = pCell->mpSpriteLinks;
+        while (pLink && pLink->mpSprite != pSprite)
+        {
+            pPrevLink = pLink;
+            pLink = pLink->mpNext;
+        }
+        if (!pLink)
+        {
+            return false;
+        }
+        apCells[i] = pCell;
+        apPrevLinks[i] = pPrevLink;
+        pCell = pCell->mpNext;
+    }
+    for (s32 i = 0; i < count; ++i)
+    {
+        if (apPrevLinks[i])
+        {
+            GridSpriteLink* pLink = apPrevLinks[i]->mpNext;
+            apPrevLinks[i]->mpNext = pLink->mpNext;
+            pLink->mpNext = apCells[i]->mpSpriteLinks;
+            apCells[i]->mpSpriteLinks = pLink;
+        }
+    }
+    return true;
+}
+#endif
+
 MATCH_FUNC(0x478590)
 GridCell* SpriteGrid::GetFirstXCellInRow(s32 y_pos) const
 {

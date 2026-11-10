@@ -2,6 +2,7 @@
 #if defined(GTA2_PORT)
 #include "../port/src/twin_stick.hpp"
 #include "../port/src/prof.hpp"
+#include "../port/src/logic_opts.hpp"
 #else
 #define PORT_PROF(part)
 #define PORT_PROF_AS(expr)
@@ -5876,7 +5877,24 @@ bool Car::PoolUpdate()
         return TrainUpdate();
     }
 
+#if defined(GTA2_PORT)
+    // Nothing before the re-add below uses the sprite grid for such a car: it stays in it.
+    const bool bKeepInGrid = !this->mPhysics && PortLogic::On(PortLogic::kGridKeep) && !IsMarkedForDespawn() &&
+        this->mDespawnStatus != car_despawn_status::despawning_5 && !IsCrushing() && !this->mAttachments.mP18 &&
+        !IsTruckCab() && !IsTvVan() && this->mWreckCountdown != 1;
+    s32 grid_rect[4];
+    if (bKeepInGrid)
+    {
+        this->mCarSprite->mpCollisionShape->SetCurrentRect();
+        grid_rect[0] = gSpriteGrid_left;
+        grid_rect[1] = gSpriteGrid_right;
+        grid_rect[2] = gSpriteGrid_top;
+        grid_rect[3] = gSpriteGrid_bottom;
+    }
+    if (this->mDespawnStatus != car_despawn_status::despawning_5 && !bKeepInGrid)
+#else
     if (this->mDespawnStatus != car_despawn_status::despawning_5)
+#endif
     {
         PORT_PROF_SECTION(kCarsCarGrid);
         gSpriteGrid_1->RemoveFromRegionBuckets(this->mCarSprite);
@@ -5951,6 +5969,13 @@ bool Car::PoolUpdate()
             }
         }
         PORT_PROF_SECTION(kCarsCarGrid);
+#if defined(GTA2_PORT)
+        if (bKeepInGrid)
+        {
+            gSpriteGrid_1->ReAddToRegionBuckets(mCarSprite, grid_rect[0], grid_rect[1], grid_rect[2], grid_rect[3]);
+            return false;
+        }
+#endif
         gSpriteGrid_1->AddToRegionBuckets(mCarSprite);
     }
     return false;
