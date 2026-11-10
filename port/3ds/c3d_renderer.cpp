@@ -1553,7 +1553,9 @@ void C3DRenderer::Impl::DrawHud()
         mHudBatches.clear();
         return;
     }
-    if (!BottomDue())
+    // While the pause menu is open the city's map takes the whole screen, in every frame to follow the stylus.
+    const u32 pauseMap = Minimap::UpdatePause(*mOwner);
+    if (!BottomDue() && !pauseMap)
     {
         mHudBatches.clear();
         mHudPanels = 0;
@@ -1562,9 +1564,9 @@ void C3DRenderer::Impl::DrawHud()
     }
     const f32 scroll = ScrollOffset();
     // The minimap shows with the HUD, in game only.
-    const u32 minimap = mHudPanels && mMinimap != kMinimapOff ? Minimap::Update(*mOwner) : 0;
+    const u32 minimap = !pauseMap && mHudPanels && mMinimap != kMinimapOff ? Minimap::Update(*mOwner) : 0;
     const bool wide = mMinimap == kMinimapWide && !(mHudPanels & (1u << HudTheme::kBrief));
-    const u32 sig = BottomSignature(scroll, minimap ^ wide);
+    const u32 sig = pauseMap ? pauseMap : BottomSignature(scroll, minimap ^ wide);
     if (mBottomFrame && sig == mBottomSig)
     {
         mHudBatches.clear();
@@ -1580,6 +1582,13 @@ void C3DRenderer::Impl::DrawHud()
     mTargetH = kBottomH;
     C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, mUniProjection, &mBottomProjection);
     mStateValid = false;
+    if (pauseMap)
+    {
+        Minimap::DrawPause(*mOwner, *this);
+        Flush();
+        mHudBatches.clear();
+        mHudPanels = 0;
+    }
     if (mHudPanels)
     {
         HudTheme::Draw(*mOwner, *this, mPanels, mHudPanels);

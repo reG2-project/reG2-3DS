@@ -163,7 +163,7 @@ width and scrolls when longer. `port/3ds/hud_theme.*` draws a recessed panel beh
 frame, over a dark backdrop made once per city from its most common plain pavement tile (one 8 KB
 texture, 2 draws per frame). The world stays on the top screen, with the zone and car names, pickup
 texts, big messages and arrows. The frontend and the pause menu stay on the top screen, legible but small
-(4 to 5 pixels high); the bottom screen is black there.
+(4 to 5 pixels high); the bottom screen is black in the frontend and shows the city's map in the pause menu.
 
 The bottom screen's last row holds the brief on the left and a minimap on the right (`port/3ds/minimap*`):
 the tube frame E of the design study (`port/docs/minimap`), north up, 21x21 blocks around the player at 4
@@ -210,6 +210,18 @@ game's sprites for the markers a 32 KB RGBA8 sheet made per city (the cross's sh
 The game's headers and the renderer's clash, so `minimap_game.cpp` reads the game and `minimap.cpp` draws.
 `GTA2_3DS_MINIMAP=wide` gives the map the whole row while no brief shows; `off` leaves it out and gives the
 row to the brief.
+
+While the pause menu is open, the bottom screen shows the whole city instead of the HUD
+(`Minimap::UpdatePause`, `DrawPause`): the same layers and markers from the same textures, the map scaled
+through its UVs at 1, 2 (the default), 4 or 8 pixels per block, centred on the player as the menu opens.
+A marker off the screen goes on its edge, on the ray from the screen's middle. Dragging the stylus pans it
+(`hidTouchRead`), held within the city, which stays in the middle at 1 pixel per block where it is narrower
+than the screen. Two buttons bottom right, squares of the frame's tube around the pause font's `+` and its
+bar for the `-` (the font has none), zoom on a press, sunk while held and dimmed at the last zoom; the zoom
+stays for the next pause. Under 2 pixels per block the map is filtered, so a pixel is the mean of a block's
+2x2 texels. It adds no texture: the two glyphs go in the markers' sheet. It is drawn in every frame in
+which it changes, to follow the stylus. SDL's 3DS driver makes mouse events of touches only for a window full
+screen on the bottom screen, which the game has none of, so touches reach neither the game nor the menu.
 
 The bottom screen is drawn only when what it shows changed, in every other frame at most (15 per second at
 30): a signature of the HUD's batches (vertices, textures and their uploads, states), its panels, the
@@ -377,7 +389,7 @@ the same buttons on foot and in a vehicle; SDL's 3DS mapping gives the buttons b
 | Y, X | specials 1 and 2 | specials 1 (horn, siren) and 2 |
 | D-pad left, right | previous, next weapon | the roof gun's turn (fire truck, tank, gun jeep), else the weapons |
 | D-pad up, down | special 3, nothing | special 3, attack |
-| START | pause menu | |
+| START | pause menu, with the city's map on the bottom screen: drag it with the stylus, + and - zoom | |
 | SELECT | back in menus | the next radio station (the PC's F1) |
 | ZR, ZL (New 3DS) | attack, nothing | attack, nothing |
 | C-stick (New 3DS) | MODERN: aims (TWIN STICK's aim) | MODERN: turns the roof gun |
