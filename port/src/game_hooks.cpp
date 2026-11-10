@@ -38,6 +38,23 @@ void port_TestCar(int model, float dx, float dy)
     pPed->set_target_car_door(0);
 }
 
+const char* port_TestTeleport(float x, float y, float degrees)
+{
+    Player* pPlayer = port_GameRunning() ? gGame_0x40->mLocalPlayer : NULL;
+    Ped* pPed = pPlayer ? pPlayer->mPlayerPed : NULL;
+    Car* pCar = pPed ? pPed->get_car() : NULL;
+    if (!pPed || (!pCar && !pPed->mGameObject))
+    {
+        return "nobody";
+    }
+    if (pCar)
+    {
+        pCar->mCarSprite->set_ang_lazy(Ang16(static_cast<s32>(degrees * 4.0f) % 1440));
+    }
+    pPed->TeleportToCoord(Fix16(x), Fix16(y));
+    return pCar ? (pCar->mPhysics ? "vehicle" : "parked vehicle") : "player";
+}
+
 bool port_FrontendActive()
 {
     return gFrontend != NULL;

@@ -11,6 +11,7 @@
 //                                                   the wheel one notch; "focus.lost" and "focus.gained"
 //                                                   for the window's keyboard focus, as with Alt+Tab
 //   GTA2_EXIT_AT=<frame>                            quit at that frame
+//   GTA2_TEST_AT=<frame>:<x>:<y>[:<degrees>],...     the player (or his vehicle, turned) moved to that block point
 // Frames count Vid_FlipBuffers calls, but logic steps while the game runs (port_FrameCount), so the same
 // script presses the same keys on the same game step at any frame rate.
 #include "port_platform.hpp"
@@ -68,6 +69,14 @@ unsigned sCarAt;
 int sCarModel;
 float sCarDx = 1.5f;
 float sCarDy;
+struct Move
+{
+    unsigned mFrame;
+    float mX;
+    float mY;
+    float mDegrees;
+};
+std::vector<Move> sMoves;
 
 void Load()
 {
@@ -78,6 +87,14 @@ void Load()
     if (const char* car = getenv("GTA2_TEST_CAR"))
     {
         sscanf(car, "%u:%d:%f:%f", &sCarAt, &sCarModel, &sCarDx, &sCarDy);
+    }
+    for (const char* at = getenv("GTA2_TEST_AT"); at && *at; at = strchr(at, ',') ? strchr(at, ',') + 1 : "")
+    {
+        Move m = {};
+        if (sscanf(at, "%u:%f:%f:%f", &m.mFrame, &m.mX, &m.mY, &m.mDegrees) >= 3)
+        {
+            sMoves.push_back(m);
+        }
     }
     const char* spec = getenv("GTA2_INPUT");
     if (!spec)
@@ -306,6 +323,17 @@ void port_InjectTestInput(unsigned frame)
         sCarAt = 0;
         port_TestCar(sCarModel, sCarDx, sCarDy);
         SDL_Log("test input: frame %u car %d", frame, sCarModel);
+    }
+    for (auto it = sMoves.begin(); it != sMoves.end() && port_GameRunning();)
+    {
+        if (frame < it->mFrame)
+        {
+            ++it;
+            continue;
+        }
+        const char* pWhat = port_TestTeleport(it->mX, it->mY, it->mDegrees);
+        SDL_Log("test input: frame %u %s at %g %g heading %g", frame, pWhat, it->mX, it->mY, it->mDegrees);
+        it = sMoves.erase(it);
     }
     if (sExitAt && frame >= sExitAt)
     {

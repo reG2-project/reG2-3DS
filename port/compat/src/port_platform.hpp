@@ -115,6 +115,9 @@ bool port_DrivingRoofGun();
 bool port_EnteringCar();
 // Tests (GTA2_TEST_CAR): a car of that model at that offset from the player, in blocks, who then gets in.
 void port_TestCar(int model, float dx, float dy);
+// Tests (GTA2_TEST_AT): the player, or his vehicle turned to that heading (degrees), moved to that point in blocks.
+// Returns what moved.
+const char* port_TestTeleport(float x, float y, float degrees);
 // The player's vehicle: how far RT, LT and the stick press FORWARD, BACKWARD and the steering, 0 to 1, 1 for
 // a key or the d-pad (pad.cpp).
 void port_PadVehicleInput(float* pForward, float* pBackward, float* pSteer);

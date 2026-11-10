@@ -474,7 +474,12 @@ Tests: `test/pad_input.txt` presses buttons, one `<first frame> <last frame> <he
 part of the way, as `hidCircleRead` gives it (up positive, about 154 at the end of the travel), for example
 `600 700 0 -109 109` for up and left. With `KEY_TOUCH` (100000) the two numbers are the stylus's point on the
 bottom screen, and two more its point on the last frame, for a drag: `900 960 100000 160 120 60 60`. `GTA2_TEST_CAR=<frame>:<model>[:<dx>:<dy>]`
-puts a car of that model (54 the tank) beside the player at that frame, who then gets in.
+puts a car of that model (54 the tank, 42 the R-type) beside the player at that frame, who then gets in, and
+`GTA2_TEST_AT=<frame>:<x>:<y>[:<degrees>],...` moves the player there (in blocks), or his vehicle turned to that
+heading (0 north, 90 west, 180 south, 270 east); the log names what moved. The menus' presses of `padA.txt` reach
+the game too (A gets in and out of a car), so a drive starts after them: the avenue south of the Loonies' easy
+phones in Downtown, east then west, is `GTA2_TEST_AT=900:56:50.5,1150:56.5:50.5:270,1950:173:54.5:90`,
+`GTA2_TEST_CAR=950:42:1.5:0` and R held (`1160 1940 200`, `1960 2750 200`).
 
 ## Buttons
 
