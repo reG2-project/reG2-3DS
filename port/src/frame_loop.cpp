@@ -59,6 +59,8 @@ void port_SetGameFlip(bool)
 // The top screen's refreshes since the last call, once the next one has come, and their period (port/3ds/c3d_context.cpp).
 unsigned port_WaitRefresh();
 unsigned long long port_RefreshNs();
+// The frame begun is presented once that many more refreshes have come, at the end of its slot.
+void port_HoldPresent(unsigned refreshes);
 #endif
 
 namespace PortFrameLoop
@@ -151,6 +153,7 @@ Action NextOnRefresh()
     sUnstepped %= perStep;
     sAlpha = static_cast<f32>(sUnstepped) / perStep;
     sDrawDue = true;
+    port_HoldPresent(perFrame - 1);
     return NextOnRefresh();
 }
 #endif
