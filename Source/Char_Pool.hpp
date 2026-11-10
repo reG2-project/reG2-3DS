@@ -144,6 +144,9 @@ class PedPool
             ++mPool.field_X_count;
 
             Ped* pNext = pCurrItem->mpNext;
+#if defined(GTA2_PORT)
+            PortPrefetch::Next(pNext);
+#endif
 
             if (pCurrItem->PoolUpdate())
             {
