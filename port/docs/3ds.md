@@ -661,6 +661,29 @@ by a few samples (a run with both options off did once, the event counters' slow
 cars, peds and `rand()` never move. On the console, `GTA2_3DS_PROF_AB=1` with `GTA2_3DS_PROF_PMU=1`
 compares both options on and off in one session, with the cache misses and stall cycles of each part.
 
+Phases over all cars. A cache simulation of the Old 3DS's L1 (16 KB of code) on the Linux port puts most of the
+step's instruction misses in the cars: each car's AI and physics run 8 to 18 KB of code, which the next car's
+evicts. Running each phase for every car before the next (all the AI, then all the physics) is not exact, as
+a car's update reads what the cars before it wrote in the same step: the car is out of the sprite grid while
+it updates and back in at its new place after, the AI's probes (`FindCollidingSpritePreferType`) see the earlier
+cars there, a collision sets the other car's `mCarInCollision`, which its AI reads later in that step and then
+clears, and the collision pushes and damages it before its AI runs. The scripted Linux drive and walk (2000
+steps each) have 364 and 367 AI probe hits on a car already moved in that step, and 17 and 31 collisions
+flagging a car still to come. Both phases draw from `rand()` (the AI 4 and 6 times, the physics 265 and 48; none
+of the AI's draws followed a physics draw of the same step there, but nothing bounds it). The peds are worse:
+the ped AI and its movement (`Ped::UpdateCharB4`) pass per ped globals (`gDistanceToTarget`, `gTargetSearchMode`)
+and draw 24 and 7 numbers a step driving, 20 of the AI's after a movement draw. A test build that runs the cars' AI first
+(each car out of the grid and back around it) changes the game state between steps 350 and 400 of the drive.
+Even inexact, the split buys little: with the AI and the physics each in a pass of its own the step's
+instruction misses fall 23 % driving and 15 % walking, against 31 % for the exact code layout (PGO), and its
+data misses rise 12 and 9 %.
+
+The system core cannot take the car physics either: each car's physics is a link in that chain (the next
+cars' AI, the peds it runs over, the objects, explosions and particles it makes, `rand()`, the collision sound
+queue), and the rest of the step reads the cars where the physics left them, so any overlap changes the
+results. Only work on state that nothing writes while it runs could go there, joined before the next step,
+and at the application's 30 % of that core it runs 3 to 5 times slower than here (the texture worker).
+
 ### Pacing
 
 The screens refresh at 59.83 Hz (4481136 ticks of the system clock), so FRAME LIMIT 30 is a frame every 2
