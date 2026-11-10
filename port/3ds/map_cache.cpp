@@ -86,6 +86,8 @@ struct Chunk
     std::vector<TexUse> textures;
     std::vector<TileUse> tiles;
     std::vector<u16> lids; // [layer][y][x], 0 where the cache has no lid
+    // A bit per cell (x) of each row: RenderBlockAt would draw more than a lid the cache has.
+    u16 walk[kLayers][kChunkSize];
 };
 
 struct Quad
@@ -100,6 +102,7 @@ struct Quad
 
 bool sOn;
 bool sRead;
+s32 sLayer;
 bool sFrameOn; // the cache takes lids in this frame
 bool sLit;
 u32 sFrame;
@@ -116,7 +119,7 @@ std::vector<MapCacheMesh::Draw> sDraws;
 std::vector<Quad> sQuads;
 
 // Per kLogEvery frames.
-u32 sLogFrames, sBuilds, sDrops, sQuadsDrawn, sDrawCalls, sMismatches, sCpuLit, sInvalid;
+u32 sLogFrames, sBuilds, sDrops, sQuadsDrawn, sDrawCalls, sMismatches, sCpuLit, sInvalid, sCells, sSkipped;
 uint64_t sBuildTicks, sBuildTexTicks, sBuildMax, sDrawTicks, sBeginTicks;
 
 void DropChunk(Chunk& c)
@@ -144,6 +147,7 @@ void DropChunk(Chunk& c)
     c.tiles.clear();
     c.missing.clear();
     std::vector<u16>().swap(c.lids);
+    memset(c.walk, 0xFF, sizeof(c.walk));
 }
 
 void DropAll()
@@ -403,6 +407,21 @@ void Build(Chunk& c, s32 cx, s32 cy)
             sMeshBytes += c.bytes;
         }
     }
+    for (s32 z = 0; z < kLayers; z++)
+    {
+        for (s32 ly = 0; ly < kChunkSize; ly++)
+        {
+            u16 row = 0;
+            for (s32 lx = 0; lx < kChunkSize; lx++)
+            {
+                const gmp_block_info* pBlock = gMap_0x370->GetBlock(x0 + lx, y0 + ly, z);
+                const bool lidOnly = pBlock && FlatBlock(pBlock) && !pBlock->mLeft && !pBlock->mRight && !pBlock->mTop &&
+                                     !pBlock->mBottom && (!pBlock->mLid || c.lids[(z * kChunkSize + ly) * kChunkSize + lx]);
+                row |= (u16)(pBlock && !lidOnly ? 1u << lx : 0);
+            }
+            c.walk[z][ly] = row;
+        }
+    }
     c.built = true;
     c.dirty = false;
     c.valid = true;
@@ -516,13 +535,13 @@ void Log()
     // Per frame but for the builds.
     Log3DS_Printf("MAPCACHE frames %u built %d builds %u drops %u quads %.1f draws %.1f mismatch %u cpulit %u invalid %u "
                   "build.ms %.2f (textures %.2f, slowest %.2f) draw.ms %.3f (flush %.3f switch %.3f draws %.3f "
-                  "[first DrawArrays %.3f, others %.3f] back %.3f) begin.ms %.3f mesh.kb %u linear.free.kb %u\n",
+                  "[first DrawArrays %.3f, others %.3f] back %.3f) begin.ms %.3f mesh.kb %u linear.free.kb %u cells %.1f skipped %.1f\n",
                   (unsigned)sLogFrames, (int)sBuilt, (unsigned)sBuilds, (unsigned)sDrops, sQuadsDrawn / n, sDrawCalls / n,
                   (unsigned)sMismatches, (unsigned)sCpuLit, (unsigned)sInvalid, MapCacheMesh::TicksToMs(sBuildTicks),
                   MapCacheMesh::TicksToMs(sBuildTexTicks), MapCacheMesh::TicksToMs(sBuildMax),
                   MapCacheMesh::TicksToMs(sDrawTicks) / n, ms[0], ms[1], ms[2], ms[4], ms[5], ms[3],
-                  MapCacheMesh::TicksToMs(sBeginTicks) / n, (unsigned)(sMeshBytes / 1024), (unsigned)MapCacheMesh::LinearFreeKb());
-    sLogFrames = sBuilds = sDrops = sQuadsDrawn = sDrawCalls = sMismatches = sCpuLit = sInvalid = 0;
+                  MapCacheMesh::TicksToMs(sBeginTicks) / n, (unsigned)(sMeshBytes / 1024), (unsigned)MapCacheMesh::LinearFreeKb(), sCells / n, sSkipped / n);
+    sLogFrames = sBuilds = sDrops = sQuadsDrawn = sDrawCalls = sMismatches = sCpuLit = sInvalid = sCells = sSkipped = 0;
     sBuildTicks = sBuildTexTicks = sBuildMax = sDrawTicks = sBeginTicks = 0;
 }
 } // namespace
@@ -542,6 +561,7 @@ void BeginLayer(s32 z, s32 minX, s32 minY, s32 maxX, s32 maxY)
     {
         return;
     }
+    sLayer = z;
     const uint64_t t0 = MapCacheMesh::Ticks();
     minX = minX < 0 ? 0 : minX;
     minY = minY < 0 ? 0 : minY;
@@ -634,6 +654,29 @@ bool TakeLid(u16 lid)
         c.dirty = true;
     }
     return false;
+}
+
+bool SkipCell(s32 x, s32 y)
+{
+    if (!sFrameOn)
+    {
+        return false;
+    }
+    sCells++;
+    if (x < 0 || x > 255 || y < 0 || y > 255)
+    {
+        return false;
+    }
+    const Chunk& c = sChunks[y >> kChunkShift][x >> kChunkShift];
+    const s32 lx = x & (kChunkSize - 1), ly = y & (kChunkSize - 1);
+    if (!c.built || c.dirty || c.checkedFrame != sFrame || (c.walk[sLayer][ly] >> lx) & 1)
+    {
+        return false;
+    }
+    // A cached lid is drawn by EndLayer only in the chunks it draws this frame.
+    const bool skip = !c.lids[(sLayer * kChunkSize + ly) * kChunkSize + lx] || (c.drawn >> sLayer) & 1;
+    sSkipped += skip ? 1 : 0;
+    return skip;
 }
 
 void EndLayer(s32 z)

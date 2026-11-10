@@ -3512,7 +3512,7 @@ void MapRenderer::ClearDrawnTileCount()
 static inline void AddToDrawListByVal(MapRenderer* pThis, s32 x, s32 y)
 {
 #if defined(GTA2_PORT)
-    if (pThis->mCurrDrawLayerSize >= static_cast<s32>(GTA2_COUNTOF(pThis->mDrawList)))
+    if (pThis->mCurrDrawLayerSize >= static_cast<s32>(GTA2_COUNTOF(pThis->mDrawList)) || PortMapCache::SkipCell(x, y))
     {
         return;
     }

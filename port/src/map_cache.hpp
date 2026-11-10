@@ -11,6 +11,8 @@ namespace PortMapCache
 void BeginLayer(s32 z, s32 minX, s32 minY, s32 maxX, s32 maxY);
 // RenderFlatBlock's lid at gXCoord, gYCoord, gZCoord: true when the cache draws it at the end of the layer.
 bool TakeLid(u16 lid);
+// RenderBlockAt(x, y) on the layer would draw nothing but a lid the cache draws: the walk can leave the cell out.
+bool SkipCell(s32 x, s32 y);
 // After the layer's blocks: its cached lids, over the walls and under the next layer's sprites.
 void EndLayer(s32 z);
 // The block column at (x, y) changed.
@@ -20,6 +22,10 @@ inline void BeginLayer(s32, s32, s32, s32, s32)
 {
 }
 inline bool TakeLid(u16)
+{
+    return false;
+}
+inline bool SkipCell(s32, s32)
 {
     return false;
 }
