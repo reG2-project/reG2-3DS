@@ -719,7 +719,7 @@ brief's text once (see Renderer). Azahar, bil: standing with a long brief, 1.6 t
 3.3 ms in a frame, now 0.66); without it 0.37 became 0.21; driving 0.44 became 0.24 (at most 1.6, now 0.75).
 
 The map (`draw.map`, about 10 ms a frame on the console driving at night, 300 primitives with the sprites drawn
-between its layers). `GTA2_3DS_MAPCACHE=1` (off by default, `port/3ds/map_cache.cpp`) builds the flat lids of each
+between its layers). `GTA2_3DS_MAPCACHE` (on unless 0, `port/3ds/map_cache.cpp`; on an Old 3DS, driving at night, draw.map 11.0 to 8.6 ms on average and 17.9 to 10.2 in the worst block, walking 6.9 to 7.2) builds the flat lids of each
 16x16 block chunk once into a mesh in linear memory, drawn at the end of their layer by a vertex shader of its own
 (`map_cache.v.pica`), a draw call per chunk and atlas page: a lid only overlaps the faces of nearer blocks of its
 layer, which the walk draws first, so the picture stays the same. Animated or remapped tiles, textures not converted

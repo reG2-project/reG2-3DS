@@ -715,7 +715,7 @@ bool Enabled()
     if (!sRead)
     {
         const char* pEnv = getenv("GTA2_3DS_MAPCACHE");
-        sOn = pEnv && atoi(pEnv) != 0;
+        sOn = !pEnv || atoi(pEnv) != 0;
         sRead = true;
     }
     return sOn;
