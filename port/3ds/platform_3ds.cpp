@@ -84,10 +84,15 @@ static void SDLCALL LogToStderr(void*, int, SDL_LogPriority, const char* message
     fprintf(stderr, "%s\n", message);
 }
 
-// gta2_env.txt: KEY=VALUE lines, the environment the port's options and tests read.
-static void LoadEnvironment()
+// gta2_env.txt, or gta2_env_<name>.txt first for a .3dsx not named gta2: KEY=VALUE lines, the environment the
+// port's options and tests read.
+static void LoadEnvironment(const char* pOwnName)
 {
-    FILE* f = fopen("gta2_env.txt", "r");
+    FILE* f = fopen(pOwnName, "r");
+    if (!f)
+    {
+        f = fopen("gta2_env.txt", "r");
+    }
     if (!f)
     {
         return;
@@ -171,18 +176,18 @@ static bool TryLaunchFolder()
     return TryFolder(dir);
 }
 
-// gta2_log.txt, or gta2_log_<name>.txt for a .3dsx not named gta2 (so builds side by side keep their logs).
-static void LogName(const char* pPath, char* pOut, size_t size)
+// <base>.txt, or <base>_<name>.txt for a .3dsx not named gta2 (so builds side by side keep their logs and settings).
+static void SideFileName(const char* pPath, const char* pBase, char* pOut, size_t size)
 {
     const char* pName = pPath ? strrchr(pPath, '/') : NULL;
     pName = pName ? pName + 1 : pPath;
     const size_t len = pName ? strcspn(pName, ".") : 0;
     if (len == 0 || (len == 4 && strncmp(pName, "gta2", 4) == 0))
     {
-        snprintf(pOut, size, "gta2_log.txt");
+        snprintf(pOut, size, "%s.txt", pBase);
         return;
     }
-    snprintf(pOut, size, "gta2_log_%.*s.txt", (int)(len < 64 ? len : 64), pName);
+    snprintf(pOut, size, "%s_%.*s.txt", pBase, (int)(len < 64 ? len : 64), pName);
 }
 
 // A message on the top screen until START, before SDL owns the screens.
@@ -279,12 +284,15 @@ __attribute__((constructor(100))) static void StartUp()
         return;
     }
     // The log: stderr and SDL's, unbuffered so that it survives a crash.
+    const char* pPath = __system_argc > 0 ? __system_argv[0] : NULL;
     char logName[96];
-    LogName(__system_argc > 0 ? __system_argv[0] : NULL, logName, sizeof(logName));
+    SideFileName(pPath, "gta2_log", logName, sizeof(logName));
     freopen(logName, "w", stderr);
     setvbuf(stderr, NULL, _IONBF, 0);
     SDL_SetLogOutputFunction(LogToStderr, NULL);
-    LoadEnvironment();
+    char envName[96];
+    SideFileName(pPath, "gta2_env", envName, sizeof(envName));
+    LoadEnvironment(envName);
 #ifdef GTA2_OPENDSP
     StartDsp();
 #endif

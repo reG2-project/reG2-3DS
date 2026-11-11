@@ -447,7 +447,8 @@ Without the data in either, the top screen lists the folders tried and the files
 The game's own error boxes (a missing city file, for example), which SDL cannot show on the 3DS, appear on
 the bottom screen until START (`--wrap=SDL_ShowSimpleMessageBox`) rather than the game closing silently.
 The port's log is `gta2_log.txt` there (stderr and SDL's log), or `gta2_log_<name>.txt` for a `.3dsx` not named `gta2`.
-`gta2_env.txt` there sets environment variables, one `KEY=VALUE` per line: `GTA2_3DS_STATS=150` logs
+`gta2_env.txt` there (or `gta2_env_<name>.txt` first, for a `.3dsx` not named `gta2`) sets environment variables, one
+`KEY=VALUE` per line: `GTA2_3DS_STATS=150` logs
 memory and renderer times every 150 frames, `GTA2_LOOP_STATS=1` steps, frames and their times,
 `GTA2_3DS_FPS=1` shows frames and logic steps per second, the main thread's CPU time per frame
 (without its waits for the GPU and its sleeps) and the heap and linear memory in use in the top screen's corner,
@@ -539,7 +540,8 @@ and hour without touching the player's settings. `port/3ds/train_bench.sh <gta2_
 player's registry, `gta2_env_<city>_<night|day>.txt` for wil, ste and bil (`GTA2_REGISTRY`, `GTA2_3DS_PROF=150`,
 `GTA2_TEST_TRAIN=60:4500`) and the registry each names (`Debug`'s `skip_frontend`, `mapname`, `stylename` and
 `scriptname`, `day_start` 0 or 12). On the console: put them in `sdmc:/3ds/gta2/`, keep the usual `gta2_env.txt`
-aside, copy the wanted one to `gta2_env.txt` and start the game; it boots into the city, boards, rides for 4500
+aside, copy the wanted one to `gta2_env.txt` and start the game (or copy it as `gta2_env_<name>.txt` next to a copy of
+the `.3dsx` named `<name>.3dsx`, one Homebrew Launcher entry per ride); it boots into the city, boards, rides for 4500
 steps (2.5 minutes, the logic keeps 30 steps a second at any frame rate) and returns to the Homebrew Launcher. Then
 `python3 port/3ds/prof_summary.py gta2_log.txt` (its first block, the load and the boarding, is left out), with
 `--blocks` for each block's place along the line and `--slow` for the frames over 45 ms. A ride is repeatable:
