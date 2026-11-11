@@ -1,5 +1,5 @@
 # Renders the device frames (designs.BUILDERS3, or those named) into assets/frames/<name>, with their 9-slice and
-# status lamp in nine.json, and device_frames.png, a preview of them all. No game data needed.
+# status lamps in nine.json, and device_frames.png, a preview of them all. No game data needed.
 # usage: python3 -I make_frames.py <assets/frames dir> [I J ...]
 import json, os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -72,7 +72,7 @@ def main(out_dir, names):
         if names and d.name.split('_')[0] not in names:
             continue
         out = os.path.join(out_dir, d.name); os.makedirs(out, exist_ok=True)
-        anchor, lx0, ly0, lx1, ly1 = d.lamp_box
+        _, lx0, ly0, lx1, ly1 = d.lamps[0]
         for s in (1, 2):
             # The edges rebuilt from their strips, as the game draws them, then crushed to few colours like the HUD.
             ns = {k: v * s for k, v in d.nine.items()}
@@ -84,7 +84,7 @@ def main(out_dir, names):
             rgba_from(np.dstack([soft(grgb[..., i], s) for i in range(3)]), soft(ga, s)).save(os.path.join(out, 'glass_%dx.png' % s))
             m = soft((d.screen_sd < 0).astype(np.float32), s)
             Image.fromarray((m * 255).astype(np.uint8), 'L').save(os.path.join(out, 'screen_mask_%dx.png' % s))
-        d.nine['lamp'] = dict(anchor=anchor, x=lx0, y=ly0, w=lx1 - lx0, h=ly1 - ly0)
+        d.nine['lamps'] = [dict(anchor=a, x=x0, y=y0, w=x1 - x0, h=y1 - y0) for a, x0, y0, x1, y1 in d.lamps]
         with open(os.path.join(out, 'nine.json'), 'w') as f:
             json.dump(d.nine, f, indent=1)
             f.write('\n')

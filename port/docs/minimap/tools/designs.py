@@ -473,15 +473,21 @@ def _screw(c, x, y, r, rgb, top, kind='slot'):
         c.paint(sd_circle(c, x, y, r * 0.42) < 0, dk, add=-0.9)
 
 
-def _lamp_sprite(d, shape):
+def _lamp_sprite(d, shape, rib_x0=None):
     """The lit lamp the game draws over the frame's dark one, white glass to be tinted by a vertex colour."""
     c = Canvas(d.W, d.H)
     sd = shape(c)
     c.paint(sd < 0, (215, 215, 215), spec=1.3, shin=40, height=profile_round(-sd, 3.0, 1.4))
-    c.emit[sd < 0] += 0.1 + 0.25 * np.clip(-sd / 2.5, 0, 1)[sd < 0, None]
+    if rib_x0 is not None:
+        c.alb[_lens_ribs(c, sd, rib_x0)] *= 0.5
+    c.emit[sd < 0] += 0.05 + 0.3 * np.clip(-sd / 2.5, 0, 1)[sd < 0, None]
     c.alpha[sd < 0] = 1
-    d.lamp_rgb = shade(c, ambient=0.35, diffuse=0.9, ao_r=0.8, ao_k=0.3)[0]
+    d.lamp_rgb = shade(c, ambient=0.25, diffuse=1.0, ao_r=0.8, ao_k=0.4)[0]
     d.lamp_alpha = c.alpha
+
+
+def _lens_ribs(c, sd, x0):
+    return (sd < -0.8) & (np.abs(((c.x - x0) / 2.5) % 1 - 0.5) < 0.16)
 
 
 def _lamp(c, shape, top):
@@ -536,14 +542,14 @@ def tracker_handset():
     c.emit[glow] += np.array([0.07, 0.30, 0.26])
     c.alpha[body < 0] = 1
     c.alpha[screen < 0] = 0
-    d.lamp_box = ('tab', 40, 3, 50, 10)
+    d.lamps = [('tab', 40, 3, 50, 10)]
     _lamp_sprite(d, lamp)
     return _finish(d, c, screen)
 
 
 def police_scanner2():
-    """J: a police scanner in dark brown anodised metal: red and blue light bar with an N between, a deep CRT well
-    with a metal lip, vent slots on the right, two knurled knobs below, the status lamp in a metal bezel top right."""
+    """J: a police scanner in dark brown anodised metal: a light bar of two status lamps with an N between, a deep CRT
+    well with a metal lip, vent slots on the right, two knurled knobs below."""
     d = Design(); d.name = 'J_police_scanner'; d.title = 'J  Police scanner'
     d.W = d.H = W = H = 110
     _nine(d, cap=20, rib=12, tab_w=44)
@@ -553,19 +559,17 @@ def police_scanner2():
     c.h_[np.abs(body + 2.5) < 0.45] -= 0.9
     bar = sd_rrect(c, 34, 0.5, 76, 12.5, 4)
     c.paint(bar < 0, hexrgb('#0c0c0e'), spec=0.8, shin=40, height=6.0 + profile_round(np.minimum(-bar, 1.5), 3.0, 1.5))
-    for x0, x1, col, glow in ((36.5, 51.5, '#ff1a08', (0.35, 0.02, 0.0)), (58.5, 73.5, '#1438ff', (0.0, 0.05, 0.40))):
-        lens = sd_rrect(c, x0, 2.5, x1, 10.5, 3)
-        c.paint(lens < 0, hexrgb(col), spec=1.4, shin=50, height=7.5 + profile_round(-lens, 4.0, 2.2))
-        c.emit[lens < 0] += np.array(glow)
-        c.alb[(lens < -0.8) & (np.abs(((c.x - x0) / 2.5) % 1 - 0.5) < 0.16)] *= 0.45
+    # the bar's two lenses, unlit glass: the game lights them in the territory's gang colour and its opinion
+    lens = lambda cc, x0: sd_rrect(cc, x0, 2.5, x0 + 15, 10.5, 3)
+    for x0 in (36.5, 58.5):
+        sd = lens(c, x0)
+        c.paint(sd < 0, hexrgb('#34343a'), spec=1.4, shin=50, height=7.5 + profile_round(-sd, 4.0, 2.2))
+        c.alb[_lens_ribs(c, sd, x0)] *= 0.55
     c.paint(glyph_mask(c, GLYPHS['N'], 52.5, 4.0, 1.0), hexrgb('#e8eae8'), add=0.3)
     vent = (c.x > W - 7.5) & (c.x < W - 2.5) & (c.y > 20) & (c.y < H - 20) & ((((c.y - 20) % 4) - 1.5) ** 2 < 1.0)
     c.paint(vent, hexrgb('#030304'), add=-2.0)
-    _screw(c, 7.0, 7.0, 3.2, GUNMETAL, 6.0, 'hex')
-    ring = sd_circle(c, W - 7.5, 7.5, 4.6)
-    c.paint(ring < 0, GUNMETAL, spec=1.4, shin=60, height=6.0 + profile_round(-ring, 1.6, 1.0))
-    lamp = lambda cc: sd_circle(cc, W - 7.5, 7.5, 3.0)
-    _lamp(c, lamp, 6.4)
+    for x in (7.0, W - 7.0):
+        _screw(c, x, 7.0, 3.2, GUNMETAL, 6.0, 'hex')
     for x, a in ((8.5, -2.3), (W - 8.5, -0.9)):
         y = H - 8.5
         k = sd_circle(c, x, y, 5.6)
@@ -583,8 +587,8 @@ def police_scanner2():
     c.paint(lip, GUNMETAL, spec=1.3, shin=60, height=1.5 + profile_round(screen, 1.4, 0.7))
     c.alpha[body < 0] = 1
     c.alpha[screen < 0] = 0
-    d.lamp_box = ('tr', W - 11, 4, W - 4, 11)
-    _lamp_sprite(d, lamp)
+    d.lamps = [('tab', 36, 2, 52, 11), ('tab', 58, 2, 74, 11)]
+    _lamp_sprite(d, lambda cc: lens(cc, 36.5), 36.5)
     return _finish(d, c, screen)
 
 
