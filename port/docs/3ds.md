@@ -319,6 +319,13 @@ docker run --rm -u $(id -u):$(id -g) -v $PWD:$PWD -v $SDL:$SDL -w $PWD gta2-3ds-
 The result is `build_3ds/gta2.3dsx` (about 2.3 MB), titled reG2 in the Homebrew Launcher. Its 48x48 icon
 `port/3ds/icon.png` is lettered with Michroma (OFL), so no game art is involved.
 
+`port/3ds/cia/make_cia.sh <build dir> <makerom> <bannertool>` packs the same `gta2.elf` and `gta2.smdh` into
+`gta2.cia` there, a HOME Menu title (FBI installs it): title ID 000400000FE62000, product code CTR-H-REG2,
+the memory the `.3dsx` gets (see Memory) and, in `gta2.rsf`, the service names the ELF links (`strings gta2.elf`),
+which a console holds it to. Its banner is `banner.png` (the logo on black, from `banner.svg`) with a silent
+`banner.wav`. makerom (Project_CTR, 0.19.0 tested) and bannertool are not in the devkitPro image, so the normal
+build leaves the CIA out. A CIA gets no `argv[0]`: its game folder is always `sdmc:/3ds/gta2/`.
+
 ### Profile guided optimisation
 
 The build optimises with the counts of the Linux port playing the game (`GTA2_3DS_PGO`, on by default;
@@ -514,6 +521,8 @@ slow frames.
 Azahar (2126.2) runs the `.3dsx` without firmware or system files, in Old or New 3DS mode. It passes
 no arguments, so the game folder there is always `sdmc:/3ds/gta2/`. The start
 to the first city frame takes about 15 seconds there.
+`azahar -i gta2.cia` installs the CIA; its title then runs from the `.app` in
+`sdmc/Nintendo 3DS/<id>/<id>/title/00040000/0fe62000/content/`, with the console's 64 MB (memory type 0) in Old 3DS mode.
 
 Tests: `test/pad_input.txt` presses buttons, one `<first frame> <last frame> <hex KEY_* mask>` per line
 (frames as `port_FrameCount` counts them), for example `150 170 8` for START; the `KEY_CPAD_*` and
@@ -644,10 +653,6 @@ calls the hook's suspend and resume around a wait at that frame, from the event 
 through the wait and comes back without a click, and the game draws 30 frames per second again. The real
 hooks, sleep with the lid, and the GPU and DSP state across them need a console.
 
-A `.cia` (a HOME Menu icon without the Homebrew Launcher) would need `makerom` and `bannertool`, which
-the devkitPro image lacks, an `.rsf` with a unique ID and a 256x128 banner with a sound; it would get no
-`argv[0]` and so use `sdmc:/3ds/gta2/`. Not done: little gain over the `.3dsx`.
-
 ## Old 3DS
 
 ### Memory
@@ -659,7 +664,7 @@ gets 64 MB on an Old 3DS (124 MB on a New 3DS), never an extended mode; only Lum
 `autoboot_3ds_app_mem_type` changes it until the next reboot. The image (3.2 MB) and both heaps come out
 of that 64 MB, about 60.8 MB being free at start. A CIA could ask for 72, 80 or 96 MB (dev system
 modes): the console then reboots into that mode at launch and exit, and the system's memory shrinks
-(HOME Menu and applets limited); not worth it here.
+(HOME Menu and applets limited); not worth it here, so `port/3ds/cia/gta2.rsf` asks for 64 MB (124 MB on a New 3DS).
 
 Azahar gives a `.3dsx` more (memory type 2, 96 MB, in Old 3DS mode), so the port fixes its heaps
 (`platform_3ds.cpp`) and the emulator holds it to them: 34 MB heap, out of which libctru takes the 2 MB
