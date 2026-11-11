@@ -1,6 +1,7 @@
 #include "c3d_context.hpp"
 #include "../renderer/gl_context.hpp"
 #include "../src/prof.hpp"
+#include "stats_3ds.hpp"
 #include <3ds.h>
 
 namespace
@@ -123,7 +124,9 @@ void C3DContextFrameSync()
 unsigned port_WaitRefresh()
 {
     const u32 last = sLastTop;
+    const u64 t0 = svcGetSystemTick();
     WaitRefresh();
+    Stats3DS_AddWait(svcGetSystemTick() - t0);
     sWaited = true;
     return sLastTop - last;
 }
