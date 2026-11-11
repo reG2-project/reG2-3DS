@@ -99,8 +99,9 @@ const s32 kMaxTexSize = 1024;
 const u32 kBottomEvery = 2;
 // A change of the minimap alone waits that long after the last draw (ms): its draw is most of the screen's cost.
 const u64 kMinimapMs = 100;
-// GLRenderer's default vertex offset: D3D pixel centres are on integers, the PICA's on halves.
-const f32 kPixelOffset = 0.5f - 1.0f / 2048.0f;
+// The HUD's vertex offset: D3D pixel centres are on integers, the PICA's on halves. An eighth of a pixel short keeps
+// D3D's pixels and texels while nearest sampling stays clear of the texel edges, which the GPU rounds either way.
+const f32 kPixelOffset = 0.5f - 1.0f / 8.0f;
 // Batch state only: the batch's texture is premultiplied; its draws sample the first mip level only.
 const u32 kStatePremultiplied = 1u << 31;
 const u32 kStateNoMip = 1u << 30;

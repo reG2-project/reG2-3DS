@@ -177,7 +177,10 @@ The HUD is on the bottom screen at its own pixel size. `Hud::DrawGui` marks its 
 (`port/src/hud_screen.*`, `HUD_GROUP` in `Source/Hud.cpp`); a renderer with a HUD screen
 (`IRenderer::SetHudGroup`, `HudScreenWidth`) takes those draws, in 640x480 layout pixels, and places each
 group in a panel of a fixed grid on the 320x240 screen (`kHudPanels`); the mission brief wraps to its
-width and scrolls when longer. `port/3ds/hud_theme.*` draws a recessed panel behind each part drawn that
+width and scrolls when longer. Its sprites and glyphs are sampled nearest, an eighth of a pixel past D3D's
+pixel centres (`kPixelOffset`): the same pixels and texels as D3D, but clear of the texel edges, which the console's
+GPU rounds either way (letters and weapon icons with stray texels; Azahar's OpenGL renderer computes in 32-bit
+floats and showed none, its software renderer showed it). `port/3ds/hud_theme.*` draws a recessed panel behind each part drawn that
 frame, over a dark backdrop made once per city from its most common plain pavement tile (one 8 KB
 texture, 2 draws per frame). The world stays on the top screen, with the zone and car names, pickup
 texts, big messages and arrows. The frontend and the pause menu stay on the top screen, legible but small
