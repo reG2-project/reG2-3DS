@@ -48,7 +48,8 @@ add_custom_command(OUTPUT ${map_shbin}.o
 
 # The minimap's frame and markers (port/docs/minimap/assets, original art) as C arrays.
 set(minimap_assets ${PORT}/docs/minimap/assets)
-set(minimap_png Frame=${minimap_assets}/frames/E_tube_frame/frame_1x.png
+set(minimap_png Frame=${minimap_assets}/frames/J_police_scanner/frame_1x.png
+    Lamp=${minimap_assets}/frames/J_police_scanner/lamp_1x.png
     Arrow=${minimap_assets}/markers/player_arrow_1x.png)
 string(REGEX REPLACE "[A-Za-z]+=" "" minimap_png_files "${minimap_png}")
 add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/minimap_assets.h
