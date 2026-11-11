@@ -9,6 +9,7 @@
  "inset": 13,
  "lamps": [
   {
+   "name": "status",
    "anchor": "tab",
    "x": 40,
    "y": 3,

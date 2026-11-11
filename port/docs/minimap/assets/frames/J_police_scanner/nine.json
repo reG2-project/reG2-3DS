@@ -9,18 +9,20 @@
  "inset": 13,
  "lamps": [
   {
+   "name": "gang",
    "anchor": "tab",
-   "x": 36,
+   "x": 45,
    "y": 2,
-   "w": 16,
+   "w": 20,
    "h": 9
   },
   {
-   "anchor": "tab",
-   "x": 58,
-   "y": 2,
-   "w": 16,
-   "h": 9
+   "name": "hostile",
+   "anchor": "tr",
+   "x": 99,
+   "y": 4,
+   "w": 7,
+   "h": 7
   }
  ]
 }

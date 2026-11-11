@@ -39,8 +39,8 @@ struct View
     s32 px4, py4; // the player, in quarter blocks
     s32 heading;  // Ang16: 1440 to the turn
     s32 gang;     // 1 + the pool slot of the gang whose territory the player is in, 0 for none
-    // That gang's opinion of the player, by the respect meter's bars: 1 likes (20 and over), -1 hates (-20 and under).
-    s32 opinion;
+    // That gang hates the player: respect -20 and under, where the respect meter shows its minus sign.
+    bool hostile;
     u8 arrows[kMaxGangs]; // each slot's arrow colour, 0 for a gang the respect meters leave out
     Mark marks[kMaxMarks];
     s32 markCount;

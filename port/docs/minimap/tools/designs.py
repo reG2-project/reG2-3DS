@@ -473,8 +473,8 @@ def _screw(c, x, y, r, rgb, top, kind='slot'):
         c.paint(sd_circle(c, x, y, r * 0.42) < 0, dk, add=-0.9)
 
 
-def _lamp_sprite(d, shape, rib_x0=None):
-    """The lit lamp the game draws over the frame's dark one, white glass to be tinted by a vertex colour."""
+def _lamp_sprite(d, name, anchor, box, shape, rib_x0=None):
+    """A lit lamp the game draws over the frame's dark one at `box`, white glass to be tinted by a vertex colour."""
     c = Canvas(d.W, d.H)
     sd = shape(c)
     c.paint(sd < 0, (215, 215, 215), spec=1.3, shin=40, height=profile_round(-sd, 3.0, 1.4))
@@ -482,8 +482,7 @@ def _lamp_sprite(d, shape, rib_x0=None):
         c.alb[_lens_ribs(c, sd, rib_x0)] *= 0.5
     c.emit[sd < 0] += 0.05 + 0.3 * np.clip(-sd / 2.5, 0, 1)[sd < 0, None]
     c.alpha[sd < 0] = 1
-    d.lamp_rgb = shade(c, ambient=0.25, diffuse=1.0, ao_r=0.8, ao_k=0.4)[0]
-    d.lamp_alpha = c.alpha
+    d.lamps = getattr(d, 'lamps', []) + [(name, anchor, box, shade(c, ambient=0.25, diffuse=1.0, ao_r=0.8, ao_k=0.4)[0], c.alpha)]
 
 
 def _lens_ribs(c, sd, x0):
@@ -542,14 +541,13 @@ def tracker_handset():
     c.emit[glow] += np.array([0.07, 0.30, 0.26])
     c.alpha[body < 0] = 1
     c.alpha[screen < 0] = 0
-    d.lamps = [('tab', 40, 3, 50, 10)]
-    _lamp_sprite(d, lamp)
+    _lamp_sprite(d, 'status', 'tab', (40, 3, 50, 10), lamp)
     return _finish(d, c, screen)
 
 
 def police_scanner2():
-    """J: a police scanner in dark brown anodised metal: a light bar of two status lamps with an N between, a deep CRT
-    well with a metal lip, vent slots on the right, two knurled knobs below."""
+    """J: a police scanner in dark brown anodised metal: a light bar with one lens and an N, a small lamp top right,
+    a deep CRT well with a metal lip, vent slots on the right, two knurled knobs below."""
     d = Design(); d.name = 'J_police_scanner'; d.title = 'J  Police scanner'
     d.W = d.H = W = H = 110
     _nine(d, cap=20, rib=12, tab_w=44)
@@ -559,17 +557,22 @@ def police_scanner2():
     c.h_[np.abs(body + 2.5) < 0.45] -= 0.9
     bar = sd_rrect(c, 34, 0.5, 76, 12.5, 4)
     c.paint(bar < 0, hexrgb('#0c0c0e'), spec=0.8, shin=40, height=6.0 + profile_round(np.minimum(-bar, 1.5), 3.0, 1.5))
-    # the bar's two lenses, unlit glass: the game lights them in the territory's gang colour and its opinion
-    lens = lambda cc, x0: sd_rrect(cc, x0, 2.5, x0 + 15, 10.5, 3)
-    for x0 in (36.5, 58.5):
-        sd = lens(c, x0)
-        c.paint(sd < 0, hexrgb('#34343a'), spec=1.4, shin=50, height=7.5 + profile_round(-sd, 4.0, 2.2))
-        c.alb[_lens_ribs(c, sd, x0)] *= 0.55
-    c.paint(glyph_mask(c, GLYPHS['N'], 52.5, 4.0, 1.0), hexrgb('#e8eae8'), add=0.3)
+    # the bar's lens, unlit glass the game lights in the territory's gang colour, with the N left of it
+    lens = lambda cc: sd_rrect(cc, 45.5, 2.5, 64.5, 10.5, 3)
+    sd = lens(c)
+    c.paint(sd < 0, hexrgb('#34343a'), spec=1.4, shin=50, height=7.5 + profile_round(-sd, 4.0, 2.2))
+    c.alb[_lens_ribs(c, sd, 45.5)] *= 0.55
+    c.paint(glyph_mask(c, GLYPHS['N'], 38.0, 4.0, 1.0), hexrgb('#e8eae8'), add=0.3)
+    for x in (68.5, 71.0):
+        c.paint(sd_rrect(c, x, 4.0, x + 1.2, 9.0, 0.5) < 0, hexrgb('#4a4a50'), spec=0.6, add=-0.4)
     vent = (c.x > W - 7.5) & (c.x < W - 2.5) & (c.y > 20) & (c.y < H - 20) & ((((c.y - 20) % 4) - 1.5) ** 2 < 1.0)
     c.paint(vent, hexrgb('#030304'), add=-2.0)
-    for x in (7.0, W - 7.0):
-        _screw(c, x, 7.0, 3.2, GUNMETAL, 6.0, 'hex')
+    _screw(c, 7.0, 7.0, 3.2, GUNMETAL, 6.0, 'hex')
+    # the small lamp top right, unlit: the game lights it red when the gang hates the player, else green
+    ring = sd_circle(c, W - 7.5, 7.5, 4.6)
+    c.paint(ring < 0, GUNMETAL, spec=1.4, shin=60, height=6.0 + profile_round(-ring, 1.6, 1.0))
+    small = lambda cc: sd_circle(cc, W - 7.5, 7.5, 3.0)
+    _lamp(c, small, 6.4)
     for x, a in ((8.5, -2.3), (W - 8.5, -0.9)):
         y = H - 8.5
         k = sd_circle(c, x, y, 5.6)
@@ -587,8 +590,8 @@ def police_scanner2():
     c.paint(lip, GUNMETAL, spec=1.3, shin=60, height=1.5 + profile_round(screen, 1.4, 0.7))
     c.alpha[body < 0] = 1
     c.alpha[screen < 0] = 0
-    d.lamps = [('tab', 36, 2, 52, 11), ('tab', 58, 2, 74, 11)]
-    _lamp_sprite(d, lambda cc: lens(cc, 36.5), 36.5)
+    _lamp_sprite(d, 'gang', 'tab', (45, 2, 65, 11), lens, 45.5)
+    _lamp_sprite(d, 'hostile', 'tr', (W - 11, 4, W - 4, 11), small)
     return _finish(d, c, screen)
 
 
