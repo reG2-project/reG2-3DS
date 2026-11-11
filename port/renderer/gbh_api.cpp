@@ -178,6 +178,8 @@ bool gGridDirty = true; // the light grid (BuildLightGrid) is out of date
 // gShaderLightsEnd as of the last UploadLights.
 bool gShaderLights;
 u32 gShaderLightsEnd;
+// The lights past the shader's light nothing; GTA2_3DS_FAR_LIGHTS=1 lights what they reach on the CPU.
+bool gFarLights;
 std::vector<u32> gConvertBuffer;
 std::vector<STexture*> gPreload;
 
@@ -786,7 +788,7 @@ __attribute__((noinline)) bool LightCorners(Vert* pVerts, s32 count, u8 shade, b
     {
         UploadLights();
     }
-    const bool shaderLit = lit && !perPixel && gShaderLights && NearLights(pVerts + 4, count, gShaderLightsEnd) == 0;
+    const bool shaderLit = lit && !perPixel && gShaderLights && (!gFarLights || NearLights(pVerts + 4, count, gShaderLightsEnd) == 0);
     const u32 numNear = (lit && !shaderLit) || (shadowLit && !perPixel) ? NearLights(pVerts + 4, count) : 0;
     if (lit)
     {
@@ -1124,6 +1126,8 @@ GBH_EXPORT u32 GTA2_CC gbh_InitDLL(SVideo* pVideo)
         __asm__ __volatile__("fldcw %0" : : "m"(cw));
     }
 #endif
+    const char* pFar = getenv("GTA2_3DS_FAR_LIGHTS");
+    gFarLights = pFar && atoi(pFar) != 0;
     const char* pTrace = getenv("GTA2GL_TRACE");
     gTraceScene = pTrace ? (u32)atoi(pTrace) : 0;
     GLVideoHeader* pHeader = (GLVideoHeader*)pVideo;
@@ -1852,6 +1856,10 @@ s32 port_MapCacheFarLights(f32 x0, f32 y0, f32 z0, f32 x1, f32 y1, f32 z1, f32* 
     if (!gShaderLights || !gRenderer || gRenderer->Options().mPerPixelLighting)
     {
         return -1;
+    }
+    if (!gFarLights)
+    {
+        return 0;
     }
     Vert box[2];
     memset(box, 0, sizeof(box));
