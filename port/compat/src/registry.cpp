@@ -1,4 +1,4 @@
-// The registry as a text file in the game folder (gta2_registry.ini), one [key] section per key:
+// The registry as a text file in the game folder (gta2_registry.ini, or GTA2_REGISTRY), one [key] section per key:
 //   name = dword:<hex> | sz:<text> | hex:<bytes>
 // Keys and value names ignore case, as in the Windows registry.
 #include <windows.h>
@@ -14,7 +14,12 @@
 
 namespace
 {
-const char kFileName[] = "gta2_registry.ini";
+// GTA2_REGISTRY names another file, for test runs that leave the player's settings alone.
+const char* FileName()
+{
+    const char* pName = getenv("GTA2_REGISTRY");
+    return pName && *pName ? pName : "gta2_registry.ini";
+}
 
 struct Value
 {
@@ -82,7 +87,7 @@ void Save()
         return;
     }
     sUnsaved = false;
-    FILE* f = fopen(kFileName, "w");
+    FILE* f = fopen(FileName(), "w");
     if (!f)
     {
         return;
@@ -154,7 +159,7 @@ void Load()
         return;
     }
     sLoaded = true;
-    FILE* f = fopen(kFileName, "r");
+    FILE* f = fopen(FileName(), "r");
     if (!f)
     {
         SetDefaults();
