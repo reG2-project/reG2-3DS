@@ -2,7 +2,7 @@
 # glass overlay, and where the map and markers go, all in native HUD pixels (640x480 HUD space).
 import numpy as np
 from mm_lib import (SS, Canvas, hexrgb, sd_circle, sd_rrect, sd_chamfer, blur, profile_round,
-                    profile_bevel, shade, glyph_mask, GLYPHS, sd_poly)
+                    profile_bevel, shade, glyph_mask, GLYPHS, sd_poly, shade_hard)
 
 
 class Design:
@@ -443,3 +443,153 @@ def gps_handheld():
 
 BUILDERS = [respect_ring, pager_handset, steel_plate, compass_dial]
 BUILDERS2 = [tube_frame, police_scanner, dash_gauge, gps_handheld]
+
+
+# Frames for the 3DS bottom screen's 9-slice (port/3ds/minimap.cpp, README's device frames) at its 110x110 slot, in
+# the respect meters' dark warm brown. Edge details repeat every 4 px; make_frames.py rebuilds edges from a strip.
+GUNMETAL = hexrgb('#6a6052'); BLACK_METAL = hexrgb('#22180f')
+
+
+def _nine(d, cap, rib, tab_w, btab_w=0, inset=13):
+    d.nine = dict(cap=cap, rib_x=cap, rib=rib, tab_x=(d.W - tab_w) // 2, tab_w=tab_w,
+                  btab_x=(d.W - btab_w) // 2 if btab_w else 0, btab_w=btab_w, inset=inset)
+
+
+def _housing(c, sd, rgb, spec, shin, bevel, height):
+    """Moulded shell: a quarter-round bevel `bevel` px wide up to a flat top at `height`."""
+    c.paint(sd < 0, rgb, spec=spec, shin=shin,
+            height=profile_round(np.minimum(-sd, bevel), 2 * bevel, height) + np.where(-sd > bevel, height, 0))
+
+
+def _screw(c, x, y, r, rgb, top, kind='slot'):
+    s = sd_circle(c, x, y, r)
+    c.paint(s < 0, rgb, spec=1.4, shin=60, height=top + profile_round(-s, r, r * 0.6))
+    dk = hexrgb('#060608')
+    if kind == 'slot':
+        c.paint((np.abs((c.x - x) - (c.y - y)) < 0.6) & (s < -0.5), dk, add=-1.0)
+    elif kind == 'cross':
+        c.paint(((np.abs(c.x - x) < 0.55) | (np.abs(c.y - y) < 0.55)) & (s < -0.6), dk, add=-1.0)
+    else:
+        c.paint(sd_circle(c, x, y, r * 0.42) < 0, dk, add=-0.9)
+
+
+def _lamp_sprite(d, shape, rib_x0=None):
+    """The lit lamp the game draws over the frame's dark one, white glass to be tinted by a vertex colour."""
+    c = Canvas(d.W, d.H)
+    sd = shape(c)
+    c.paint(sd < 0, (215, 215, 215), spec=1.3, shin=40, height=profile_round(-sd, 3.0, 1.4))
+    if rib_x0 is not None:
+        c.alb[_lens_ribs(c, sd, rib_x0)] *= 0.5
+    c.emit[sd < 0] += 0.05 + 0.3 * np.clip(-sd / 2.5, 0, 1)[sd < 0, None]
+    c.alpha[sd < 0] = 1
+    d.lamp_rgb = shade(c, ambient=0.25, diffuse=1.0, ao_r=0.8, ao_k=0.4)[0]
+    d.lamp_alpha = c.alpha
+
+
+def _lens_ribs(c, sd, x0):
+    return (sd < -0.8) & (np.abs(((c.x - x0) / 2.5) % 1 - 0.5) < 0.16)
+
+
+def _lamp(c, shape, top):
+    """The status lamp unlit: dark glass with a glint."""
+    sd = shape(c)
+    c.paint(sd < 0, hexrgb('#1a1c1e'), spec=1.4, shin=60, height=top + profile_round(-sd, 3.0, 1.4))
+
+
+def _finish(d, c, screen, map_style='colour'):
+    d.canvas = c
+    d.rgb = shade_hard(c)
+    n = d.nine['inset']
+    d.screen_sd = screen; d.screen_box = (n, n, d.W - n, d.H - n); d.center = (d.W / 2, d.H / 2)
+    c.sw, c.sh = d.W - 2 * n, d.H - 2 * n
+    d.glass = _glass(c, screen, d.W / 2, d.H / 2, 'rect')
+    d.map_style = map_style; d.rotates = False
+    return d
+
+
+def tracker_handset():
+    """I: a handheld tracker in dark brown moulded plastic: dark anodised bezel with a thin glowing line, side vents,
+    a black glass status window with the status lamp and an N, the pager's orange button, a speaker grille below."""
+    d = Design(); d.name = 'I_tracker_handset'; d.title = 'I  Tracker handset'
+    d.W = d.H = W = H = 110
+    _nine(d, cap=18, rib=12, tab_w=40, btab_w=40)
+    c = Canvas(W, H)
+    body = sd_rrect(c, 0.5, 0.5, W - 0.5, H - 0.5, 9)
+    _housing(c, body, hexrgb('#4a3826'), 0.6, 30, 3.5, 5.0)
+    c.h_[np.abs(body + 2.2) < 0.45] -= 0.9
+    side = ((c.x > 3) & (c.x < 7.5) | (c.x > W - 7.5) & (c.x < W - 3)) & (c.y > 18) & (c.y < H - 18)
+    c.paint(side & (((c.y - 18) % 4) < 1.6), hexrgb('#060708'), add=-1.8)
+    win = sd_rrect(c, 38, 2, 72, 11, 2)
+    c.paint(win < 0, hexrgb('#08090b'), spec=1.2, shin=70, height=5.0 - 1.8 * np.clip(-win / 1.0, 0, 1))
+    lamp = lambda cc: sd_rrect(cc, 40.5, 3.5, 49.5, 9.5, 2)
+    _lamp(c, lamp, 3.4)
+    c.paint(glyph_mask(c, GLYPHS['N'], 53, 4.5, 1.0), hexrgb('#b4c8b0'), spec=0.0, add=0.0)
+    for x in (63.5, 66.5, 69.5):
+        c.paint(sd_circle(c, x, 6.5, 0.9) < 0, hexrgb('#020203'), add=-1.0)
+    for i in range(6):
+        sl = sd_rrect(c, 40.5 + i * 5, 99.5, 43 + i * 5, 107, 1.0)
+        c.paint(sl < 0, hexrgb('#040405'), add=-2.6)
+    btn = sd_rrect(c, W - 12.5, 2, W - 2.5, 10, 2.5)
+    c.paint(btn < 0, hexrgb('#e8601a'), spec=0.9, shin=40, height=5.0 + profile_bevel(-btn, 1.5, 2.0))
+    for x, y in ((6.5, 6.5), (6.5, H - 6.5), (W - 6.5, H - 6.5)):
+        _screw(c, x, y, 3.0, GUNMETAL, 5.5, 'cross')
+    bez = sd_rrect(c, 9.5, 9.5, W - 9.5, H - 9.5, 6)
+    c.paint((bez < 0.7) & (bez >= 0), hexrgb('#040405'), add=-1.2)
+    c.paint(bez < 0, BLACK_METAL, spec=1.3, shin=60, height=4.2 + profile_round(np.minimum(-bez, 3.5), 3.5, 1.6))
+    screen = sd_rrect(c, 13, 13, W - 13, H - 13, 3)
+    glow = (screen >= 0) & (screen < 0.9)
+    c.paint(glow, hexrgb('#1c4a44'), spec=0.2)
+    c.emit[glow] += np.array([0.07, 0.30, 0.26])
+    c.alpha[body < 0] = 1
+    c.alpha[screen < 0] = 0
+    d.lamps = [('tab', 40, 3, 50, 10)]
+    _lamp_sprite(d, lamp)
+    return _finish(d, c, screen)
+
+
+def police_scanner2():
+    """J: a police scanner in dark brown anodised metal: a light bar of two status lamps with an N between, a deep CRT
+    well with a metal lip, vent slots on the right, two knurled knobs below."""
+    d = Design(); d.name = 'J_police_scanner'; d.title = 'J  Police scanner'
+    d.W = d.H = W = H = 110
+    _nine(d, cap=20, rib=12, tab_w=44)
+    c = Canvas(W, H)
+    body = sd_rrect(c, 0.5, 0.5, W - 0.5, H - 0.5, 11)
+    _housing(c, body, hexrgb('#3a2b1e'), 0.9, 45, 4.5, 6.0)
+    c.h_[np.abs(body + 2.5) < 0.45] -= 0.9
+    bar = sd_rrect(c, 34, 0.5, 76, 12.5, 4)
+    c.paint(bar < 0, hexrgb('#0c0c0e'), spec=0.8, shin=40, height=6.0 + profile_round(np.minimum(-bar, 1.5), 3.0, 1.5))
+    # the bar's two lenses, unlit glass: the game lights them in the territory's gang colour and its opinion
+    lens = lambda cc, x0: sd_rrect(cc, x0, 2.5, x0 + 15, 10.5, 3)
+    for x0 in (36.5, 58.5):
+        sd = lens(c, x0)
+        c.paint(sd < 0, hexrgb('#34343a'), spec=1.4, shin=50, height=7.5 + profile_round(-sd, 4.0, 2.2))
+        c.alb[_lens_ribs(c, sd, x0)] *= 0.55
+    c.paint(glyph_mask(c, GLYPHS['N'], 52.5, 4.0, 1.0), hexrgb('#e8eae8'), add=0.3)
+    vent = (c.x > W - 7.5) & (c.x < W - 2.5) & (c.y > 20) & (c.y < H - 20) & ((((c.y - 20) % 4) - 1.5) ** 2 < 1.0)
+    c.paint(vent, hexrgb('#030304'), add=-2.0)
+    for x in (7.0, W - 7.0):
+        _screw(c, x, 7.0, 3.2, GUNMETAL, 6.0, 'hex')
+    for x, a in ((8.5, -2.3), (W - 8.5, -0.9)):
+        y = H - 8.5
+        k = sd_circle(c, x, y, 5.6)
+        ang = np.arctan2(c.y - y, c.x - x)
+        c.paint(k < 0, hexrgb('#141416'), spec=1.2, shin=50, height=6.0 + profile_round(np.minimum(-k, 1.8), 3.6, 2.4)
+                + np.where(-k > 1.8, 2.4, 0) + 0.5 * np.cos(ang * 12) * (k > -1.6))
+        c.paint(sd_circle(c, x, y, 3.4) < 0, GUNMETAL, spec=1.4, shin=60)
+        p = sd_poly(c, [(x + 0.7 * np.cos(a + 1.57), y + 0.7 * np.sin(a + 1.57)), (x + 3.2 * np.cos(a), y + 3.2 * np.sin(a)),
+                        (x - 0.7 * np.cos(a + 1.57), y - 0.7 * np.sin(a + 1.57))])
+        c.paint(p < 0.2, hexrgb('#0c0c0e'), spec=0.4, add=-0.6)
+    well = sd_rrect(c, 9, 9, W - 9, H - 9, 9)
+    c.paint(well < 0, hexrgb('#0c0906'), spec=0.5, shin=30, height=6.0 - 4.5 * np.clip(-well / 3.5, 0, 1))
+    screen = sd_rrect(c, 13, 13, W - 13, H - 13, 6)
+    lip = (screen >= 0) & (screen < 1.4)
+    c.paint(lip, GUNMETAL, spec=1.3, shin=60, height=1.5 + profile_round(screen, 1.4, 0.7))
+    c.alpha[body < 0] = 1
+    c.alpha[screen < 0] = 0
+    d.lamps = [('tab', 36, 2, 52, 11), ('tab', 58, 2, 74, 11)]
+    _lamp_sprite(d, lambda cc: lens(cc, 36.5), 36.5)
+    return _finish(d, c, screen)
+
+
+BUILDERS3 = [tracker_handset, police_scanner2]

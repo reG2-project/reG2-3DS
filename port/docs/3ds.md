@@ -187,9 +187,9 @@ texts, big messages and arrows. The frontend and the pause menu stay on the top 
 (4 to 5 pixels high); the bottom screen is black in the frontend and shows the city's map in the pause menu.
 
 The bottom screen's last row holds the brief on the left and a minimap on the right (`port/3ds/minimap*`):
-the tube frame E of the design study (`port/docs/minimap`), north up, 21x21 blocks around the player at 4
-pixels per block. It is meant to be fair, so it shows little, and every colour and icon on it comes from
-the city's style:
+the police scanner frame J of the design study (`port/docs/minimap`), north up, 21x21 blocks around the
+player at 4 pixels per block. It is meant to be fair, so it shows little, and every colour and icon on it comes
+from the city's style:
 
 - the ground in the mean colour of each block's lid tile, lighter as the block stands taller, with the
   study's rims and shadows; where no block has a lid, and around the city, the mean colour of the city's
@@ -214,11 +214,18 @@ the city's style:
   direction, also during missions. Its icon is the pause menu font's `+` (`gStylePauseFont`) cut into a
   Latin cross: arms one texel shorter than the stem is wide, the foot twice as long, with a shade around.
 
+The frame's light bar has two lenses, dark outside any territory. Inside one, the left lens is lit in that
+gang's colour at full brightness, and the right one in its opinion of the player, by the respect meter's bars:
+the colour of the meter's green lamp from 20 respect up, its red lamp from -20 down, its yellow lamp between
+(user sprites 46 to 48, their mean colour at full brightness). The frame holds the lenses as unlit glass, and one
+lit white lens in the atlas is drawn over each with its colour. The gang and its respect come with the rest of the
+minimap's state, read once a frame (`MinimapGame::View`), so the bottom screen redraws only when one changes.
+
 Nothing else: no pickups, hidden weapons, secret tokens, frenzies, garages or mission targets.
 Arrows and icons are drawn at half size, as the bottom screen draws the HUD, pips and the cross at full
-size. The only colours of the port's own are shades (black with alpha: rims, shadows, the tube's shadow,
-the edges' shade, the cross's) and the frame and player arrow, original art embedded at build time from
-the study's PNGs by `embed_png.py`. The player arrow is drawn turned and filtered, so the atlas keeps a
+size. The only colours of the port's own are shades (black with alpha: rims, shadows, the frame's shadow,
+the edges' shade, the cross's) and the frame, its lit lens and the player arrow, original art embedded at build
+time from the study's PNGs by `embed_png.py`. The player arrow is drawn turned and filtered, so the atlas keeps a
 clear column between it and the frame.
 
 The map is built once per city from the map and tiles in memory (about 200 ms in Azahar's Old 3DS mode,
@@ -226,7 +233,7 @@ The map is built once per city from the map and tiles in memory (about 200 ms in
 of linear memory). The territory edges are a 256x256 RGBA4 texture (128 KB, built when the gangs are set
 up, about 20 ms), the light tint over the player's territory a 256x256 A8 texture (64 KB) drawn in the
 gang's colour and filled again when the player changes territory (2 to 3 ms) from each block's gang,
-kept in the textures' order (64 KB of heap). The frame and the player's arrow are a 32 KB atlas, the
+kept in the textures' order (64 KB of heap). The frame, the player's arrow and the lit lens are a 32 KB atlas, the
 game's sprites for the markers a 32 KB RGBA8 sheet made per city (the cross's shade has partial alpha).
 The game's headers and the renderer's clash, so `minimap_game.cpp` reads the game and `minimap.cpp` draws.
 `GTA2_3DS_MINIMAP=wide` gives the map the whole row while no brief shows; `off` leaves it out and gives the
@@ -237,7 +244,7 @@ While the pause menu is open, the bottom screen shows the whole city instead of 
 through its UVs at 1, 2 (the default), 4 or 8 pixels per block, centred on the player as the menu opens.
 A marker off the screen goes on its edge, on the ray from the screen's middle. Dragging the stylus pans it
 (`hidTouchRead`), held within the city, which stays in the middle at 1 pixel per block where it is narrower
-than the screen. Two buttons bottom right, squares of the frame's tube around the pause font's `+` and its
+than the screen. Two buttons bottom right, squares of the frame (its corners) around the pause font's `+` and its
 bar for the `-` (the font has none), zoom on a press, sunk while held and dimmed at the last zoom; the zoom
 stays for the next pause. Under 2 pixels per block the map is filtered, so a pixel is the mean of a block's
 2x2 texels. It adds no texture: the two glyphs go in the markers' sheet. It is drawn in every frame in

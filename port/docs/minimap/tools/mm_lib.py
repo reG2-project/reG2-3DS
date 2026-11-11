@@ -171,3 +171,10 @@ def font(bold, size):
         except OSError:
             pass
     return ImageFont.load_default()
+
+
+# The 1999 pre-render look comes from the light: hard key light, deep occlusion, crisp glints, few colours.
+def shade_hard(c, ambient=0.06, diffuse=1.3, ao_r=1.8, ao_k=0.9, light_rgb=(1.0, 0.96, 0.86), contrast=1.3):
+    """shade() with a harder key light, deep crevices and a contrast curve."""
+    rgb, ao = shade(c, ambient, diffuse, ao_r, ao_k, light_rgb)
+    return np.clip((rgb - 0.3) * contrast + 0.3, 0, 1)

@@ -1,7 +1,7 @@
 # A minimap for the port
 
-Status: design study. The 3DS port draws frame E with a lid colour map on its bottom screen, with
-a stingier choice of layers (`port/docs/3ds.md`, Renderer). This note records the frame designs, the
+Status: design study. The 3DS port draws frame J (Device frames, below) with a lid colour map on its bottom
+screen, with a stingier choice of layers (`port/docs/3ds.md`, Renderer). This note records the frame designs, the
 map treatments, where every map layer comes from, and how it would be built.
 
 The goal is a minimap that looks like part of GTA2's own HUD rather than a modern overlay.
@@ -168,6 +168,60 @@ stations come from zone names, an educated guess.
 
 ![Minimap A with the block-kind map and points of interest](demo/minimap_pois.png)
 
+## Device frames for the 3DS bottom screen
+
+The 3DS bottom screen draws frame J, the police scanner, around its minimap (`port/3ds/minimap.cpp`,
+`port/docs/3ds.md`, Renderer); I, the other candidate, and E stay here. The minimap sits under the respect
+meters, the status row and the pager, at 1:1 in a 110x110 slot. Both frames are dark, industrial electronic
+devices of GTA2's 1999 city, in clean moulded plastic and anodised metal of the respect meters' rim colour (a
+dark warm brown, about `#382b1d` lit flat, `#1f1810` to `#67503a` across its bevels), with small saturated
+accents.
+
+![I and J: the frame x3, then 9-sliced at 110x110, 316x110 (the wide row) and 40x40 (a pause map button), x2](assets/frames/device_frames.png)
+
+| | Frame | Idea | Status lamps |
+|-|-------|------|--------------|
+| I | Tracker handset | Brown plastic, a darker anodised bezel with a thin teal glowing line, side vents, a black glass status window, the pager's orange button, a speaker grille below | One, in the status window beside the N |
+| J | Police scanner | Darker brown anodised metal, a light bar with the N, a deep CRT well with a metal lip, vent slots on the right, two knurled knobs | The light bar's two lenses: the territory's gang colour, its opinion of the player |
+
+The HUD sprites are 3D renders crushed to an 8-bit palette, and the frames get that look from the light, not
+from texture: `shade_hard` in `mm_lib.py` (low ambient, a hard key light from the top left, deep ambient
+occlusion, a contrast curve), crisp bevels, high specular on edges and screws, and 48 colours per frame with no
+dithering, so gradients step. Earlier rounds, in the history: clean but soft (fcf965af, with K, a field scope);
+per-pixel grain, wear and rust (3a7399d4), which read as a weathered object rather than an electronic device;
+clean but charcoal and black (8f85f0e9), which sat apart from the HUD's browns.
+
+The status lamps show game state: the frame has them as unlit glass, and `lamp_1x.png` is one lit lamp in
+white glass that the game draws over each with the state's colour as the vertex colour.
+
+They are drawn for the game's 9-slice (`DrawFrame` in `port/3ds/minimap.cpp`) rather than as fixed images:
+square corners `cap` px, each edge one strip of `rib` px from `rib_x` repeated, a centred tab on the top edge
+(and on the bottom one for I), the map `inset` px inside, the same 13 px as E, so the map keeps its 84 px
+(21 blocks). Edge details repeat every 4 px and the assets' edges are rebuilt from their strips, so the PNG is
+what the game draws at 110x110. `nine.json` in each frame's folder holds the numbers, and the lamps' places
+relative to their anchor piece:
+
+| | Size | cap | rib_x, rib | top tab x, w | bottom tab x, w | inset | lamps: anchor, x, y, w x h |
+|-|------|-----|------------|--------------|-----------------|-------|----------------------------|
+| E | 104x92 | 14 | 14, 7 | 44, 15 | | 13 | |
+| I | 110x110 | 18 | 18, 12 | 35, 40 | 35, 40 | 13 | top tab, 40, 3, 10x7 |
+| J | 110x110 | 20 | 20, 12 | 33, 44 | | 13 | top tab, 36 and 58, 2, 16x9 |
+
+In the game, for J:
+
+- `port/3ds/CMakeLists.txt` embeds its `frame_1x.png` and `lamp_1x.png`; `minimap.cpp` takes `kCap`, `kRibX`,
+  `kRib`, `kTabX`, `kTabW`, `kTube` (the inset) and the lenses' places from `nine.json`.
+- The atlas stays 128x128: the 110 px frame, a clear column, the 11 px arrow and the 16 px lens under it.
+  The wide row (`GTA2_3DS_MINIMAP=wide`, 316x110) takes 61 quads with the 12 px strip, under `DrawFrame`'s 160.
+- The pause map's zoom buttons are 40x40 squares of the frame without the tab: J's 20 px corners meet, leaving
+  E's 14 px hole for the glyph, with the corners' screws and knobs.
+- I would need a bottom tab in `DrawFrame` (the bottom edge drawn like the top one, around a tab from `h - cap`)
+  and its one lamp placed from the top tab.
+
+`tools/make_frames.py` renders them (and this preview) without game data. The candidates were compared in
+Azahar on Downtown's bottom screen through a temporary frame switch; the captures and `tools/compare_frames.py`'s
+sheets of them hold game graphics, so they are not in the repo.
+
 ## Prior art
 
 Existing radar mods for the original game, all from the same base: GTA3's radar code backported
@@ -198,7 +252,9 @@ tools/run_all.sh <game data dir> <game dir copy> <out dir>  # every image above,
 |--------|------|
 | `sty.py`, `scr.py`, `gmpzones.py` | Readers for `.sty` sprites and palettes, `.scr` commands and strings, `.gmp` zones |
 | `render_map.py` | Top-down render from lid tiles, plus height and ground type grids |
-| `mm_lib.py`, `designs.py` | Frame renderer and the eight frames |
+| `mm_lib.py`, `designs.py` | Frame renderer, the eight frames and the device frames I and J |
+| `make_frames.py` | The device frames' assets, `nine.json` and preview, without game data |
+| `compare_frames.py` | Side by side bottom screens of Azahar captures, one column per frame |
 | `make_all.py` | Frames, glass, masks, markers, composites, overviews |
 | `variants.py`, `placement.py` | Map treatment variants, HUD zone diagram |
 | `fullmap.py`, `minimap_pois.py` | Full maps with territories and points of interest, minimap with them |
