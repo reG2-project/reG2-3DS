@@ -41,6 +41,7 @@ enum Id
     kClock,
     kControls,
     kAimCamera,
+    kShowFps,
     kCount,
 };
 
@@ -106,6 +107,9 @@ bool TwinStick();
 bool DpadControls();
 // AIM CAMERA: with TWIN STICK, the view looks ahead toward the aim.
 bool AimCamera();
+
+// SHOW FPS: the frame rate, CPU time and memory over the game (port/3ds/fps_overlay.cpp).
+bool ShowFps();
 
 // SAFE AREA: the part of the screen's width or height kept clear at each edge, 0 to 0.1.
 f32 SafeArea();

@@ -1,4 +1,4 @@
-// GTA2_3DS_FPS=1: frames and logic steps per second, the main thread's CPU time per frame and the memory in use,
+// SHOW FPS (or GTA2_3DS_FPS=1): frames and logic steps per second, the main thread's CPU time per frame and the memory in use,
 // in the top screen's corner, refreshed a few times per second.
 #pragma once
 

@@ -458,9 +458,7 @@ The port's log is `gta2_log.txt` there (stderr and SDL's log), or `gta2_log_<nam
 `gta2_env.txt` there (or `gta2_env_<name>.txt` first, for a `.3dsx` not named `gta2`) sets environment variables, one
 `KEY=VALUE` per line: `GTA2_3DS_STATS=150` logs
 memory and renderer times every 150 frames, `GTA2_LOOP_STATS=1` steps, frames and their times,
-`GTA2_3DS_FPS=1` shows frames and logic steps per second, the main thread's CPU time per frame
-(without its waits for the GPU and its sleeps) and the heap and linear memory in use in the top screen's corner,
-over the last second and refreshed 4 times per second, `GTA2_UNCAPPED=1` draws as fast as it can (the logic
+`GTA2_3DS_FPS=1` turns on SHOW FPS whatever the setting, `GTA2_UNCAPPED=1` draws as fast as it can (the logic
 keeps its 30.3 steps per second, citro3d does not wait for the screens' refresh) to measure the headroom
 (Azahar, bil: about 185 frames per second walking at noon, 165 driving through traffic, about 100 driving at dusk,
 the same in New 3DS mode, which runs the same clock; Azahar leaves out the GPU's time),
@@ -616,6 +614,13 @@ renderer has no gamma), SAFE AREA, the OpenGL renderer's options, the CHINATOWN 
 tilt, HUD SCALE (the HUD has its own screen), 3D SOUND (no OpenAL Soft) and the bindings: the pad keeps its
 default bindings, stored ones are ignored. VIEW keeps CAMERA ZOOM, GRAPHICS LIGHT EFFECTS, on by default
 and lit per vertex (see Renderer); CAR HEADLIGHTS is off.
+SCREEN has SHOW FPS, off by default (`port_show_fps` in the registry; `PortPlatform::kFpsOverlay`, the 3DS only,
+`port/3ds/fps_overlay.cpp`): frames and logic steps per second, the main thread's CPU time per frame (without its
+waits for the GPU and its sleeps) and the heap and linear memory in use, in the top screen's corner, over the last
+second and refreshed 4 times per second. Its cost, in Azahar on a night train ride: 0.09 ms of main thread time a
+frame on, nothing measurable off (a cached setting read): 0.04 ms in its draw and its text (`mallinfo` too), 0.05 ms
+in the uploads of its 183 by 19 texture, 4 a second. With the console's 3.5 to 6.5 times Azahar's CPU times, about
+0.3 to 0.6 ms a frame there, under 2 % of a 30 fps frame.
 AIM CAMERA is there on the New 3DS only, told apart at run time (`APT_CheckNew3DS`), with its C-stick, and so is
 FRAME LIMIT above 30 (untested on hardware: no New 3DS was at hand).
 

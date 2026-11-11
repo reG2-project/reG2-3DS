@@ -2,6 +2,7 @@
 #include "stats_3ds.hpp"
 #include "../renderer/renderer.hpp"
 #include "../src/frame_loop.hpp"
+#include "../src/settings.hpp"
 #include <3ds.h>
 #include <malloc.h>
 #include <stdio.h>
@@ -43,6 +44,7 @@ const u8 kFont[][5] = {
 static_assert(sizeof(kFont) / sizeof(kFont[0]) == 'Z' - ' ' + 1, "a glyph per character");
 
 bool sInit;
+bool sForced;
 bool sOn;
 RTexture* spTex;
 s32 sW, sH;
@@ -64,8 +66,7 @@ void Init()
 {
     sInit = true;
     const char* pOn = getenv("GTA2_3DS_FPS");
-    sOn = pOn && atoi(pOn) != 0;
-    Stats3DS_CountSleeps(sOn);
+    sForced = pOn && atoi(pOn) != 0;
 }
 
 // The text as an image: white glyphs with a dark shadow on a translucent black box. Bytes r, g, b, a.
@@ -116,6 +117,13 @@ RTexture* Update(IRenderer& renderer, s32* pW, s32* pH)
     if (!sInit)
     {
         Init();
+    }
+    const bool on = sForced || PortSettings::ShowFps();
+    if (on != sOn)
+    {
+        sOn = on;
+        sCount = 0;
+        Stats3DS_CountSleeps(on);
     }
     if (!sOn)
     {
