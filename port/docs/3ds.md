@@ -461,8 +461,8 @@ From the 2004 Rockstar Classics installer, `port/tools/extract_gta2.sh GTA2INSTA
 Without the data in either, the top screen lists the folders tried and the files expected until START.
 The game's own error boxes (a missing city file, for example), which SDL cannot show on the 3DS, appear on
 the bottom screen until START (`--wrap=SDL_ShowSimpleMessageBox`) rather than the game closing silently.
-The port's log is `gta2_log.txt` there (stderr and SDL's log), or `gta2_log_<name>.txt` for a `.3dsx` not named `gta2`.
-`gta2_env.txt` there (or `gta2_env_<name>.txt` first, for a `.3dsx` not named `gta2`) sets environment variables, one
+The port's log is `gta2_log.txt` there (stderr and SDL's log), or `gta2_log_<name>.txt` for a `.3dsx` not named `gta2` or `reg2`.
+`gta2_env.txt` there (or `gta2_env_<name>.txt` first, for a `.3dsx` not named `gta2` or `reg2`) sets environment variables, one
 `KEY=VALUE` per line: `GTA2_3DS_STATS=150` logs
 memory and renderer times every 150 frames, `GTA2_LOOP_STATS=1` steps, frames and their times,
 `GTA2_3DS_FPS=1` turns on SHOW FPS whatever the setting, `GTA2_UNCAPPED=1` draws as fast as it can (the logic

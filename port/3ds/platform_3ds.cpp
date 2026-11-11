@@ -84,7 +84,7 @@ static void SDLCALL LogToStderr(void*, int, SDL_LogPriority, const char* message
     fprintf(stderr, "%s\n", message);
 }
 
-// gta2_env.txt, or gta2_env_<name>.txt first for a .3dsx not named gta2: KEY=VALUE lines, the environment the
+// gta2_env.txt, or gta2_env_<name>.txt first for a .3dsx not named gta2 or reg2: KEY=VALUE lines, the environment the
 // port's options and tests read.
 static void LoadEnvironment(const char* pOwnName)
 {
@@ -176,13 +176,13 @@ static bool TryLaunchFolder()
     return TryFolder(dir);
 }
 
-// <base>.txt, or <base>_<name>.txt for a .3dsx not named gta2 (so builds side by side keep their logs and settings).
+// <base>.txt, or <base>_<name>.txt for a .3dsx not named gta2 or reg2 (so builds side by side keep their logs and settings).
 static void SideFileName(const char* pPath, const char* pBase, char* pOut, size_t size)
 {
     const char* pName = pPath ? strrchr(pPath, '/') : NULL;
     pName = pName ? pName + 1 : pPath;
     const size_t len = pName ? strcspn(pName, ".") : 0;
-    if (len == 0 || (len == 4 && strncmp(pName, "gta2", 4) == 0))
+    if (len == 0 || (len == 4 && (strncmp(pName, "gta2", 4) == 0 || strncmp(pName, "reg2", 4) == 0)))
     {
         snprintf(pOut, size, "%s.txt", pBase);
         return;
