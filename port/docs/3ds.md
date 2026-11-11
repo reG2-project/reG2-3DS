@@ -558,7 +558,9 @@ CONTROLS (pause menu or OPTIONS) chooses MODERN, the default, CLASSIC, the origi
 CLASSIC D-PAD, the same on the d-pad; the choice is `port_console_controls` in the registry (1, 0 and 2),
 apart from the PC's `port_controls`. MODERN is TWIN STICK
 (`port/src/twin_stick.cpp`): without an aim the player turns to the way he walks; while L is held his
-facing stays the one he had at the press (`port_HoldFacing`), and the C-stick's aim comes first. Shots keep
+facing stays the one he had at the press (`port_HoldFacing`), and the C-stick's aim comes first. His shots and flames take
+on his speed along the way he walks (`PortTwinStick::WalkVelocity`), as the original's backward walk gives it, so
+backing off shortens their reach a little. Shots keep
 the original's lock on a ped near the line of fire, except while the C-stick aims (`PortTwinStick::FreeAim`). CLASSIC reads
 the circle pad as the original's arrows by the way it points past the dead zone, an 8-way gate: up or down
 alone within 30 degrees of straight, left or right alone within 22.5, both in between, so a diagonal runs and

@@ -17,6 +17,9 @@ namespace PortTwinStick
 void PedControls(Player* pPlayer, Ped* pPed);
 // At the start of Char::UpdateWalking: true if this step walks along the move, the facing to end with in *pFacing.
 bool Walk(Char* pChar, Ang16* pFacing);
+// In Char::Update, after the velocity along the facing: the walk's velocity is along its own direction, as
+// the original's backward walk gives it (the shots inherit it).
+void WalkVelocity(Char* pChar);
 // In Char::UpdateWalking, after the player's speed forward: the stick pushed a little walks, as the peds do
 // (CLASSIC too), further it runs.
 void WalkSpeed(Char* pChar);
