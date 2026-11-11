@@ -73,7 +73,12 @@ const Language kLanguages[] = {{'e', L"ENGLISH"}, {'f', L"FRANCAIS"}, {'g', L"DE
 const s32 kNumLanguages = sizeof(kLanguages) / sizeof(kLanguages[0]);
 
 const wchar_t* const kTextSpeeds[] = {L"VERY FAST", L"FAST", L"NORMAL", L"SLOW", L"VERY SLOW"};
+#if defined(__3DS__)
+// The frame loop paces on the 59.83 Hz refresh: anything above 60 would draw at 60.
+const s32 kMaxFpsValues[] = {30, 60};
+#else
 const s32 kMaxFpsValues[] = {30, 60, 120, 144, 240, 0};
+#endif
 const s32 kNumMaxFpsValues = sizeof(kMaxFpsValues) / sizeof(kMaxFpsValues[0]);
 const wchar_t* const kTextureFilters[] = {L"BILINEAR", L"TRILINEAR", L"ANISOTROPIC"};
 const s32 kNumTextureFilters = sizeof(kTextureFilters) / sizeof(kTextureFilters[0]);
