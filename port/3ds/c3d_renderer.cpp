@@ -109,6 +109,9 @@ const u32 kStateAlphaTexture = 1u << 29;
 // The game's textures go to VRAM while it has room, else to linear memory; least recently drawn are evicted beyond
 // what VRAM had free at start plus this share of linear memory. GTA2_3DS_TEXTURE_BUDGET=<KB> sets the share.
 const u32 kTextureBudget = 8192 * 1024;
+// Linear memory the game's textures leave free while older textures can make room instead: the map cache's meshes and
+// the VRAM staging buffers need it.
+const u32 kLinearReserve = 1024 * 1024;
 // Textures of their own of these sizes go to VRAM: made in a staging buffer in linear memory, copied by the GPU's DMA.
 // The smallest is above kVramHole, so none takes that hole.
 const u32 kMaxStaging = 512 * 1024;
@@ -746,7 +749,7 @@ struct C3DRenderer::Impl : HudTheme::Sink
     bool Allocate(RTexture* pTex, s32 tw, s32 th, GPU_TEXCOLOR fmt, s32 levels, bool clear, bool vram);
     bool AllocateSlot(RTexture* pTex, GPU_TEXCOLOR fmt, bool vram);
     bool FindSlot(RTexture* pTex, GPU_TEXCOLOR fmt, bool vram);
-    bool AddPage(GPU_TEXCOLOR fmt, bool vram);
+    bool AddPage(GPU_TEXCOLOR fmt, bool vram, bool reserve);
     void FreePage(size_t i);
     void CopyToVram(const u8* pSrc, u8* pDst, u32 rowBytes, u32 rows, u32 dstPitch);
     void CopyJob(RTexture* pTex, UploadJob* pJob);
@@ -760,6 +763,7 @@ struct C3DRenderer::Impl : HudTheme::Sink
     void LruRemove(RTexture* pTex);
     void LruAppend(RTexture* pTex);
     bool EvictOne();
+    bool EvictFor(bool slot, GPU_TEXCOLOR fmt, bool vram);
 };
 
 void C3DRenderer::Impl::LruRemove(RTexture* pTex)
@@ -792,6 +796,26 @@ bool C3DRenderer::Impl::EvictOne()
     pTex->mFailedFrame = 0;
     mEvictions++;
     return true;
+}
+
+// Frees the least recently drawn texture whose storage makes room for a slot of fmt (one FindSlot(fmt, vram) takes) or,
+// if !slot, for a texture of its own (in linear memory, or VRAM if vram), unless the GPU may still read it.
+bool C3DRenderer::Impl::EvictFor(bool slot, GPU_TEXCOLOR fmt, bool vram)
+{
+    for (RTexture* pTex = mLruHead; pTex; pTex = pTex->mLruNext)
+    {
+        const bool room = slot ? pTex->mPage && pTex->mTex.fmt == fmt && (vram || !pTex->mPage->mShadow)
+                               : !pTex->mPage && (vram || !InVram(pTex->mTex.data));
+        if (room && pTex->mUsedFrame != mFrame)
+        {
+            Release(pTex);
+            pTex->mEvicted = true;
+            pTex->mFailedFrame = 0;
+            mEvictions++;
+            return true;
+        }
+    }
+    return false;
 }
 
 static u32 BitsPerTexel(GPU_TEXCOLOR fmt)
@@ -955,8 +979,8 @@ bool C3DRenderer::Impl::FindSlot(RTexture* pTex, GPU_TEXCOLOR fmt, bool vram)
     return false;
 }
 
-// A page in VRAM, with its shadow, if asked and there is room; else in linear memory.
-bool C3DRenderer::Impl::AddPage(GPU_TEXCOLOR fmt, bool vram)
+// A page in VRAM, with its shadow, if asked and there is room; else in linear memory, leaving kLinearReserve if reserve.
+bool C3DRenderer::Impl::AddPage(GPU_TEXCOLOR fmt, bool vram, bool reserve)
 {
     AtlasPage* pPage = new AtlasPage();
     memset(pPage, 0, sizeof(*pPage));
@@ -969,7 +993,8 @@ bool C3DRenderer::Impl::AddPage(GPU_TEXCOLOR fmt, bool vram)
         linearFree(pPage->mShadow);
         pPage->mShadow = 0;
     }
-    if (!pPage->mShadow && !C3D_TexInitWithParams(&pPage->mTex.mTex, NULL, params))
+    if (!pPage->mShadow &&
+        ((reserve && linearSpaceFree() < bytes + kLinearReserve) || !C3D_TexInitWithParams(&pPage->mTex.mTex, NULL, params)))
     {
         delete pPage;
         return false;
@@ -1104,7 +1129,9 @@ bool C3DRenderer::Impl::AllocateSlot(RTexture* pTex, GPU_TEXCOLOR fmt, bool vram
     }
     while (!FindSlot(pTex, fmt, vram))
     {
-        if (!AddPage(fmt, vram) && !EvictOne())
+        // A freed slot frees no memory before its page empties: with no room for a page, a slot of the format goes, and
+        // the reserve only if there is none.
+        if (!AddPage(fmt, vram, true) && !EvictFor(true, fmt, vram) && !AddPage(fmt, vram, false) && !EvictOne())
         {
             mAllocFails++;
             pTex->mEvicted = true;
@@ -1261,10 +1288,18 @@ bool C3DRenderer::Impl::Allocate(RTexture* pTex, s32 tw, s32 th, GPU_TEXCOLOR fm
     while (pTex->mEvictable && mCachedBytes + bytes > mBudget && EvictOne())
     {
     }
+    // In VRAM if asked and there is room, else in linear memory, leaving kLinearReserve if reserve.
+    auto init = [&](bool reserve) {
+        return (vram && C3D_TexInitWithParams(&pTex->mTex, NULL, vramParams)) ||
+               ((!reserve || linearSpaceFree() >= bytes + kLinearReserve) && C3D_TexInitWithParams(&pTex->mTex, NULL, params));
+    };
+    // Short of a free block big enough, or of the reserve for a game's texture, older textures of their own go (slots free
+    // no memory before their page empties); then the reserve, then any texture.
     bool fits;
-    // Should no free block be big enough, older textures go until one is.
-    while (!(fits = (vram && C3D_TexInitWithParams(&pTex->mTex, NULL, vramParams)) || C3D_TexInitWithParams(&pTex->mTex, NULL, params)) &&
-           EvictOne())
+    while (!(fits = init(pTex->mEvictable)) && EvictFor(false, fmt, vram))
+    {
+    }
+    while (!fits && !(fits = init(false)) && EvictOne())
     {
     }
     if (!fits)
