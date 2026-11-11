@@ -616,7 +616,8 @@ renderer has no gamma), SAFE AREA, the OpenGL renderer's options, the CHINATOWN 
 tilt, HUD SCALE (the HUD has its own screen), 3D SOUND (no OpenAL Soft) and the bindings: the pad keeps its
 default bindings, stored ones are ignored. VIEW keeps CAMERA ZOOM, GRAPHICS LIGHT EFFECTS, on by default
 and lit per vertex (see Renderer); CAR HEADLIGHTS is off.
-AIM CAMERA is there on the New 3DS only, told apart at run time (`APT_CheckNew3DS`), with its C-stick.
+AIM CAMERA is there on the New 3DS only, told apart at run time (`APT_CheckNew3DS`), with its C-stick, and so is
+FRAME LIMIT above 30 (untested on hardware: no New 3DS was at hand).
 
 ## HOME, sleep and exit
 
