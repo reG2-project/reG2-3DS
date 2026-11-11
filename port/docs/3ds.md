@@ -606,18 +606,19 @@ in `Char::UpdateWalking`), so the player can turn on the spot; further, he runs.
 circle pad gives about 0.96 at the end of its travel, diagonals too (Azahar: 154 of the 160 that SDL's 3DS
 driver takes as full, 109 on each axis on a diagonal), so a run is reached a little past half way (not in CLASSIC D-PAD, where the d-pad runs). In MODERN and
 CLASSIC only the circle pad moves, so that the d-pad keeps the specials; L on foot in CLASSIC D-PAD gives the
-next weapon without leaving the d-pad or R. The original's SPECIAL 1 with left or right still turns a roof gun. In the menus B
-or START selects and A or SELECT goes back; the hints name the buttons as the console prints them
+next weapon without leaving the d-pad or R. The original's SPECIAL 1 with left or right still turns a roof gun. In the menus A
+or START selects and B or SELECT goes back; the hints name the buttons as the console prints them
 (`PortPlatform::PadButtonName`).
 
 The settings menu leaves out what the 3DS lacks (`PortPlatform::Has` in `port/src/platform.hpp`, answered
-in `platform_3ds.cpp`): the window, display modes and vsync, frame limits above 30, BRIGHTNESS (the
+in `platform_3ds.cpp`): the window, display modes and vsync, frame limits above 60, BRIGHTNESS (the
 renderer has no gamma), SAFE AREA, the OpenGL renderer's options, the CHINATOWN camera with its rotation and
 tilt, HUD SCALE (the HUD has its own screen), 3D SOUND (no OpenAL Soft) and the bindings: the pad keeps its
 default bindings, stored ones are ignored. VIEW keeps CAMERA ZOOM, GRAPHICS LIGHT EFFECTS, on by default
 and lit per vertex (see Renderer); CAR HEADLIGHTS is off.
 AIM CAMERA is there on the New 3DS only, told apart at run time (`APT_CheckNew3DS`), with its C-stick, and so is
-FRAME LIMIT above 30 (untested on hardware: no New 3DS was at hand).
+FRAME LIMIT: 30 ORIGINAL or 60, as the frame loop paces on the refresh (see New 3DS (Azahar)); an Old 3DS
+keeps 30 whatever the registry's `port_max_fps`.
 
 ## HOME, sleep and exit
 
@@ -1142,7 +1143,7 @@ The screens refresh at 59.83 Hz (4481136 ticks of the system clock), so FRAME LI
 refreshes, 29.9 per second, while the original steps its logic every 33 ms, 30.3 per second. On the 3DS the
 frame loop runs on the top screen's refresh rather than on that timer (`NextOnRefresh` in
 `port/src/frame_loop.cpp`, the waits in `c3d_context.cpp`): it waits for the refresh (citro3d's frame counters),
-begins a frame every 2 refreshes (FRAME LIMIT 30; every refresh at 60, a test value the menu leaves out) and
+begins a frame every 2 refreshes (FRAME LIMIT 30; every refresh at 60, offered on the New 3DS only) and
 steps the logic every 2 refreshes, 29.9 steps per second, 1.3 % slower than the original, as console games
 run on their screen's clock. Waiting for the refresh is the frame loop's only sleep, and the frame's first draw
 then does not wait again. citro3d's frame end hook holds the frame until the refresh after its start before it
@@ -1170,6 +1171,39 @@ second and the logic at 29.92 steps; after `GTA2_TEST_SUSPEND` the second after 
 On the console, `GTA2_3DS_PROF`: `refreshes` about 2.00 and `steps` 1.00 per frame, `late` near the share of
 frames whose work passes 33 ms, `loop.next` near 0 and its sleep in `wait.vsync`, `wait.bottom` near 0 (the
 bottom screen's refresh comes with the top's: if not, it is the time waiting for both costs).
+
+## New 3DS (Azahar)
+
+No New 3DS was at hand: checked in Azahar 2126.2's New 3DS mode (`is_new_3ds=true` in a copy of its config),
+which runs the Old 3DS's 268 MHz clock and cycle table, so its times are the Old 3DS mode's.
+
+- Downtown by night, the avenue drive (`GTA2_TEST_CAR` 42) then a walk, 5 minutes at FRAME LIMIT 60: no crash,
+  59.4 to 59.8 frames and 29.92 steps per second. Memory as on the Old 3DS (the heaps are fixed): heap peak 21.7 MB
+  of 34, linear heap 21.6 MB of 22 (the texture cache fills it; evictions, no failed allocation).
+- The pause menu's SCREEN page shows FRAME LIMIT (30 ORIGINAL, 60) and CONTROLS shows AIM CAMERA in New 3DS mode;
+  in Old 3DS mode neither, and `port_max_fps` 60 in the registry still draws 29.9 frames per second.
+- At 60 the frames alternate between one with a step and one without, drawn at 0 and 0.5 of the way to the next step
+  (`GTA2_LOOP_TRACE`: the camera and the player move by even halves); `prof_summary.py`: `refreshes` 1.00 to 1.02.
+- `test/pad_input.txt`'s `KEY_CSTICK_*` turn the player on foot to the C-stick's way (right, up, left, down; walking up
+  with the C-stick right he keeps facing right) and AIM CAMERA leads the view; ZR fires (the pistol's ammunition
+  goes down only while ZR is held).
+
+Azahar's times at 60 (`GTA2_3DS_PROF`, the timers' 2 to 3 ms a frame left out), per frame and per step:
+
+| Azahar, FRAME LIMIT 60 | Frames/s | Step | Draw (most in a block) | Wait for the refresh |
+|---|---|---|---|---|
+| wil drive at night | 59.4 | 1.56 ms | 2.67 ms (4.10) | 10.7 ms |
+| wil walk at night | 59.7 | 1.36 ms | 2.25 ms (2.91) | 11.8 ms |
+| explosion chain (`GTA2_TEST_BOOM` 12 cars) | 58.9 | 1.75 ms | 2.95 ms (4.77) | 10.2 ms |
+| bil train ride at night (`GTA2_TEST_TRAIN`) | 58.6 | 1.59 ms | 5.51 ms (6.98) | 7.3 ms |
+
+A frame with a step has to fit both in one refresh (16.7 ms). With Azahar 4 to 6 times optimistic on the Old 3DS's CPU
+and the New 3DS's 804 MHz with its L2 cache about 2.5 to 3 times an Old 3DS, a New 3DS would take about 1.3 to 2.4
+times Azahar's for a frame with a step (with the pump and the textures, about 0.5 ms more): 6 to 11 ms on average
+driving (up to 17 in the worst blocks), 7 to 12 in an explosion chain (up to 18) and 10 to 18 on a train ride in bil
+(up to 23), whose camera height shows 180 to 350 tiles. So 60 should mostly hold in the streets, with frames missing
+their refresh in the busiest blocks and often on train rides; the GPU, the Old 3DS's at the same clock (4 to 5 ms
+a street frame on the console), has to fit in 16.7 ms too. Only a console can tell.
 
 ## Next steps
 
