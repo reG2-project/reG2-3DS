@@ -182,7 +182,7 @@ accents.
 | | Frame | Idea | Status lamps |
 |-|-------|------|--------------|
 | I | Tracker handset | Brown plastic, a darker anodised bezel with a thin teal glowing line, side vents, a black glass status window, the pager's orange button, a speaker grille below | One, in the status window beside the N |
-| J | Police scanner | Darker brown anodised metal, a light bar with the N, a deep CRT well with a metal lip, vent slots on the right, two knurled knobs | The light bar's two lenses: the territory's gang colour, its opinion of the player |
+| J | Police scanner | Darker brown anodised metal, a light bar with the N, a deep CRT well with a metal lip, vent slots on the right, two knurled knobs | The light bar's lens: the territory's gang colour; a small lamp top right: red when that gang hates the player, else green |
 
 The HUD sprites are 3D renders crushed to an 8-bit palette, and the frames get that look from the light, not
 from texture: `shade_hard` in `mm_lib.py` (low ambient, a hard key light from the top left, deep ambient
@@ -191,8 +191,8 @@ dithering, so gradients step. Earlier rounds, in the history: clean but soft (fc
 per-pixel grain, wear and rust (3a7399d4), which read as a weathered object rather than an electronic device;
 clean but charcoal and black (8f85f0e9), which sat apart from the HUD's browns.
 
-The status lamps show game state: the frame has them as unlit glass, and `lamp_1x.png` is one lit lamp in
-white glass that the game draws over each with the state's colour as the vertex colour.
+The status lamps show game state: the frame has them as unlit glass, and `lamp_<name>_1x.png` is each one lit in
+white glass, which the game draws over it with the state's colour as the vertex colour.
 
 They are drawn for the game's 9-slice (`DrawFrame` in `port/3ds/minimap.cpp`) rather than as fixed images:
 square corners `cap` px, each edge one strip of `rib` px from `rib_x` repeated, a centred tab on the top edge
@@ -205,16 +205,16 @@ relative to their anchor piece:
 |-|------|-----|------------|--------------|-----------------|-------|----------------------------|
 | E | 104x92 | 14 | 14, 7 | 44, 15 | | 13 | |
 | I | 110x110 | 18 | 18, 12 | 35, 40 | 35, 40 | 13 | top tab, 40, 3, 10x7 |
-| J | 110x110 | 20 | 20, 12 | 33, 44 | | 13 | top tab, 36 and 58, 2, 16x9 |
+| J | 110x110 | 20 | 20, 12 | 33, 44 | | 13 | gang: top tab, 45, 2, 20x9; hostile: top right corner, 99, 4, 7x7 |
 
 In the game, for J:
 
-- `port/3ds/CMakeLists.txt` embeds its `frame_1x.png` and `lamp_1x.png`; `minimap.cpp` takes `kCap`, `kRibX`,
-  `kRib`, `kTabX`, `kTabW`, `kTube` (the inset) and the lenses' places from `nine.json`.
-- The atlas stays 128x128: the 110 px frame, a clear column, the 11 px arrow and the 16 px lens under it.
+- `port/3ds/CMakeLists.txt` embeds its `frame_1x.png` and its two lamps; `minimap.cpp` takes `kCap`, `kRibX`,
+  `kRib`, `kTabX`, `kTabW`, `kTube` (the inset) and the lamps' places from `nine.json`.
+- The atlas stays 128x128: the 110 px frame, a clear column and the 11 px arrow, the lamps under the frame.
   The wide row (`GTA2_3DS_MINIMAP=wide`, 316x110) takes 61 quads with the 12 px strip, under `DrawFrame`'s 160.
 - The pause map's zoom buttons are 40x40 squares of the frame without the tab: J's 20 px corners meet, leaving
-  E's 14 px hole for the glyph, with the corners' screws and knobs.
+  E's 14 px hole for the glyph, with the corners' screw, lamp (unlit) and knobs.
 - I would need a bottom tab in `DrawFrame` (the bottom edge drawn like the top one, around a tab from `h - cap`)
   and its one lamp placed from the top tab.
 

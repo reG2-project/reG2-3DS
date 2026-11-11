@@ -211,17 +211,18 @@ from the city's style:
   direction, also during missions. Its icon is the pause menu font's `+` (`gStylePauseFont`) cut into a
   Latin cross: arms one texel shorter than the stem is wide, the foot twice as long, with a shade around.
 
-The frame's light bar has two lenses, dark outside any territory. Inside one, the left lens is lit in that
-gang's colour at full brightness, and the right one in its opinion of the player, by the respect meter's bars:
-the colour of the meter's green lamp from 20 respect up, its red lamp from -20 down, its yellow lamp between
-(user sprites 46 to 48, their mean colour at full brightness). The frame holds the lenses as unlit glass, and one
-lit white lens in the atlas is drawn over each with its colour. The gang and its respect come with the rest of the
-minimap's state, read once a frame (`MinimapGame::View`), so the bottom screen redraws only when one changes.
+The frame has two lamps, dark outside any territory. Inside one, the lens in the middle of its light bar, right of
+the N, is lit in that gang's colour at full brightness, and the small lamp top right in the colour of the respect
+meter's red lamp when the gang hates the player (respect -20 and under, where the meter shows its minus sign),
+else its green lamp (user sprites 48 and 46, their mean colour at full brightness). The frame holds the lamps as
+unlit glass, and a lit white sprite of each in the atlas is drawn over it with its colour. The gang and its respect
+come with the rest of the minimap's state, read once a frame (`MinimapGame::View`), so the bottom screen redraws
+only when a lamp changes.
 
 Nothing else: no pickups, hidden weapons, secret tokens, frenzies, garages or mission targets.
 Arrows and icons are drawn at half size, as the bottom screen draws the HUD, pips and the cross at full
 size. The only colours of the port's own are shades (black with alpha: rims, shadows, the frame's shadow,
-the edges' shade, the cross's) and the frame, its lit lens and the player arrow, original art embedded at build
+the edges' shade, the cross's) and the frame, its lit lamps and the player arrow, original art embedded at build
 time from the study's PNGs by `embed_png.py`. The player arrow is drawn turned and filtered, so the atlas keeps a
 clear column between it and the frame.
 
@@ -230,7 +231,7 @@ The map is built once per city from the map and tiles in memory (about 200 ms in
 of linear memory). The territory edges are a 256x256 RGBA4 texture (128 KB, built when the gangs are set
 up, about 20 ms), the light tint over the player's territory a 256x256 A8 texture (64 KB) drawn in the
 gang's colour and filled again when the player changes territory (2 to 3 ms) from each block's gang,
-kept in the textures' order (64 KB of heap). The frame, the player's arrow and the lit lens are a 32 KB atlas, the
+kept in the textures' order (64 KB of heap). The frame, the player's arrow and the lit lamps are a 32 KB atlas, the
 game's sprites for the markers a 32 KB RGBA8 sheet made per city (the cross's shade has partial alpha).
 The game's headers and the renderer's clash, so `minimap_game.cpp` reads the game and `minimap.cpp` draws.
 `GTA2_3DS_MINIMAP=wide` gives the map the whole row while no brief shows; `off` leaves it out and gives the
