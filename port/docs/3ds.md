@@ -316,8 +316,8 @@ docker run --rm -u $(id -u):$(id -g) -v $PWD:$PWD -v $SDL:$SDL -w $PWD gta2-3ds-
      -DSDL3_DIR=$SDL/sdl3/lib/cmake/SDL3 -DCMAKE_BUILD_TYPE=RelWithDebInfo && ninja -C build_3ds"
 ```
 
-The result is `build_3ds/gta2.3dsx` (about 2.3 MB). Its Homebrew Launcher icon (48x48) is drawn from plain
-shapes by `make_icon.py` at build time (python3 is in the image), so no game art is involved.
+The result is `build_3ds/gta2.3dsx` (about 2.3 MB), titled reG2 in the Homebrew Launcher. Its 48x48 icon
+`port/3ds/icon.png` is lettered with Michroma (OFL), so no game art is involved.
 
 ### Profile guided optimisation
 

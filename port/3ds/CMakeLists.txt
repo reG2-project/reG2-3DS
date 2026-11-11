@@ -124,15 +124,12 @@ target_link_libraries(gta2 PRIVATE SDL3::SDL3-static ${opendsp} citro3d ctru m)
 target_link_options(gta2 PRIVATE -Wl,--wrap=hidScanInput,--wrap=hidKeysDown,--wrap=hidKeysUp,--wrap=hidCircleRead,--wrap=irrstCstickRead,--wrap=hidTouchRead,--wrap=SDL_ShowSimpleMessageBox,--wrap=svcSleepThread
     -Wl,--wrap=linearAlloc,--wrap=linearMemAlign,--wrap=linearRealloc,--wrap=linearGetSize,--wrap=linearFree,--wrap=linearSpaceFree)
 
-# The Homebrew Launcher's title, description, author and 48x48 icon.
-set(icon ${CMAKE_CURRENT_BINARY_DIR}/icon.png)
-add_custom_command(OUTPUT ${icon}
-    COMMAND python3 ${CMAKE_CURRENT_LIST_DIR}/make_icon.py ${icon}
-    DEPENDS ${CMAKE_CURRENT_LIST_DIR}/make_icon.py VERBATIM)
-set(GTA2_3DS_TITLE "GTA2" CACHE STRING "The Homebrew Launcher's title, at most 64 characters")
+# The Homebrew Launcher's title, description, author and 48x48 icon (lettering from Michroma, OFL; no game art).
+set(icon ${CMAKE_CURRENT_LIST_DIR}/icon.png)
+set(GTA2_3DS_TITLE "reG2" CACHE STRING "The Homebrew Launcher's title, at most 64 characters")
 set(smdh ${CMAKE_CURRENT_BINARY_DIR}/gta2.smdh)
 add_custom_command(OUTPUT ${smdh}
-    COMMAND ${DEVKITPRO}/tools/bin/smdhtool --create "${GTA2_3DS_TITLE}" "Grand Theft Auto 2, from the gta2_re decompilation. Needs the PC game's data."
+    COMMAND ${DEVKITPRO}/tools/bin/smdhtool --create "${GTA2_3DS_TITLE}" "GTA2 on the 3DS, from the gta2_re decompilation. Needs the PC game's data."
             "gta2_re" ${icon} ${smdh}
     DEPENDS ${icon} VERBATIM)
 add_custom_command(OUTPUT gta2.3dsx
