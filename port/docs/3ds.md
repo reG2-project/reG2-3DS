@@ -1076,11 +1076,38 @@ view), the
 cache's 50 to 120 draw calls a frame and its walls (330 a frame, the drive 120). Night adds little (lit primitives on
 the shader). Three costs come from the ride itself. The cache keeps 48 chunks and a loop passes more, so from about
 step 1000 each new chunk drops the oldest: 0.08 to 0.13 builds a frame, 2.2 to 3.1 ms each in Azahar, one a frame at
-most. In bil (and likely ste, where 117 of 609 builds were of invalid chunks) linear memory runs out (22.4 of 22.5 MB, the textures 14.5 MB and the meshes 0.9 to
-1.6 MB): `AllocateSlot` cannot add an atlas page and evicts the least recently drawn textures of any format until a
-slot of its own frees, 300 to 600 at once; every chunk using one is then invalid (`invalid` in the `MAPCACHE` line, 387
-of bil's 577 builds, 3 of wil's 384), the game draws the whole view itself for a block (400 to 700 tiles, `draw.map`
-7.2 to 7.4 ms) and the chunks are built again one a frame. The step is the drive's, but for ste's traffic (cars 1.2
+most. Linear memory ran out in bil and ste (22.4 of 22.5 MB, the textures 14.5 MB and the meshes 0.9 to 1.6 MB): an
+upload that did not fit evicted the least recently drawn textures of any kind until it did, 140 to 350 at once, though
+an evicted slot frees no memory before its page empties, and the meshes of new chunks then failed to allocate (the
+game drew those chunks, 400 to 700 tiles a frame and `draw.map` 7.2 to 7.4 ms in bil's worst blocks). Eviction now
+frees what makes room of the kind needed (a slot of the same format and pool, else textures of their own) and the
+game's textures leave 1 MB of linear memory free while older ones can go instead (`kLinearReserve`): evictions 1087,
+1817 and 1079 became 254, 995 and 652 (bil, ste, wil), the largest burst 52 textures of their own, and no mesh failed.
+Most of the invalid chunks (`invalid` in the `MAPCACHE` line, 387 of bil's 577 builds) came from animated wall tiles:
+the build recorded them, so each step of their animation failed the chunk's check and built it again. A build no
+longer looks up a tile seen animating: bil 148 builds (18 invalid), ste 512 (5). `draw.map` over the ride, bil 5.15 to
+4.55 ms (worst block 7.35 to 5.80, its tiles 427 to 248 a frame), ste 4.01 to 3.94, wil 3.64 to 3.70 (1 MB less for
+textures).
+
+The tiles the game draws itself at the train's height (per frame over the ride, a temporary counter in `RenderBlockAt`):
+
+| | bil (187) | ste (97) | wil (112) |
+|---|---|---|---|
+| flat blocks off the map's edge (`GetBlockClamped` repeats the edge) | 61 (105 in a block) | 0 | 0 |
+| gradient slopes | 53 | 32 | 42 |
+| walls of flat cells walked for what the game draws in front | 49 | 35 | 28 |
+| animated lids (wil: a whole layer in places, 155 in a block) | 5 | 10 | 23 |
+| other lids of cached chunks left to the game | 2 | 8 | 5 |
+| diagonal walls and triangular diagonals | 8 | 8 | 9 |
+| partial blocks (the El's pylons and rails) | 8 | 5 | 5 |
+
+The El is not what the train sees most: slopes and the walls next to them are, then in bil the clamped columns past
+the map's east edge, along which its first train runs. Caching those would take chunks past the edge built from the
+clamped blocks (about 40 lines in `map_cache.cpp`, up to 1.4 ms a frame on the console there, only near an edge);
+the animated lids a draw that binds the tile's current frame (some 60 to 100 lines, for a few places); slopes, the
+largest share everywhere, new geometry in the meshes and their walls' rules (well over 100 lines).
+
+The step is the drive's, but for ste's traffic (cars 1.2
 ms) and bil's six trains (`cars.car.other` 0.24 ms). With Azahar's 4 to 6 times, a console would spend about 28 to
 42 ms a frame in Downtown, 32 to 48 in ste and 35 to 53 in bil, the tiles at about 25 us each the largest part.
 

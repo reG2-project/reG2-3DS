@@ -26,8 +26,12 @@ streaming texture cache:
 - An upload that would take them over the budget (what VRAM has free at start, 5.3 MB, plus an 8 MB share of
   linear memory, `GTA2_3DS_TEXTURE_BUDGET=<KB>`) frees from the front first, wherever it is. Textures drawn in the current frame are never freed (the GPU reads them after the frame
   ends); those of earlier frames are safe, since `C3D_FrameBegin` waits for the GPU.
-- Should the allocation still fail (no free block big enough), more are freed until it fits. If nothing is
-  left to free, the texture draws untextured for that frame and is tried again on the next.
+- Should the allocation still fail (no free block big enough), more are freed until it fits: for a slot, the least
+  recently drawn slot of its format and pool, for a texture of its own textures of their own (a freed slot frees no
+  memory before its page empties), then any. If nothing is left to free, the texture draws untextured for that frame
+  and is tried again on the next.
+- The game's textures leave 1 MB of linear memory free (`kLinearReserve`) while older textures can make room instead:
+  the map cache's meshes and the VRAM staging buffers need it (see the train rides in `3ds.md`).
 - An evicted texture is converted again on its next draw (`IRenderer::Evicted`, checked by `Resolve`).
 - Evictable 64x64 textures with mip levels live in a slot of a 512x512 atlas page of their format (see
   Renderer in `3ds.md`). A slot is an entry of the list as a texture is, and counts for its share of its page
