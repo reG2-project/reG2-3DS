@@ -47,6 +47,7 @@ int sCapturedKey = -1;
 int sCapturedPad = -1;
 bool sMigrated;
 bool sMenuBlocked; // back from a game with a button still down: the menus wait for its release
+bool sAccelHeld; // R (RT) held since the player drove or was getting into a vehicle: it attacks once pressed again
 bool sMouseAims; // the mouse was used in game after the pad
 bool sKeyDown[256]; // by DIK code
 unsigned sButtonsDown; // bit n: SDL mouse button n
@@ -359,8 +360,7 @@ bool ConsoleDown(int control, bool car, int twin, bool roofGun, bool dpad)
         case 3:
             return dpad ? Button(SDL_GAMEPAD_BUTTON_DPAD_RIGHT) : (car ? x > kStickDeadZone : StickArrow(3));
         case 4:
-            // R also accelerates: held while getting in, it does not fire.
-            return (car ? Button(SDL_GAMEPAD_BUTTON_DPAD_DOWN) : r && !port_EnteringCar()) || CodeDown(11);
+            return (car ? Button(SDL_GAMEPAD_BUTTON_DPAD_DOWN) : r && !sAccelHeld) || CodeDown(11);
         case 5:
             return Button(SDL_GAMEPAD_BUTTON_EAST);
         case 6:
@@ -733,6 +733,9 @@ void port_UpdatePad()
     sWasQuitShown = quitShown;
     sGameBlocked = sGameBlocked && anyDown();
     const int twin = inGame && !quitShown ? port_TwinStick() : 0;
+    const bool console = Console();
+    const bool accel = console ? Button(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER) : CodeDown(11);
+    sAccelHeld = accel && (sAccelHeld || port_Driving() || port_EnteringCar());
     // The vehicle's triggers, unless FORWARD or BACKWARD has a pad input of the player's choice.
     const bool car = inGame && !quitShown && port_Driving() && port_GetPadBinding(0) == kPadUp && port_GetPadBinding(1) == kPadDown;
     bool l3Free = true;
@@ -742,7 +745,6 @@ void port_UpdatePad()
     }
     const bool lt = LtLooks();
     // TWIN STICK in a vehicle with a roof gun: RB fires, so the thumb stays on the aiming stick.
-    const bool console = Console();
     const bool dpad = console && port_DpadControls();
     const bool rbFires = !console && twin == 2 && port_TwinStickAims() && port_GetPadBinding(8) == 5;
     // The key bindings are registry reads: looked up only while a key is held.
@@ -768,7 +770,7 @@ void port_UpdatePad()
             !(rbFires && code == 5);
         const bool down = !move &&
             (console ? ConsoleDown(i, port_Driving(), twin, port_DrivingRoofGun(), dpad)
-                     : pad || AltDown(i) || (twin == 1 && i == 4 && CodeDown(11)) || (rbFires && i == 4 && CodeDown(5)));
+                     : pad || AltDown(i) || (twin == 1 && i == 4 && CodeDown(11) && !sAccelHeld) || (rbFires && i == 4 && CodeDown(5)));
         Press(i, inGame && !quitShown && !sGameBlocked && down);
     }
     if (inGame)

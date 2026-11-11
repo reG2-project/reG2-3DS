@@ -54,6 +54,7 @@ const f32 kLookFollow = 0.12f;
 
 Char* spWalker; // the ped walking this step, along sMove
 s32 sMove;
+Char* spWalked; // the ped that walked along sMove this step
 Char* spSlowWalker; // the ped walking at the walk speed this step
 s32 sJumpTurn;
 bool sMouse;
@@ -241,11 +242,22 @@ bool Walk(Char* pChar, Ang16* pFacing)
         return false;
     }
     spWalker = NULL;
+    spWalked = pChar;
     // The walk adds the turn to mRotation: it goes along sMove, and turns back to the facing at the end.
     const s32 turn = pChar->mpPed->GetTurnSpeed().rValue;
     *pFacing = Ang16(static_cast<s16>(pChar->mRotation.rValue + turn), 0);
     pChar->mRotation = Ang16(static_cast<s16>(sMove - turn), 0);
     return true;
+}
+
+void WalkVelocity(Char* pChar)
+{
+    if (pChar == spWalked)
+    {
+        spWalked = NULL;
+        Ang16 move(static_cast<s16>(sMove), 0);
+        pChar->mVelocityVector.SetFromPolar(pChar->mVelocity, move);
+    }
 }
 
 void WalkSpeed(Char* pChar)
