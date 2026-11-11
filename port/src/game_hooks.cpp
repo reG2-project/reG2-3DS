@@ -113,6 +113,16 @@ int port_TestBoom(unsigned step, int count, float spacing)
     return left;
 }
 
+void port_TestWanted(int stars)
+{
+    Player* pPlayer = port_GameRunning() ? gGame_0x40->mLocalPlayer : NULL;
+    Ped* pPed = pPlayer ? pPlayer->mPlayerPed : NULL;
+    if (pPed && pPed->get_wanted_star_count() < stars)
+    {
+        pPed->set_wanted_star_count(static_cast<u8>(stars));
+    }
+}
+
 int port_TestTrain(int index)
 {
     Player* pPlayer = port_GameRunning() ? gGame_0x40->mLocalPlayer : NULL;
