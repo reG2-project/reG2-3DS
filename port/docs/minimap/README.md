@@ -171,45 +171,69 @@ stations come from zone names, an educated guess.
 ## Device frames for the 3DS bottom screen
 
 Three candidates to replace E on the 3DS bottom screen, where the minimap sits under the respect meters, the
-status row and the pager, at 1:1 in a 110x110 slot. They are darker than E's copper and read as a gadget that
-shows a map, with the HUD's few materials, soft bevels, light from the top left and 128 colours.
+status row and the pager, at 1:1 in a 110x110 slot. Each reads as a gadget that shows a map, in the HUD sprites'
+own materials (the pager's dark plastic and khaki metal, the respect meters' warm brown rim, `#463624` to
+`#978f75`), with small saturated accents.
 
 ![I, J and K: the frame x3, then 9-sliced at 110x110, 316x110 (the wide row) and 40x40 (a pause map button), x2](assets/frames/device_frames.png)
 
-| | Frame | Idea |
-|-|-------|------|
-| I | Tracker handset | The pager's green-black plastic, a khaki bezel, grip ridges on the sides, a status window (N between a lit green LED and a dark red one), the pager's orange button, a speaker grille below |
-| J | Police scanner | F made darker: navy housing, a red and blue light bar with the N, a deep CRT well, vent slots on the right, two knurled knobs (the light bar could flash with the wanted level) |
-| K | Field scope | Satin black case, a bronze bezel like the respect meters' rims, a ruler of ticks around the screen, a bronze N plate, three status lamps below |
+| | Frame | Idea | Status lamp |
+|-|-------|------|-------------|
+| I | Tracker handset | The pager's dark plastic, a khaki metal bezel, grip ridges on the sides, the pager's orange button, a speaker grille below | In the status window on the top tab, beside the N |
+| J | Police scanner | Near-black plastic with a warm brown rim, a red and blue light bar with the N, a deep CRT well, vent slots on the right, two knurled knobs | Top right corner, in a khaki bezel |
+| K | Field scope | A case in the respect meters' warm brown, a khaki bezel, a khaki N plate, cross-head screws | In a recess on the bottom tab |
+
+A first, clean version of the three (commit fcf965af) looked too precise next to the HUD sprites. Those are
+3D renders crushed to an 8-bit palette: strong local contrast (near-white glints beside near-black shading),
+per-pixel grain, saturated colours, chunky shapes a little off true. A try with rust, worn edges and scratches
+went too far (a submarine's scanner rather than GTA2's HUD): `grit` can still wear and scratch, but the frames
+keep the HUD's clean pre-rendered materials. The grit pass in `mm_lib.py`:
+
+| Step | What it does |
+|------|--------------|
+| `shade_hard` | Low ambient, strong key light, deep ambient occlusion, a contrast curve |
+| `grit` | Grain per native pixel and light mottling in the albedo, a fine bump so the specular breaks into glints |
+| `_wobble` | A few tenths of a pixel of noise on the outlines |
+| Colours | 48 per frame rather than 128, no dithering, so gradients step |
+
+The status lamp is meant to show game state later: the colour of the gang whose territory the player is in, or
+green and red for whether that gang likes the player. The frame has it dark; `lamp_1x.png` is the lit lamp in
+white glass, drawn over it with the state's colour as the vertex colour.
 
 They are drawn for the game's 9-slice (`DrawFrame` in `port/3ds/minimap.cpp`) rather than as fixed images:
 square corners `cap` px, each edge one strip of `rib` px from `rib_x` repeated, a centred tab on the top edge
 (and on the bottom one for I and K), the map `inset` px inside, the same 13 px as E, so the map keeps its 84 px
-(21 blocks). Edge details repeat every 4 px, so a strip of 8 tiles with no seam and halves the quads of a 4 px
-one, and there is no key light falloff. `nine.json` in each frame's folder holds the numbers:
+(21 blocks). Edge details repeat every 4 px and the assets' edges are rebuilt from their strips, so the PNG is
+what the game draws at 110x110. `nine.json` in each frame's folder holds the numbers, and the lamp's place
+relative to its anchor piece:
 
-| | Size | cap | rib_x, rib | top tab x, w | bottom tab x, w | inset |
-|-|------|-----|------------|--------------|-----------------|-------|
-| E | 104x92 | 14 | 14, 7 | 44, 15 | | 13 |
-| I | 110x110 | 18 | 18, 8 | 35, 40 | 35, 40 | 13 |
-| J | 110x110 | 20 | 20, 8 | 33, 44 | | 13 |
-| K | 110x110 | 18 | 18, 8 | 40, 30 | 40, 30 | 13 |
+| | Size | cap | rib_x, rib | top tab x, w | bottom tab x, w | inset | lamp: anchor, x, y, w x h |
+|-|------|-----|------------|--------------|-----------------|-------|---------------------------|
+| E | 104x92 | 14 | 14, 7 | 44, 15 | | 13 | |
+| I | 110x110 | 18 | 18, 12 | 35, 40 | 35, 40 | 13 | top tab, 40, 3, 10x7 |
+| J | 110x110 | 20 | 20, 12 | 33, 44 | | 13 | top right corner, 99, 4, 7x7 |
+| K | 110x110 | 18 | 18, 12 | 40, 30 | 40, 30 | 13 | bottom tab, 49, 100, 12x8 |
 
 Switching the game to one of them:
 
-- `port/3ds/CMakeLists.txt`: `Frame=` names that frame's `frame_1x.png`.
+- `port/3ds/CMakeLists.txt`: `Frame=` names that frame's `frame_1x.png`, and a `Lamp=` its `lamp_1x.png`.
 - `minimap.cpp`: `kCap`, `kRibX`, `kRib`, `kTabX`, `kTabW` and `kTube` (the inset) from the table. I and K need a
   bottom tab in `DrawFrame`: the bottom edge drawn like the top one, around a tab from `h - cap`.
-- The atlas stays 128x128: a 110 px frame, a clear column and the 11 px arrow make 122. The wide row
-  (`GTA2_3DS_MINIMAP=wide`, 316x110) takes 66 to 88 quads with an 8 px strip, under `DrawFrame`'s 160.
+- The lamp: in the atlas under the arrow (the arrow is 13 high, so from row 16), one more quad in `DrawFrame`
+  for the minimap (not the buttons) placed from its anchor, with the state's colour; that colour joins the
+  signature in `Update`.
+- The atlas stays 128x128: a 110 px frame, a clear column and the 11 px arrow or 12 px lamp make at most 123.
+  The wide row (`GTA2_3DS_MINIMAP=wide`, 316x110) takes 61 to 65 quads with a 12 px strip, under
+  `DrawFrame`'s 160.
 - The pause map's zoom buttons are 40x40 squares of the frame without tabs: corners take 36 px of them (40 for
   J, whose corners meet), leaving E's 14 px hole for the glyph. They show the corners' details: I's orange button,
-  J's knobs, K's screws. Smaller corners for the buttons would need a separate button piece in the atlas.
+  J's lamp and knobs, K's screws. Smaller corners for the buttons would need a separate button piece in the atlas.
 - `port/docs/3ds.md` (Renderer) names the tube frame and its tube for the buttons.
 
 `tools/make_frames.py` renders them (and this preview) without game data. The candidates were compared in
-Azahar on Downtown's bottom screen by day and at night through a temporary `GTA2_3DS_MMFRAME` switch; the
-captures and `tools/compare_frames.py`'s sheets of them hold game graphics, so they are not in the repo.
+Azahar on Downtown's bottom screen by day and at night, the lamp in the gang's colour, green and red, through a
+temporary `GTA2_3DS_MMFRAME` and `GTA2_3DS_MMLAMP` switch; the captures and `tools/compare_frames.py`'s sheets
+of them hold game graphics, so they are not in the repo.
 
 ## Prior art
 

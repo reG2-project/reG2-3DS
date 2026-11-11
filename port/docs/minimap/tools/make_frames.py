@@ -1,13 +1,15 @@
-# Renders the device frames (designs.BUILDERS3, or those named) into assets/frames/<name> with their 9-slice in
-# nine.json, and device_frames.png, a preview of them all. No game data needed.
+# Renders the device frames (designs.BUILDERS3, or those named) into assets/frames/<name>, with their 9-slice and
+# status lamp in nine.json, and device_frames.png, a preview of them all. No game data needed.
 # usage: python3 -I make_frames.py <assets/frames dir> [I J ...]
 import json, os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import numpy as np
 from PIL import Image
 import designs
-from mm_lib import downsample
+from mm_lib import downsample, quantize
 from make_all import soft, rgba_from
+
+COLOURS = 48
 
 
 def nine_slice(frame, n, w, h, tab=True):
@@ -70,12 +72,19 @@ def main(out_dir, names):
         if names and d.name.split('_')[0] not in names:
             continue
         out = os.path.join(out_dir, d.name); os.makedirs(out, exist_ok=True)
+        anchor, lx0, ly0, lx1, ly1 = d.lamp_box
         for s in (1, 2):
-            downsample(d.rgb, d.canvas.alpha, s, 128).save(os.path.join(out, 'frame_%dx.png' % s))
+            # The edges rebuilt from their strips, as the game draws them, then crushed to few colours like the HUD.
+            ns = {k: v * s for k, v in d.nine.items()}
+            frame = nine_slice(downsample(d.rgb, d.canvas.alpha, s), ns, d.W * s, d.H * s)
+            quantize(frame, COLOURS).save(os.path.join(out, 'frame_%dx.png' % s))
+            lamp = downsample(d.lamp_rgb, d.lamp_alpha, s).crop((lx0 * s, ly0 * s, lx1 * s, ly1 * s))
+            quantize(lamp, 16).save(os.path.join(out, 'lamp_%dx.png' % s))
             grgb, ga = d.glass
             rgba_from(np.dstack([soft(grgb[..., i], s) for i in range(3)]), soft(ga, s)).save(os.path.join(out, 'glass_%dx.png' % s))
             m = soft((d.screen_sd < 0).astype(np.float32), s)
             Image.fromarray((m * 255).astype(np.uint8), 'L').save(os.path.join(out, 'screen_mask_%dx.png' % s))
+        d.nine['lamp'] = dict(anchor=anchor, x=lx0, y=ly0, w=lx1 - lx0, h=ly1 - ly0)
         with open(os.path.join(out, 'nine.json'), 'w') as f:
             json.dump(d.nine, f, indent=1)
             f.write('\n')

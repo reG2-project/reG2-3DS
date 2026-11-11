@@ -171,3 +171,65 @@ def font(bold, size):
         except OSError:
             pass
     return ImageFont.load_default()
+
+
+# Grit, to match the HUD sprites: a 3D render crushed to few colours has per-pixel grain and sharp glints.
+def value_noise(c, cell, seed):
+    """Smooth noise in -1..1 with features about `cell` native px wide."""
+    rng = np.random.default_rng(seed)
+    gh, gw = int(c.h / cell) + 3, int(c.w / cell) + 3
+    g = rng.random((gh, gw)).astype(np.float32) * 2 - 1
+    fy, fx = c.y / cell, c.x / cell
+    y0, x0 = fy.astype(int), fx.astype(int)
+    ty, tx = fy - y0, fx - x0
+    ty, tx = ty * ty * (3 - 2 * ty), tx * tx * (3 - 2 * tx)
+    top = g[y0, x0] * (1 - tx) + g[y0, x0 + 1] * tx
+    bot = g[y0 + 1, x0] * (1 - tx) + g[y0 + 1, x0 + 1] * tx
+    return top * (1 - ty) + bot * ty
+
+
+def pixel_noise(c, seed):
+    """One random value in -1..1 per native pixel."""
+    g = np.random.default_rng(seed).random((c.h, c.w)).astype(np.float32) * 2 - 1
+    return g[np.minimum(c.y.astype(int), c.h - 1), np.minimum(c.x.astype(int), c.w - 1)]
+
+
+def scratch_mask(c, mask, n, seed, length=(2.0, 6.0), width=0.4):
+    """Short straight scratches starting inside `mask`, mostly along the diagonals."""
+    rng = np.random.default_rng(seed)
+    ys, xs = np.nonzero(mask[::SS, ::SS])
+    out = np.zeros(c.x.shape, bool)
+    for _ in range(n if len(xs) else 0):
+        i = rng.integers(len(xs))
+        ax, ay = xs[i] + rng.random(), ys[i] + rng.random()
+        a = rng.choice([0.75, 2.35, 0.2, 1.4]) + rng.normal(0, 0.25)
+        ln = rng.uniform(*length)
+        ex, ey = np.cos(a) * ln, np.sin(a) * ln
+        px, py = c.x - ax, c.y - ay
+        t = np.clip((px * ex + py * ey) / (ln * ln), 0, 1)
+        out |= np.hypot(px - t * ex, py - t * ey) < width
+    return out & mask
+
+
+def grit(c, mask, seed, grain=0.09, bump=0.14, wear=0.0, wear_rgb=(200, 150, 96), scratches=0, mottle=0.08):
+    """Grain, mottling and a fine bump (glints) on the painted region `mask`, optionally worn edges and scratches."""
+    m = mask > 0
+    convex = np.clip((c.h_ - blur(c.h_, int(0.5 * SS))) * 2.5, 0, 1)
+    k = 1 + grain * pixel_noise(c, seed) + mottle * value_noise(c, 3.0, seed + 1)
+    c.alb[m] *= np.clip(k, 0.3, 1.8)[m][:, None]
+    c.h_ += np.where(m, bump * (0.6 * value_noise(c, 1.2, seed + 2) + 0.4 * pixel_noise(c, seed + 3)), 0)
+    worn = m & (convex > 0.5) & (value_noise(c, 1.5, seed + 4) > 1 - 2 * wear) if wear else np.zeros_like(m)
+    c.alb[worn] = c.alb[worn] * 0.4 + np.array(wear_rgb, np.float32) / 255 * 0.6
+    c.spec[worn] = np.maximum(c.spec[worn], 1.1); c.shin[worn] = 45
+    if scratches:
+        s = scratch_mask(c, m, scratches, seed + 5, length=(1.5, 4.0), width=0.35)
+        light = s & (pixel_noise(c, seed + 6) > 0.2)
+        c.alb[light] = np.array(wear_rgb, np.float32) / 255 * 0.8
+        c.spec[light] = 1.2
+        c.alb[s & ~light] *= 0.45
+
+
+def shade_hard(c, ambient=0.06, diffuse=1.3, ao_r=1.8, ao_k=0.9, light_rgb=(1.0, 0.96, 0.86), contrast=1.3):
+    """shade() with a harder key light, deep crevices and a contrast curve, for the gritty frames."""
+    rgb, ao = shade(c, ambient, diffuse, ao_r, ao_k, light_rgb)
+    return np.clip((rgb - 0.3) * contrast + 0.3, 0, 1)

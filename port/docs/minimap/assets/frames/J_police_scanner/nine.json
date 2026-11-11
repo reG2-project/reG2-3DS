@@ -1,10 +1,17 @@
 {
  "cap": 20,
  "rib_x": 20,
- "rib": 8,
+ "rib": 12,
  "tab_x": 33,
  "tab_w": 44,
  "btab_x": 0,
  "btab_w": 0,
- "inset": 13
+ "inset": 13,
+ "lamp": {
+  "anchor": "tr",
+  "x": 99,
+  "y": 4,
+  "w": 7,
+  "h": 7
+ }
 }
