@@ -523,6 +523,25 @@ the game too (A gets in and out of a car), so a drive starts after them: the ave
 phones in Downtown, east then west, is `GTA2_TEST_AT=900:56:50.5,1150:56.5:50.5:270,1950:173:54.5:90`,
 `GTA2_TEST_CAR=950:42:1.5:0` and R held (`1160 1940 200`, `1960 2750 200`).
 
+The train ride benchmark needs no buttons and runs the same on the console. `GTA2_TEST_TRAIN=<frame>[:<steps>[:<train>]]`
+waits from that frame for the city's first train with a passenger carriage (or the `<train>`th, from 0) to open its
+doors at a station, moves the player to a door and gives him the objective the ENTER control gives next to a train;
+he then rides it around the city with the game's train camera (height 9, against 3.8 for an R-type at top speed), and
+after `<steps>` steps riding the game quits (`test input: ... train ride over`). The trains start at their stations
+with the doors open, so the ride starts 20 to 80 steps after the frame; a boarding that fails is tried again at the
+next stop. Downtown's first train loops in about 2400 steps, Residential's in 2100; Industrial's first runs back and
+forth along the east edge (x 247 to 250) in about 1950 steps, its fourth (`:3`) through the middle of the city.
+`GTA2_REGISTRY=<file>` makes the port read and write that file instead of `gta2_registry.ini`, so a run picks its city
+and hour without touching the player's settings. `port/3ds/train_bench.sh <gta2_registry.ini> <dir>` writes, from the
+player's registry, `gta2_env_<city>_<night|day>.txt` for wil, ste and bil (`GTA2_REGISTRY`, `GTA2_3DS_PROF=150`,
+`GTA2_TEST_TRAIN=60:4500`) and the registry each names (`Debug`'s `skip_frontend`, `mapname`, `stylename` and
+`scriptname`, `day_start` 0 or 12). On the console: put them in `sdmc:/3ds/gta2/`, keep the usual `gta2_env.txt`
+aside, copy the wanted one to `gta2_env.txt` and start the game; it boots into the city, boards, rides for 4500
+steps (2.5 minutes, the logic keeps 30 steps a second at any frame rate) and returns to the Homebrew Launcher. Then
+`python3 port/3ds/prof_summary.py gta2_log.txt` (its first block, the load and the boarding, is left out), with
+`--blocks` for each block's place along the line and `--slow` for the frames over 45 ms. A ride is repeatable:
+two Azahar runs of Downtown by night gave the same step and draw times to 0.01 ms.
+
 ## Buttons
 
 The 3DS has a layout of its own (`PortPlatform::kConsoleControls`, `ConsoleDown` in `compat/src/pad.cpp`),
@@ -1026,6 +1045,36 @@ with 486 pixels one level off (lit by the shader rather than the CPU), one with 
 up to 9 levels off. Azahar's 4 to 6 times on the console's CPU put the saving at 5 to 9 ms a frame in such blocks.
 Each run has 4 frames of 70 to 140 ms in Azahar alone, in `C3D_FrameBegin` (timed in `draw.map.cache`, the frame's
 first draw) as the first blasts draw, both before and after; the averages above leave them out.
+
+Train rides (`GTA2_TEST_TRAIN=60:4500`, Running), Azahar in Old 3DS mode, 29 blocks of 150 frames each, against the
+scripted Downtown avenue drive (R-type, night, its 11 driving blocks). Per frame, in ms; the main thread is the step,
+the draw, the present, the textures and the pump; worst block in brackets:
+
+| | wil night | wil day | ste night | ste day | bil night | bil day | drive |
+|---|---|---|---|---|---|---|---|
+| main thread | 7.05 | 7.00 | 8.06 | 7.83 | 8.76 | 8.15 | 4.45 |
+| step | 1.19 | 1.22 | 1.72 | 1.76 | 1.32 | 1.35 | 1.12 |
+| draw | 4.77 | 4.60 | 5.21 | 4.96 | 6.39 | 5.79 | 2.52 |
+| draw.map | 3.64 (4.60) | 3.48 | 4.01 (4.98) | 3.78 | 5.15 (7.35) | 4.56 | 1.50 (2.18) |
+| game primitives, tiles | 183, 111 | 184, 118 | 176, 99 | 166, 97 | 285, 218 | 251, 189 | 79, 13 |
+| map cache draws | 0.98 | 0.96 | 1.11 | 1.11 | 0.89 | 0.90 | 0.62 |
+| chunk builds a frame (ms) | 0.08 (0.16) | 0.09 (0.17) | 0.13 (0.32) | 0.13 (0.31) | 0.13 (0.35) | 0.11 (0.32) | 0.03 (0.05) |
+| tex.upload | 0.24 | 0.31 | 0.24 | 0.23 | 0.16 | 0.13 | 0.15 |
+
+All ran at 29.8 to 29.9 frames per second in Azahar. The train's camera at height 9 sees about 24 chunks (15 on bil's
+edge line) where the drive sees 12, so the draw takes twice the drive's: the game's tiles (8 times as many in
+Downtown; as in the frozen Downtown frames above, mostly the El's partial blocks and slopes, with the rails always in
+view), the
+cache's 50 to 120 draw calls a frame and its walls (330 a frame, the drive 120). Night adds little (lit primitives on
+the shader). Three costs come from the ride itself. The cache keeps 48 chunks and a loop passes more, so from about
+step 1000 each new chunk drops the oldest: 0.08 to 0.13 builds a frame, 2.2 to 3.1 ms each in Azahar, one a frame at
+most. In bil (and likely ste, where 117 of 609 builds were of invalid chunks) linear memory runs out (22.4 of 22.5 MB, the textures 14.5 MB and the meshes 0.9 to
+1.6 MB): `AllocateSlot` cannot add an atlas page and evicts the least recently drawn textures of any format until a
+slot of its own frees, 300 to 600 at once; every chunk using one is then invalid (`invalid` in the `MAPCACHE` line, 387
+of bil's 577 builds, 3 of wil's 384), the game draws the whole view itself for a block (400 to 700 tiles, `draw.map`
+7.2 to 7.4 ms) and the chunks are built again one a frame. The step is the drive's, but for ste's traffic (cars 1.2
+ms) and bil's six trains (`cars.car.other` 0.24 ms). With Azahar's 4 to 6 times, a console would spend about 28 to
+42 ms a frame in Downtown, 32 to 48 in ste and 35 to 53 in bil, the tiles at about 25 us each the largest part.
 
 ### Pacing
 

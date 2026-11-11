@@ -4,6 +4,7 @@
 #include "Game.hpp"
 #include "Ped.hpp"
 #include "Player.hpp"
+#include "PublicTransport.hpp"
 #include "Camera.hpp"
 #include "pause_menu.hpp"
 #include "hud_screen.hpp"
@@ -110,6 +111,58 @@ int port_TestBoom(unsigned step, int count, float spacing)
         }
     }
     return left;
+}
+
+int port_TestTrain(int index)
+{
+    Player* pPlayer = port_GameRunning() ? gGame_0x40->mLocalPlayer : NULL;
+    Ped* pPed = pPlayer ? pPlayer->mPlayerPed : NULL;
+    if (!pPed || !gPublicTransport_181C)
+    {
+        return 0;
+    }
+    if (pPed->IsInTrain())
+    {
+        pPlayer->mGameCamera.SetSmoothFollow();
+        return 3;
+    }
+    if (pPed->get_objective() == objectives_enum::enter_train_37)
+    {
+        return 2;
+    }
+    for (s32 i = 0; i < 10; i++)
+    {
+        const Train& train = gPublicTransport_181C->mTrainArray[i];
+        Car* pWagon = NULL;
+        for (s32 w = 1; train.mCarriages[0] && w <= train.mWagonCount && !pWagon; w++)
+        {
+            pWagon = train.mCarriages[w] && train.mCarriages[w]->GetCarInfoIdx() == car_model_enum::TRAIN ? train.mCarriages[w] : NULL;
+        }
+        if (!pWagon || index-- > 0)
+        {
+            continue;
+        }
+        // Stop phase 7: doors open, the platform's peds boarding (PublicTransport::PublicTransportService).
+        for (u8 door = 0; train.mStopPhase == 7 && pPed->mGameObject && door < static_cast<u8>(pWagon->GetDoorCount()); door++)
+        {
+            if (pWagon->IsDoorAccessible(door))
+            {
+                Fix16 x, y;
+                pWagon->GetDoorWorldPosition(door, &x, &y);
+                pPed->TeleportToCoord(x, y);
+                pPlayer->mGameCamera.SetSnapFollow();
+                // As the ENTER OR EXIT control does next to a train (Player::HandleControls).
+                pPed->SetObjective2(objectives_enum::no_obj_0);
+                pPed->SetObjective(objectives_enum::enter_train_37);
+                pPed->SetTargetObjectiveCar(pWagon);
+                pPed->set_enter_car_as_passenger(0);
+                pPed->set_target_car_door(0);
+                return 2;
+            }
+        }
+        return 1;
+    }
+    return 0;
 }
 
 const char* port_TestTeleport(float x, float y, float degrees)
