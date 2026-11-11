@@ -331,7 +331,7 @@ namespace PortPlatform
 bool Has(Feature feature)
 {
     // Two fixed screens, the HUD on its own, the original's camera, the citro3d renderer's classic look and the
-    // console's own buttons; the New 3DS's C-stick aims.
+    // console's own buttons, the FPS overlay; the New 3DS's C-stick aims.
     static int sNew3ds = -1;
     if (sNew3ds < 0)
     {
@@ -339,7 +339,7 @@ bool Has(Feature feature)
         APT_CheckNew3DS(&isNew);
         sNew3ds = isNew;
     }
-    return feature == kConsoleControls || ((feature == kTwinStick || feature == kFastFrames) && sNew3ds);
+    return feature == kConsoleControls || feature == kFpsOverlay || ((feature == kTwinStick || feature == kFastFrames) && sNew3ds);
 }
 
 const wchar_t* PadButtonName(int code)

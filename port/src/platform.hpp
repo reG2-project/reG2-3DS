@@ -18,6 +18,7 @@ enum Feature
     kKeyboard,
     kTwinStick, // a second stick to aim with
     kConsoleControls, // the console's own pad layout (compat/src/pad.cpp), CONTROLS CLASSIC or MODERN
+    kFpsOverlay, // SHOW FPS: frame rate, CPU time and memory over the game
 };
 
 bool Has(Feature feature);

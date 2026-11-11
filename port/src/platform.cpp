@@ -6,7 +6,7 @@ namespace PortPlatform
 {
 bool Has(Feature feature)
 {
-    return feature != kConsoleControls;
+    return feature != kConsoleControls && feature != kFpsOverlay;
 }
 
 const wchar_t* PadButtonName(int code)
