@@ -543,6 +543,9 @@ the same buttons on foot and in a vehicle; SDL's 3DS mapping gives the buttons b
 | ZR, ZL (New 3DS) | attack, nothing | attack, nothing |
 | C-stick (New 3DS) | MODERN: aims (TWIN STICK's aim) | MODERN: turns the roof gun |
 
+R held while the player gets into a vehicle, or still held from driving as he gets out, does not attack: it
+attacks once released and pressed again (`sAccelHeld` in `compat/src/pad.cpp`; RT the same in the PC's TWIN STICK).
+
 CLASSIC D-PAD moves on the d-pad instead, and the circle pad takes what the d-pad did:
 
 | Button | On foot | In a vehicle |
