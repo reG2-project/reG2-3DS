@@ -4,9 +4,9 @@
 #if !defined(__3DS__)
 namespace PortPlatform
 {
-bool Has(Feature)
+bool Has(Feature feature)
 {
-    return true;
+    return feature != kConsoleControls;
 }
 
 const wchar_t* PadButtonName(int code)
