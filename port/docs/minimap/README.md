@@ -172,20 +172,22 @@ stations come from zone names, an educated guess.
 
 Two candidates to replace E on the 3DS bottom screen, where the minimap sits under the respect meters, the
 status row and the pager, at 1:1 in a 110x110 slot: dark, industrial electronic devices of GTA2's 1999 city,
-in clean charcoal moulded plastic and black anodised metal, with small saturated accents.
+in clean moulded plastic and anodised metal of the respect meters' rim colour (a dark warm brown, about
+`#382b1d` lit flat, `#1f1810` to `#67503a` across its bevels), with small saturated accents.
 
 ![I and J: the frame x3, then 9-sliced at 110x110, 316x110 (the wide row) and 40x40 (a pause map button), x2](assets/frames/device_frames.png)
 
 | | Frame | Idea | Status lamp |
 |-|-------|------|-------------|
-| I | Tracker handset | Charcoal plastic, a black anodised bezel with a thin teal glowing line, side vents, a black glass status window, the pager's orange button, a speaker grille below | In the status window, beside the N |
-| J | Police scanner | Black anodised metal, a red and blue light bar with the N, a deep CRT well with a gunmetal lip, vent slots on the right, two knurled knobs | Top right corner, in a gunmetal bezel |
+| I | Tracker handset | Brown plastic, a darker anodised bezel with a thin teal glowing line, side vents, a black glass status window, the pager's orange button, a speaker grille below | In the status window, beside the N |
+| J | Police scanner | Darker brown anodised metal, a red and blue light bar with the N, a deep CRT well with a metal lip, vent slots on the right, two knurled knobs | Top right corner, in a metal bezel |
 
 The HUD sprites are 3D renders crushed to an 8-bit palette, and the frames get that look from the light, not
 from texture: `shade_hard` in `mm_lib.py` (low ambient, a hard key light from the top left, deep ambient
 occlusion, a contrast curve), crisp bevels, high specular on edges and screws, and 48 colours per frame with no
 dithering, so gradients step. Earlier rounds, in the history: clean but soft (fcf965af, with K, a field scope);
-per-pixel grain, wear and rust (3a7399d4), which read as a weathered object rather than an electronic device.
+per-pixel grain, wear and rust (3a7399d4), which read as a weathered object rather than an electronic device;
+clean but charcoal and black (8f85f0e9), which sat apart from the HUD's browns.
 
 The status lamp is meant to show game state later: the colour of the gang whose territory the player is in, or
 green and red for whether that gang likes the player. The frame has it dark; `lamp_1x.png` is the lit lamp in

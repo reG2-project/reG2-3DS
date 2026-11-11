@@ -445,9 +445,9 @@ BUILDERS = [respect_ring, pager_handset, steel_plate, compass_dial]
 BUILDERS2 = [tube_frame, police_scanner, dash_gauge, gps_handheld]
 
 
-# Frames for the 3DS bottom screen's 9-slice (port/3ds/minimap.cpp, README's device frames) at its 110x110 slot:
-# clean moulded plastic and anodised metal. Edge details repeat every 4 px; make_frames.py rebuilds edges from a strip.
-GUNMETAL = hexrgb('#5a5f68'); BLACK_METAL = hexrgb('#16171b')
+# Frames for the 3DS bottom screen's 9-slice (port/3ds/minimap.cpp, README's device frames) at its 110x110 slot, in
+# the respect meters' dark warm brown. Edge details repeat every 4 px; make_frames.py rebuilds edges from a strip.
+GUNMETAL = hexrgb('#6a6052'); BLACK_METAL = hexrgb('#22180f')
 
 
 def _nine(d, cap, rib, tab_w, btab_w=0, inset=13):
@@ -502,14 +502,14 @@ def _finish(d, c, screen, map_style='colour'):
 
 
 def tracker_handset():
-    """I: a handheld tracker in charcoal moulded plastic: black anodised bezel with a thin glowing line, side vents,
+    """I: a handheld tracker in dark brown moulded plastic: dark anodised bezel with a thin glowing line, side vents,
     a black glass status window with the status lamp and an N, the pager's orange button, a speaker grille below."""
     d = Design(); d.name = 'I_tracker_handset'; d.title = 'I  Tracker handset'
     d.W = d.H = W = H = 110
     _nine(d, cap=18, rib=12, tab_w=40, btab_w=40)
     c = Canvas(W, H)
     body = sd_rrect(c, 0.5, 0.5, W - 0.5, H - 0.5, 9)
-    _housing(c, body, hexrgb('#2e3238'), 0.6, 30, 3.5, 5.0)
+    _housing(c, body, hexrgb('#4a3826'), 0.6, 30, 3.5, 5.0)
     c.h_[np.abs(body + 2.2) < 0.45] -= 0.9
     side = ((c.x > 3) & (c.x < 7.5) | (c.x > W - 7.5) & (c.x < W - 3)) & (c.y > 18) & (c.y < H - 18)
     c.paint(side & (((c.y - 18) % 4) < 1.6), hexrgb('#060708'), add=-1.8)
@@ -542,14 +542,14 @@ def tracker_handset():
 
 
 def police_scanner2():
-    """J: a police scanner in black anodised metal: red and blue light bar with an N between, a deep CRT well with a
-    gunmetal lip, vent slots on the right, two knurled knobs below, the status lamp in a gunmetal bezel top right."""
+    """J: a police scanner in dark brown anodised metal: red and blue light bar with an N between, a deep CRT well
+    with a metal lip, vent slots on the right, two knurled knobs below, the status lamp in a metal bezel top right."""
     d = Design(); d.name = 'J_police_scanner'; d.title = 'J  Police scanner'
     d.W = d.H = W = H = 110
     _nine(d, cap=20, rib=12, tab_w=44)
     c = Canvas(W, H)
     body = sd_rrect(c, 0.5, 0.5, W - 0.5, H - 0.5, 11)
-    _housing(c, body, hexrgb('#202226'), 0.9, 45, 4.5, 6.0)
+    _housing(c, body, hexrgb('#3a2b1e'), 0.9, 45, 4.5, 6.0)
     c.h_[np.abs(body + 2.5) < 0.45] -= 0.9
     bar = sd_rrect(c, 34, 0.5, 76, 12.5, 4)
     c.paint(bar < 0, hexrgb('#0c0c0e'), spec=0.8, shin=40, height=6.0 + profile_round(np.minimum(-bar, 1.5), 3.0, 1.5))
@@ -577,7 +577,7 @@ def police_scanner2():
                         (x - 0.7 * np.cos(a + 1.57), y - 0.7 * np.sin(a + 1.57))])
         c.paint(p < 0.2, hexrgb('#0c0c0e'), spec=0.4, add=-0.6)
     well = sd_rrect(c, 9, 9, W - 9, H - 9, 9)
-    c.paint(well < 0, hexrgb('#08090a'), spec=0.5, shin=30, height=6.0 - 4.5 * np.clip(-well / 3.5, 0, 1))
+    c.paint(well < 0, hexrgb('#0c0906'), spec=0.5, shin=30, height=6.0 - 4.5 * np.clip(-well / 3.5, 0, 1))
     screen = sd_rrect(c, 13, 13, W - 13, H - 13, 6)
     lip = (screen >= 0) & (screen < 1.4)
     c.paint(lip, GUNMETAL, spec=1.3, shin=60, height=1.5 + profile_round(screen, 1.4, 0.7))
