@@ -339,6 +339,12 @@ const Look& LookUp(Chunk& c, u16 logical, bool colourKey)
     l.build = sBuildStamp;
     l.key = key;
     l.pTex = 0;
+    // An animated tile's faces stay with the game: recorded, each of its frames would invalidate the chunk.
+    if ((sAnimated[logical >> 5] >> (logical & 31)) & 1)
+    {
+        l.none = false;
+        return l;
+    }
     const s16 physical = gGtx_0x106C->GetTile(logical);
     const u16 textureIdx = (u16)physical;
     l.none = !textureIdx;
