@@ -13,6 +13,8 @@
 //   GTA2_EXIT_AT=<frame>                            quit at that frame
 //   GTA2_TEST_AT=<frame>:<x>:<y>[:<degrees>],...     the player (or his vehicle, turned) moved to that block point
 //   GTA2_TEST_BOOM=<frame>:<cars>[:<spacing>]        cars around the player set burning and blown up in turn
+//   GTA2_TEST_TRAIN=<frame>[:<steps>[:<train>]]     the player into the city's first train (or that one) at its
+//                                                   next stop, quit after that many steps riding
 // Frames count Vid_FlipBuffers calls, but logic steps while the game runs (port_FrameCount), so the same
 // script presses the same keys on the same game step at any frame rate.
 #include "port_platform.hpp"
@@ -73,6 +75,11 @@ float sCarDy;
 unsigned sBoomAt;
 int sBoomCars;
 float sBoomSpacing = 1.2f;
+unsigned sTrainAt;
+unsigned sTrainSteps;
+int sTrainIndex;
+unsigned sTrainRideEnd;
+int sTrainState;
 struct Move
 {
     unsigned mFrame;
@@ -95,6 +102,10 @@ void Load()
     if (const char* boom = getenv("GTA2_TEST_BOOM"))
     {
         sscanf(boom, "%u:%d:%f", &sBoomAt, &sBoomCars, &sBoomSpacing);
+    }
+    if (const char* train = getenv("GTA2_TEST_TRAIN"))
+    {
+        sscanf(train, "%u:%u:%d", &sTrainAt, &sTrainSteps, &sTrainIndex);
     }
     for (const char* at = getenv("GTA2_TEST_AT"); at && *at; at = strchr(at, ',') ? strchr(at, ',') + 1 : "")
     {
@@ -340,6 +351,25 @@ void port_InjectTestInput(unsigned frame)
             SDL_Log("test input: frame %u boom, %d cars", frame, left);
         }
         sBoomAt = left ? sBoomAt : 0;
+    }
+    if (sTrainAt && frame >= sTrainAt && port_GameRunning())
+    {
+        const int state = port_TestTrain(sTrainIndex);
+        if (state != sTrainState)
+        {
+            static const char* const kStates[] = {"no train", "waiting", "boarding", "riding"};
+            SDL_Log("test input: frame %u train %s", frame, kStates[state]);
+            sTrainRideEnd = state == 3 && !sTrainRideEnd && sTrainSteps ? frame + sTrainSteps : sTrainRideEnd;
+            sTrainState = state;
+        }
+        if (sTrainRideEnd && frame >= sTrainRideEnd)
+        {
+            SDL_Log("test input: frame %u train ride over, quitting", frame);
+            sTrainAt = 0;
+            SDL_Event e = {};
+            e.type = SDL_EVENT_QUIT;
+            SDL_PushEvent(&e);
+        }
     }
     for (auto it = sMoves.begin(); it != sMoves.end() && port_GameRunning();)
     {
