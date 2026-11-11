@@ -13,6 +13,7 @@
 //   GTA2_EXIT_AT=<frame>                            quit at that frame
 //   GTA2_TEST_AT=<frame>:<x>:<y>[:<degrees>],...     the player (or his vehicle, turned) moved to that block point
 //   GTA2_TEST_BOOM=<frame>:<cars>[:<spacing>]        cars around the player set burning and blown up in turn
+//   GTA2_TEST_WANTED=<frame>:<stars>                 the player's wanted level kept at least that high from then on
 //   GTA2_TEST_TRAIN=<frame>[:<steps>[:<train>]]     the player into the city's first train (or that one) at its
 //                                                   next stop, quit after that many steps riding
 // Frames count Vid_FlipBuffers calls, but logic steps while the game runs (port_FrameCount), so the same
@@ -69,6 +70,8 @@ std::vector<KeyEvent>& Events()
 
 unsigned sExitAt;
 unsigned sCarAt;
+unsigned sWantedAt;
+int sWantedStars;
 int sCarModel;
 float sCarDx = 1.5f;
 float sCarDy;
@@ -102,6 +105,10 @@ void Load()
     if (const char* boom = getenv("GTA2_TEST_BOOM"))
     {
         sscanf(boom, "%u:%d:%f", &sBoomAt, &sBoomCars, &sBoomSpacing);
+    }
+    if (const char* wanted = getenv("GTA2_TEST_WANTED"))
+    {
+        sscanf(wanted, "%u:%d", &sWantedAt, &sWantedStars);
     }
     if (const char* train = getenv("GTA2_TEST_TRAIN"))
     {
@@ -351,6 +358,10 @@ void port_InjectTestInput(unsigned frame)
             SDL_Log("test input: frame %u boom, %d cars", frame, left);
         }
         sBoomAt = left ? sBoomAt : 0;
+    }
+    if (sWantedAt && frame >= sWantedAt && port_GameRunning())
+    {
+        port_TestWanted(sWantedStars);
     }
     if (sTrainAt && frame >= sTrainAt && port_GameRunning())
     {

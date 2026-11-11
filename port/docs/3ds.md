@@ -527,7 +527,8 @@ puts a car of that model (54 the tank, 42 the R-type) beside the player at that 
 `GTA2_TEST_AT=<frame>:<x>:<y>[:<degrees>],...` moves the player there (in blocks), or his vehicle turned to that
 heading (0 north, 90 west, 180 south, 270 east); the log names what moved. `GTA2_TEST_BOOM=<frame>:<cars>[:<spacing>]`
 parks that many cars (R-types and S-types) in two rows that far above and below the player (1.2 blocks by default),
-sets one burning every 20 steps and blows each up 75 steps after (`port_TestBoom`). On foot the camera takes about
+sets one burning every 20 steps and blows each up 75 steps after (`port_TestBoom`). `GTA2_TEST_WANTED=<frame>:<stars>` keeps the
+player's wanted level at least that high from that frame on (`port_TestWanted`), for police chases. On foot the camera takes about
 400 steps to follow a far `GTA2_TEST_AT`, and parked cars off the screen for 130 steps despawn, so the explosion chain
 of Speed is `GTA2_TEST_AT=700:87.5:33.5`, `GTA2_TEST_BOOM=1250:12:1.2` after the menus' presses, with the registry's
 `Debug` key `do_invulnerable` (the player stands among the blasts). The menus' presses of `padA.txt` reach
@@ -1009,6 +1010,19 @@ the console the walks' cache misses might make it a gain, which only a measureme
 of the particles is their own update (the circular bursts 40 %, sprite sizes and depth), and the objects'
 time goes to their collisions against grid 1 (rows of 4.7 cells, as outside chains) and their movement, with
 no repeated work of the zone kind.
+
+Train rides and police chases (console logs of the three night rides, Linux sampling of the logic without the sound
+pass, which runs on the system core here). The step is mostly cars: in ste (10.6 ms on the console) the AI driven
+cars 3.3 ms, the visit of the 104 parked ones 1.7, the trains 1.6, the peds 2.3. On Linux the sprite grid's removals
+and re-adds are 15 % of the step, and the conveyors and destructors (object models 139 and 141, 10 in wil and 14 in
+ste) 6 % wherever the player is: each checks its strips of grids 1 and 2 every step (in ste 126 row walks, 585
+cells passed before their x, 280 links). Police cars cost what traffic cars do (`Police::Service` under 1 %); cops
+on foot spend their AI in the sprite grid's spiral search for targets and, when the player is out of reach, in
+`PathFinder::ComputePath` (Azahar: the peds' AI from 0.2 to 1.0 ms a step, 4000 map reads a step), where 90 % of
+the searches repeat the same ped's last one with the same start, end and facing. Caching those would mean saving and
+restoring the path finder's whole state; left as it is, as are the conveyors (no exact shortcut without a per-row
+index, which costs more than it saves) and the trains (a stopped train's carriages could reuse their last walk, a
+small share of the ride). Explosion chains on Linux: particles 17 % of the step, car physics 19 %, objects 10 %.
 
 The trains cost the same everywhere (about 0.45 ms on the console for 2 trains): every step each carriage is
 taken out of the sprite grid and put back (a quarter of the trains' time on Linux), the engine runs its AI and
