@@ -204,8 +204,8 @@ the city's style:
   the gang's respect meter icon (user sprite 63 + arrow). A phone off the map is the game's phone arrow
   in the gang's colour on the map's edge, turned towards it, with its pip (none for the info phone), as
   the top screen draws it;
-- outside every territory, each gang's respect meter icon at the nearest block of its territory, or on
-  the map's edge in its direction;
+- each gang's respect meter icon at the nearest block of its territory, or on the map's edge in its
+  direction, but for the gang whose territory the player is in;
 - the church where the player saves, at the middle of the area of each `DO_SAVE_GAME` command of the
   city's script (found once per script among its commands, one per city), or on the map's edge in its
   direction, also during missions. Its icon is the pause menu font's `+` (`gStylePauseFont`) cut into a
