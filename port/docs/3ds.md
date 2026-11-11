@@ -91,7 +91,12 @@ With more lights than the shader's, `UploadLights` ranks them by the part of tha
 frame's order otherwise): the game submits its lamps first and the port's blasts (6 blocks) and fires last, so in an
 explosion chain the blasts were the ones lit on the CPU. Ranked, the lights past the 44th are the small lamps at the
 area's edge (`GTA2_TEST_BOOM` in Azahar: 65 to 78 lights a frame, from 1000 light tests and 170 CPU-lit vertices a
-frame to 2 and 0). A light lit by the shader rather than the CPU differs by at most one level, as above.
+frame to 2 and 0). A light lit by the shader rather than the CPU differs by at most one level, as above. The lights
+past the 44th now light nothing (`GTA2_3DS_FAR_LIGHTS=1` lights what they reach on the CPU, as before): no light
+tests, no CPU-lit vertices and no rows or walls left to the game for them. With `GTA2_TEST_BOOM=1250:20:1.2` in
+Azahar, frozen at its densest step (94 lights, 695 light tests, 18 rows left to the game), `draw.map` went from 6.17
+to 4.77 ms, and 1874 of the 96000 pixels changed, by 4 levels at most; over the chain's blocks 0.15 to 0.8 ms a
+frame. On the console that is about 5 ms in such frames (prim.light alone reached 6 ms in single frames).
 The game's vertices are in logical pixels with 1/w; the vertex shader
 outputs `(x*w, y*w, z*w, w)` so the PICA200 interpolates textures with perspective. Textures arrive
 as RGBA8 from the gbh_* layer and are stored in the smallest exact PICA format (RGB565, RGBA4,
@@ -448,7 +453,7 @@ keeps its 30.3 steps per second, citro3d does not wait for the screens' refresh)
 (Azahar, bil: about 185 frames per second walking at noon, 165 driving through traffic, about 100 driving at dusk,
 the same in New 3DS mode, which runs the same clock; Azahar leaves out the GPU's time),
 `GTA2_AUDIO_DRIVER=dummy` runs the sound without the DSP, `GTA2_3DS_VRAM=0` keeps the textures in linear memory
-(`GTA2_3DS_STATS` logs what VRAM holds, the DMA copies and the waits for them), `GTA2_3DS_UPLOAD_WORKER=0` makes the textures' levels on
+(`GTA2_3DS_STATS` logs what VRAM holds, the DMA copies and the waits for them), `GTA2_3DS_FAR_LIGHTS=1` lights on the CPU what the lights past the shader's 44 reach (see Renderer), `GTA2_3DS_UPLOAD_WORKER=0` makes the textures' levels on
 the main thread (see Renderer; `GTA2_3DS_STATS` logs the worker's time and the jobs the main thread wrote), `GTA2_3DS_MINIMAP=wide` or `off` sets the
 minimap's place (see Renderer), `GTA2_3DS_STEREO=<pixels>` the stereo's strength (see Stereo, 0 for none),
 `GTA2_3DS_EYES=<frame>,...` writes the top screen's left and right framebuffers of those renderer frames to
