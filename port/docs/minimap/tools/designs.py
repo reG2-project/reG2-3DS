@@ -2,7 +2,7 @@
 # glass overlay, and where the map and markers go, all in native HUD pixels (640x480 HUD space).
 import numpy as np
 from mm_lib import (SS, Canvas, hexrgb, sd_circle, sd_rrect, sd_chamfer, blur, profile_round,
-                    profile_bevel, shade, glyph_mask, GLYPHS, sd_poly, value_noise, grit, shade_hard)
+                    profile_bevel, shade, glyph_mask, GLYPHS, sd_poly, shade_hard)
 
 
 class Design:
@@ -445,10 +445,9 @@ BUILDERS = [respect_ring, pager_handset, steel_plate, compass_dial]
 BUILDERS2 = [tube_frame, police_scanner, dash_gauge, gps_handheld]
 
 
-# Frames for the 3DS bottom screen's 9-slice (port/3ds/minimap.cpp, README's device frames) at its 110x110 slot,
-# pre-rendered like the HUD sprites. Edge details repeat every 4 px; make_frames.py rebuilds edges from one strip.
-# The HUD sprites' own materials: the pager's dark plastic and khaki metal, the respect meters' warm brown rim.
-PLASTIC = hexrgb('#1f2721'); KHAKI = hexrgb('#8e876b'); RIM = hexrgb('#5c4a32')
+# Frames for the 3DS bottom screen's 9-slice (port/3ds/minimap.cpp, README's device frames) at its 110x110 slot:
+# clean moulded plastic and anodised metal. Edge details repeat every 4 px; make_frames.py rebuilds edges from a strip.
+GUNMETAL = hexrgb('#5a5f68'); BLACK_METAL = hexrgb('#16171b')
 
 
 def _nine(d, cap, rib, tab_w, btab_w=0, inset=13):
@@ -462,15 +461,10 @@ def _housing(c, sd, rgb, spec, shin, bevel, height):
             height=profile_round(np.minimum(-sd, bevel), 2 * bevel, height) + np.where(-sd > bevel, height, 0))
 
 
-def _wobble(c, seed, amp=0.35):
-    """A few tenths of a pixel of irregularity to add to a signed distance."""
-    return amp * value_noise(c, 4.0, seed)
-
-
-def _screw(c, x, y, r, rgb, top, kind='slot', seed=0):
-    s = sd_circle(c, x, y, r) + _wobble(c, seed, 0.2)
-    c.paint(s < 0, rgb, spec=1.0, shin=40, height=top + profile_round(-s, r, r * 0.6))
-    dk = hexrgb('#0e0c08')
+def _screw(c, x, y, r, rgb, top, kind='slot'):
+    s = sd_circle(c, x, y, r)
+    c.paint(s < 0, rgb, spec=1.4, shin=60, height=top + profile_round(-s, r, r * 0.6))
+    dk = hexrgb('#060608')
     if kind == 'slot':
         c.paint((np.abs((c.x - x) - (c.y - y)) < 0.6) & (s < -0.5), dk, add=-1.0)
     elif kind == 'cross':
@@ -493,7 +487,7 @@ def _lamp_sprite(d, shape):
 def _lamp(c, shape, top):
     """The status lamp unlit: dark glass with a glint."""
     sd = shape(c)
-    c.paint(sd < 0, hexrgb('#1a1c18'), spec=1.3, shin=50, height=top + profile_round(-sd, 3.0, 1.4))
+    c.paint(sd < 0, hexrgb('#1a1c1e'), spec=1.4, shin=60, height=top + profile_round(-sd, 3.0, 1.4))
 
 
 def _finish(d, c, screen, map_style='colour'):
@@ -508,37 +502,38 @@ def _finish(d, c, screen, map_style='colour'):
 
 
 def tracker_handset():
-    """I: a handheld tracker in the pager's dark plastic: khaki metal screen bezel, grip ridges, a status window with
-    the status lamp and an N, the pager's orange button, a speaker grille below."""
+    """I: a handheld tracker in charcoal moulded plastic: black anodised bezel with a thin glowing line, side vents,
+    a black glass status window with the status lamp and an N, the pager's orange button, a speaker grille below."""
     d = Design(); d.name = 'I_tracker_handset'; d.title = 'I  Tracker handset'
     d.W = d.H = W = H = 110
     _nine(d, cap=18, rib=12, tab_w=40, btab_w=40)
     c = Canvas(W, H)
-    body = sd_rrect(c, 0.5, 0.5, W - 0.5, H - 0.5, 9) + _wobble(c, 11)
-    _housing(c, body, PLASTIC, 0.5, 18, 4.0, 5.0)
-    c.h_[np.abs(body + 2.3) < 0.5] -= 1.0
-    side = ((c.x < 9) | (c.x > W - 9)) & (c.y > 18) & (c.y < H - 18) & (body < -0.8)
-    c.paint(side & (((c.y - 18) % 4) < 1.8), hexrgb('#0c100d'), add=-1.4)
+    body = sd_rrect(c, 0.5, 0.5, W - 0.5, H - 0.5, 9)
+    _housing(c, body, hexrgb('#2e3238'), 0.6, 30, 3.5, 5.0)
+    c.h_[np.abs(body + 2.2) < 0.45] -= 0.9
+    side = ((c.x > 3) & (c.x < 7.5) | (c.x > W - 7.5) & (c.x < W - 3)) & (c.y > 18) & (c.y < H - 18)
+    c.paint(side & (((c.y - 18) % 4) < 1.6), hexrgb('#060708'), add=-1.8)
     win = sd_rrect(c, 38, 2, 72, 11, 2)
-    c.paint(win < 0, hexrgb('#0c0e0c'), spec=0.6, shin=30, height=5.0 - 2.0 * np.clip(-win / 1.0, 0, 1))
+    c.paint(win < 0, hexrgb('#08090b'), spec=1.2, shin=70, height=5.0 - 1.8 * np.clip(-win / 1.0, 0, 1))
     lamp = lambda cc: sd_rrect(cc, 40.5, 3.5, 49.5, 9.5, 2)
-    _lamp(c, lamp, 3.0)
-    c.paint(glyph_mask(c, GLYPHS['N'], 53, 4.5, 1.0), hexrgb('#d8d2a8'), spec=0.0, add=0.0)
+    _lamp(c, lamp, 3.4)
+    c.paint(glyph_mask(c, GLYPHS['N'], 53, 4.5, 1.0), hexrgb('#b4c8b0'), spec=0.0, add=0.0)
     for x in (63.5, 66.5, 69.5):
-        c.paint(sd_circle(c, x, 6.5, 0.9) < 0, hexrgb('#030403'), add=-1.0)
+        c.paint(sd_circle(c, x, 6.5, 0.9) < 0, hexrgb('#020203'), add=-1.0)
     for i in range(6):
         sl = sd_rrect(c, 40.5 + i * 5, 99.5, 43 + i * 5, 107, 1.0)
-        c.paint(sl < 0, hexrgb('#040504'), add=-2.6)
-    btn = sd_rrect(c, W - 12.5, 2, W - 2.5, 10, 2.5) + _wobble(c, 12, 0.25)
-    c.paint(btn < 0, hexrgb('#f0641a'), spec=0.8, shin=30, height=5.0 + profile_bevel(-btn, 1.5, 2.0))
-    for i, (x, y) in enumerate(((6.5, 6.5), (6.5, H - 6.5), (W - 6.5, H - 6.5))):
-        _screw(c, x, y, 3.2, KHAKI, 5.5, 'slot', 20 + i)
-    bez = sd_rrect(c, 9.5, 9.5, W - 9.5, H - 9.5, 6) + _wobble(c, 13, 0.25)
-    c.paint((bez < 0.7) & (bez >= 0), hexrgb('#060806'), add=-1.2)
+        c.paint(sl < 0, hexrgb('#040405'), add=-2.6)
+    btn = sd_rrect(c, W - 12.5, 2, W - 2.5, 10, 2.5)
+    c.paint(btn < 0, hexrgb('#e8601a'), spec=0.9, shin=40, height=5.0 + profile_bevel(-btn, 1.5, 2.0))
+    for x, y in ((6.5, 6.5), (6.5, H - 6.5), (W - 6.5, H - 6.5)):
+        _screw(c, x, y, 3.0, GUNMETAL, 5.5, 'cross')
+    bez = sd_rrect(c, 9.5, 9.5, W - 9.5, H - 9.5, 6)
+    c.paint((bez < 0.7) & (bez >= 0), hexrgb('#040405'), add=-1.2)
+    c.paint(bez < 0, BLACK_METAL, spec=1.3, shin=60, height=4.2 + profile_round(np.minimum(-bez, 3.5), 3.5, 1.6))
     screen = sd_rrect(c, 13, 13, W - 13, H - 13, 3)
-    c.paint(bez < 0, KHAKI, spec=0.8, shin=30, height=4.2 + profile_round(np.minimum(-bez, 3.5), 3.5, 1.4))
-    grit(c, (body < 0) & (bez >= 0.7), 101)
-    grit(c, bez < 0, 102, grain=0.06)
+    glow = (screen >= 0) & (screen < 0.9)
+    c.paint(glow, hexrgb('#1c4a44'), spec=0.2)
+    c.emit[glow] += np.array([0.07, 0.30, 0.26])
     c.alpha[body < 0] = 1
     c.alpha[screen < 0] = 0
     d.lamp_box = ('tab', 40, 3, 50, 10)
@@ -547,46 +542,45 @@ def tracker_handset():
 
 
 def police_scanner2():
-    """J: a police scanner in near-black plastic with a warm brown rim: red and blue light bar with an N between, a
-    deep CRT well, vent slots on the right, two knurled knobs below, the status lamp in a khaki bezel top right."""
+    """J: a police scanner in black anodised metal: red and blue light bar with an N between, a deep CRT well with a
+    gunmetal lip, vent slots on the right, two knurled knobs below, the status lamp in a gunmetal bezel top right."""
     d = Design(); d.name = 'J_police_scanner'; d.title = 'J  Police scanner'
     d.W = d.H = W = H = 110
     _nine(d, cap=20, rib=12, tab_w=44)
     c = Canvas(W, H)
-    body = sd_rrect(c, 0.5, 0.5, W - 0.5, H - 0.5, 11) + _wobble(c, 21)
-    _housing(c, body, hexrgb('#1e1d1c'), 0.5, 18, 4.5, 6.0)
-    c.paint((body < 0) & (body > -2.2), RIM, spec=0.7, shin=24)
-    c.h_[np.abs(body + 2.5) < 0.5] -= 1.0
-    bar = sd_rrect(c, 34, 0.5, 76, 12.5, 4) + _wobble(c, 22, 0.25)
-    c.paint(bar < 0, hexrgb('#101010'), spec=0.5, shin=20, height=6.0 + profile_round(np.minimum(-bar, 1.5), 3.0, 1.5))
+    body = sd_rrect(c, 0.5, 0.5, W - 0.5, H - 0.5, 11)
+    _housing(c, body, hexrgb('#202226'), 0.9, 45, 4.5, 6.0)
+    c.h_[np.abs(body + 2.5) < 0.45] -= 0.9
+    bar = sd_rrect(c, 34, 0.5, 76, 12.5, 4)
+    c.paint(bar < 0, hexrgb('#0c0c0e'), spec=0.8, shin=40, height=6.0 + profile_round(np.minimum(-bar, 1.5), 3.0, 1.5))
     for x0, x1, col, glow in ((36.5, 51.5, '#ff1a08', (0.35, 0.02, 0.0)), (58.5, 73.5, '#1438ff', (0.0, 0.05, 0.40))):
         lens = sd_rrect(c, x0, 2.5, x1, 10.5, 3)
         c.paint(lens < 0, hexrgb(col), spec=1.4, shin=50, height=7.5 + profile_round(-lens, 4.0, 2.2))
         c.emit[lens < 0] += np.array(glow)
         c.alb[(lens < -0.8) & (np.abs(((c.x - x0) / 2.5) % 1 - 0.5) < 0.16)] *= 0.45
-    c.paint(glyph_mask(c, GLYPHS['N'], 52.5, 4.0, 1.0), hexrgb('#f0e8d8'), add=0.3)
+    c.paint(glyph_mask(c, GLYPHS['N'], 52.5, 4.0, 1.0), hexrgb('#e8eae8'), add=0.3)
     vent = (c.x > W - 7.5) & (c.x < W - 2.5) & (c.y > 20) & (c.y < H - 20) & ((((c.y - 20) % 4) - 1.5) ** 2 < 1.0)
-    c.paint(vent, hexrgb('#040404'), add=-2.0)
-    _screw(c, 7.0, 7.0, 3.2, KHAKI, 6.0, 'hex', 23)
+    c.paint(vent, hexrgb('#030304'), add=-2.0)
+    _screw(c, 7.0, 7.0, 3.2, GUNMETAL, 6.0, 'hex')
     ring = sd_circle(c, W - 7.5, 7.5, 4.6)
-    c.paint(ring < 0, KHAKI, spec=1.0, shin=36, height=6.0 + profile_round(-ring, 1.6, 1.0))
+    c.paint(ring < 0, GUNMETAL, spec=1.4, shin=60, height=6.0 + profile_round(-ring, 1.6, 1.0))
     lamp = lambda cc: sd_circle(cc, W - 7.5, 7.5, 3.0)
     _lamp(c, lamp, 6.4)
-    for i, (x, a) in enumerate(((8.5, -2.3), (W - 8.5, -0.9))):
+    for x, a in ((8.5, -2.3), (W - 8.5, -0.9)):
         y = H - 8.5
-        k = sd_circle(c, x, y, 5.6) + _wobble(c, 24 + i, 0.2)
+        k = sd_circle(c, x, y, 5.6)
         ang = np.arctan2(c.y - y, c.x - x)
-        c.paint(k < 0, hexrgb('#161616'), spec=1.2, shin=40, height=6.0 + profile_round(np.minimum(-k, 1.8), 3.6, 2.4)
+        c.paint(k < 0, hexrgb('#141416'), spec=1.2, shin=50, height=6.0 + profile_round(np.minimum(-k, 1.8), 3.6, 2.4)
                 + np.where(-k > 1.8, 2.4, 0) + 0.5 * np.cos(ang * 12) * (k > -1.6))
-        c.paint(sd_circle(c, x, y, 3.4) < 0, KHAKI, spec=1.0, shin=36)
+        c.paint(sd_circle(c, x, y, 3.4) < 0, GUNMETAL, spec=1.4, shin=60)
         p = sd_poly(c, [(x + 0.7 * np.cos(a + 1.57), y + 0.7 * np.sin(a + 1.57)), (x + 3.2 * np.cos(a), y + 3.2 * np.sin(a)),
                         (x - 0.7 * np.cos(a + 1.57), y - 0.7 * np.sin(a + 1.57))])
-        c.paint(p < 0.2, hexrgb('#141410'), spec=0.4, add=-0.6)
-    well = sd_rrect(c, 9, 9, W - 9, H - 9, 9) + _wobble(c, 26, 0.25)
-    c.paint(well < 0, hexrgb('#0c0d0e'), spec=0.4, shin=20, height=6.0 - 4.5 * np.clip(-well / 3.5, 0, 1))
+        c.paint(p < 0.2, hexrgb('#0c0c0e'), spec=0.4, add=-0.6)
+    well = sd_rrect(c, 9, 9, W - 9, H - 9, 9)
+    c.paint(well < 0, hexrgb('#08090a'), spec=0.5, shin=30, height=6.0 - 4.5 * np.clip(-well / 3.5, 0, 1))
     screen = sd_rrect(c, 13, 13, W - 13, H - 13, 6)
-    grit(c, (body < 0) & (well >= 0) & (bar >= 0) & (ring >= 0), 201)
-    grit(c, well < 0, 202, bump=0.06)
+    lip = (screen >= 0) & (screen < 1.4)
+    c.paint(lip, GUNMETAL, spec=1.3, shin=60, height=1.5 + profile_round(screen, 1.4, 0.7))
     c.alpha[body < 0] = 1
     c.alpha[screen < 0] = 0
     d.lamp_box = ('tr', W - 11, 4, W - 4, 11)
@@ -594,36 +588,4 @@ def police_scanner2():
     return _finish(d, c, screen)
 
 
-def field_scope():
-    """K: an instrument case in the respect meters' warm brown, a khaki bezel, a khaki N plate, the status lamp in a
-    recess below, cross-head screws."""
-    d = Design(); d.name = 'K_field_scope'; d.title = 'K  Field scope'
-    d.W = d.H = W = H = 110
-    _nine(d, cap=18, rib=12, tab_w=30, btab_w=30)
-    c = Canvas(W, H)
-    body = sd_rrect(c, 0.5, 0.5, W - 0.5, H - 0.5, 8) + _wobble(c, 31)
-    _housing(c, body, hexrgb('#4a3c28'), 0.6, 22, 3.5, 5.0)
-    c.h_[np.abs(body + 2.0) < 0.5] -= 1.0
-    plate = sd_rrect(c, 44, 0.5, 66, 11.5, 2.5) + _wobble(c, 32, 0.25)
-    c.paint(plate < 0, KHAKI, spec=0.9, shin=30, height=5.0 + profile_bevel(-plate, 1.6, 1.8))
-    c.paint(glyph_mask(c, GLYPHS['N'], 52.5, 3.5, 1.0) * (plate < -0.5), hexrgb('#141208'), add=-1.2)
-    rec = sd_rrect(c, 45, 98.5, 65, 109, 2.5)
-    c.paint(rec < 0, hexrgb('#0e0c08'), height=5.0 - 1.8 * np.clip(-rec, 0, 1))
-    lamp = lambda cc: sd_rrect(cc, 49, 100.5, 61, 107, 2.2)
-    _lamp(c, lamp, 3.4)
-    for i, (x, y) in enumerate(((6.5, 6.5), (W - 6.5, 6.5), (6.5, H - 6.5), (W - 6.5, H - 6.5))):
-        _screw(c, x, y, 3.0, KHAKI, 5.0, 'cross', 34 + i)
-    bez = sd_rrect(c, 9, 9, W - 9, H - 9, 5) + _wobble(c, 38, 0.25)
-    c.paint((bez < 0.7) & (bez >= 0), hexrgb('#0e0a06'), add=-1.0)
-    c.paint(bez < 0, hexrgb('#7c7458'), spec=0.8, shin=26, height=4.0 + profile_round(np.minimum(-bez, 4.0), 4.0, 2.4))
-    screen = sd_rrect(c, 13, 13, W - 13, H - 13, 3)
-    grit(c, (body < 0) & (bez >= 0.7) & (plate >= 0), 301)
-    grit(c, (bez < 0) | (plate < 0), 302, grain=0.06)
-    c.alpha[body < 0] = 1
-    c.alpha[screen < 0] = 0
-    d.lamp_box = ('btab', 49, 100, 61, 108)
-    _lamp_sprite(d, lamp)
-    return _finish(d, c, screen)
-
-
-BUILDERS3 = [tracker_handset, police_scanner2, field_scope]
+BUILDERS3 = [tracker_handset, police_scanner2]
