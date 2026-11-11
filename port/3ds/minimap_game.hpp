@@ -20,7 +20,7 @@ enum MarkKind
 {
     kMissionPhone,
     kInfoPhone,
-    kTerritory, // a gang's nearest block, while the player is in no gang's territory
+    kTerritory, // a gang's nearest block, for each gang but the one whose territory the player is in
     kSavePoint, // a church where the player saves: a DO_SAVE_GAME command's area
 };
 

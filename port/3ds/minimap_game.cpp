@@ -190,7 +190,7 @@ void FindPhones(View* pView, Player* pPlayer, const Gang* pGang)
 }
 
 // Each gang's nearest block to the player's block (its middle): the nearest point of each of its zones, kept if
-// no earlier zone of another gang owns it. Kept while the player stays on a block.
+// no earlier zone of another gang owns it. Kept while the player stays on a block. Leaves out the player's gang.
 void FindTerritories(View* pView)
 {
     const gmp_zone_list* pZones = gMap_0x370->mpZones;
@@ -202,6 +202,7 @@ void FindTerritories(View* pView)
     static s32 sX = -1, sY = -1;
     static u8 sArrows[kMaxGangs];
     static Mark sMarks[kMaxGangs];
+    static s32 sSlots[kMaxGangs];
     static s32 sCount;
     const s32 px = pView->px4 >> 2, py = pView->py4 >> 2;
     if (pZones != sZones || px != sX || py != sY || memcmp(pView->arrows, sArrows, sizeof(sArrows)))
@@ -238,6 +239,7 @@ void FindTerritories(View* pView)
             }
             if (best >= 0)
             {
+                sSlots[sCount] = slot;
                 Mark& m = sMarks[sCount++];
                 m.x4 = bx * 4 + 2;
                 m.y4 = by * 4 + 2;
@@ -249,7 +251,10 @@ void FindTerritories(View* pView)
     }
     for (s32 i = 0; i < sCount; i++)
     {
-        AddMark(pView, sMarks[i].x4, sMarks[i].y4, kTerritory, sMarks[i].arrow);
+        if (sSlots[i] + 1 != pView->gang)
+        {
+            AddMark(pView, sMarks[i].x4, sMarks[i].y4, kTerritory, sMarks[i].arrow);
+        }
     }
 }
 
@@ -335,10 +340,7 @@ bool ReadView(View* pView)
     {
         FindPhones(pView, pPlayer, pGang);
     }
-    else
-    {
-        FindTerritories(pView);
-    }
+    FindTerritories(pView);
     return true;
 }
 
