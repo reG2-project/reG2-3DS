@@ -25,14 +25,18 @@ const s32 kRib = 12;
 const s32 kTabX = 33;
 const s32 kTabW = 44;
 const s32 kTube = 13;
-// The light bar's two lenses, from the tab's left: the territory's gang colour, then its opinion of the player.
-const s32 kLampLeft[2] = {36 - kTabX, 58 - kTabX};
-const s32 kLampTop = 2;
-// The atlas: the frame at (0, 0), the player arrow right of it, the lit lens under the arrow. The arrow is drawn
+// The lamps: the light bar's lens from the tab's left, lit in the territory's gang colour, and the small one top
+// right from the frame's right edge, red when that gang hates the player, else green.
+const s32 kGangLampX = 45 - kTabX;
+const s32 kGangLampY = 2;
+const s32 kHostileLampX = 11;
+const s32 kHostileLampY = 4;
+// The atlas: the frame at (0, 0), the player arrow right of it, the lit lamps under the frame. The arrow is drawn
 // filtered, so a clear column between them keeps the frame's edge out of the arrow's.
 const s32 kAtlasSize = 128;
 const s32 kArrowX = kFrameW + 1;
-const s32 kLampY = kArrowH + 3;
+const s32 kLampsY = kFrameH + 1;
+const s32 kHostileAtlasX = kLampGangW + 1;
 // The game's sprites for the markers, read from the city's style.
 const s32 kSpritesW = 128;
 const s32 kSpritesH = 64;
@@ -72,9 +76,9 @@ u32 sEdgeSig;
 s32 sFillGang;
 u32 sFillRgba;
 u32 sNone; // the ground where no block has a lid, also around the city
-// The lenses' colours: the respect meter's red, yellow and green lamps by opinion + 1, and this frame's two.
-u32 sOpinionRgba[3];
-u32 sLampRgba[2];
+// The respect meter's green and red lamps, and the colours the frame's two lamps are lit in, 0 when dark.
+u32 sGreenRgba, sRedRgba;
+u32 sGangLampRgba, sHostileLampRgba;
 MinimapGame::View sView;
 
 enum PauseTouch
@@ -222,14 +226,18 @@ void BuildAtlas(C3DRenderer& renderer)
     };
     put(kFrame, kFrameW, kFrameH, 0);
     put(kArrow, kArrowW, kArrowH, kArrowX);
-    for (s32 y = 0; y < kLampH; y++)
-    {
-        for (s32 x = 0; x < kLampW; x++)
+    const auto putBelow = [&atlas](const unsigned int* pSrc, s32 w, s32 h, s32 x0) {
+        for (s32 y = 0; y < h; y++)
         {
-            const u32 c = kLamp[y * kLampW + x];
-            atlas[(kLampY + y) * kAtlasSize + kArrowX + x] = (c >> 24) >= 128 ? c | 0xFF000000u : 0;
+            for (s32 x = 0; x < w; x++)
+            {
+                const u32 c = pSrc[y * w + x];
+                atlas[(kLampsY + y) * kAtlasSize + x0 + x] = (c >> 24) >= 128 ? c | 0xFF000000u : 0;
+            }
         }
-    }
+    };
+    putBelow(kLampGang, kLampGangW, kLampGangH, 0);
+    putBelow(kLampHostile, kLampHostileW, kLampHostileH, kHostileAtlasX);
     sAtlas = renderer.CreateTexture();
     renderer.UploadTexture(sAtlas, kAtlasSize, kAtlasSize, &atlas[0], RMIP_NONE);
 }
@@ -483,10 +491,8 @@ void BuildSprites(C3DRenderer& renderer)
         place(minus, w, h, &sMinus);
     }
     renderer.UploadTexture(sSprites, kSpritesW, kSpritesH, &sheet[0], RMIP_NONE);
-    for (s32 i = 0; i < 3; i++)
-    {
-        sOpinionRgba[i] = SpriteColour(MinimapGame::kMeterLampSprite + 2 - i);
-    }
+    sGreenRgba = SpriteColour(MinimapGame::kMeterLampSprite);
+    sRedRgba = SpriteColour(MinimapGame::kMeterLampSprite + 2);
 }
 
 HudTheme::Quad MakeQuad(f32 x0, f32 y0, f32 x1, f32 y1, f32 u0, f32 v0, f32 u1, f32 v1, u32 rgba)
@@ -760,8 +766,8 @@ u32 Update(C3DRenderer& renderer)
         BuildFill(renderer);
     }
     sFillRgba = sView.gang ? MinimapGame::ArrowColour(sView.arrows[sView.gang - 1]) : 0;
-    sLampRgba[0] = sView.gang ? Lit(sFillRgba) : 0;
-    sLampRgba[1] = sView.gang ? sOpinionRgba[sView.opinion + 1] : 0;
+    sGangLampRgba = sView.gang ? Lit(sFillRgba) : 0;
+    sHostileLampRgba = !sView.gang ? 0 : sView.hostile ? sRedRgba : sGreenRgba;
     // 64 headings to the turn are enough for an 11 pixel arrow.
     sView.heading = (sView.heading + 11) / 22 * 22;
     u32 h = 2166136261u;
@@ -772,7 +778,7 @@ u32 Update(C3DRenderer& renderer)
     mix((u32)sView.heading);
     mix(sEdgeSig);
     mix((u32)sView.gang);
-    mix((u32)sView.opinion);
+    mix((u32)sView.hostile);
     for (s32 i = 0; i < sView.markCount; i++)
     {
         mix((u32)sView.marks[i].x4);
@@ -799,18 +805,17 @@ void Draw(C3DRenderer&, HudTheme::Sink& sink, const HudTheme::Rect& frame)
     DrawMarks(sink, hx0, hy0, hx1, hy1, (f32)(cx - sView.px4), (f32)(cy - sView.py4), 1.0f, (f32)cx, (f32)cy);
     DrawArrow(sink, (f32)cx, (f32)cy, sView.heading);
     DrawFrame(sink, frame);
-    // The light bar's lenses lit over the frame's dark ones, outside any territory left dark.
-    HudTheme::Quad lamps[2];
-    s32 n = 0;
-    const s32 tabX = (frame.x0 + frame.x1 - kTabW) / 2;
-    for (s32 i = 0; i < 2; i++)
+    // The lamps lit over the frame's dark ones, outside any territory left dark.
+    if (sView.gang)
     {
-        if (sLampRgba[i])
-        {
-            lamps[n++] = AtlasQuad(tabX + kLampLeft[i], frame.y0 + kLampTop, kArrowX, kLampY, kLampW, kLampH, sLampRgba[i]);
-        }
+        const s32 tabX = (frame.x0 + frame.x1 - kTabW) / 2;
+        const HudTheme::Quad lamps[2] = {
+            AtlasQuad(tabX + kGangLampX, frame.y0 + kGangLampY, 0, kLampsY, kLampGangW, kLampGangH, sGangLampRgba),
+            AtlasQuad(frame.x1 - kHostileLampX, frame.y0 + kHostileLampY, kHostileAtlasX, kLampsY, kLampHostileW, kLampHostileH,
+                      sHostileLampRgba),
+        };
+        sink.DrawQuads(lamps, 2, sAtlas, RS_BLEND_ALPHA | C3DRenderer::kStateNearest);
     }
-    sink.DrawQuads(lamps, n, sAtlas, RS_BLEND_ALPHA | C3DRenderer::kStateNearest);
 }
 
 u32 UpdatePause(C3DRenderer& renderer)

@@ -335,8 +335,7 @@ bool ReadView(View* pView)
     const Gang* pGang = pPlayer->get_gang_curr_location();
     const s32 slot = pGang ? (s32)(pGang - gGangPool_CA8->mGangList) : -1;
     pView->gang = slot >= 0 && slot < kMaxGangs && pView->arrows[slot] ? slot + 1 : 0;
-    const s32 respect = pView->gang ? (s8)pGang->GetRespectForPlayer(pPlayer->get_idx()) : 0;
-    pView->opinion = respect >= 20 ? 1 : respect <= -20 ? -1 : 0;
+    pView->hostile = pView->gang && (s8)pGang->GetRespectForPlayer(pPlayer->get_idx()) <= -20;
     FindSavePoints(pView);
     if (pView->gang)
     {

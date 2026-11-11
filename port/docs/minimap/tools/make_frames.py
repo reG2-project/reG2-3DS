@@ -72,19 +72,19 @@ def main(out_dir, names):
         if names and d.name.split('_')[0] not in names:
             continue
         out = os.path.join(out_dir, d.name); os.makedirs(out, exist_ok=True)
-        _, lx0, ly0, lx1, ly1 = d.lamps[0]
         for s in (1, 2):
             # The edges rebuilt from their strips, as the game draws them, then crushed to few colours like the HUD.
             ns = {k: v * s for k, v in d.nine.items()}
             frame = nine_slice(downsample(d.rgb, d.canvas.alpha, s), ns, d.W * s, d.H * s)
             quantize(frame, COLOURS).save(os.path.join(out, 'frame_%dx.png' % s))
-            lamp = downsample(d.lamp_rgb, d.lamp_alpha, s).crop((lx0 * s, ly0 * s, lx1 * s, ly1 * s))
-            quantize(lamp, 16).save(os.path.join(out, 'lamp_%dx.png' % s))
+            for name, _, (x0, y0, x1, y1), rgb, alpha in d.lamps:
+                lamp = downsample(rgb, alpha, s).crop((x0 * s, y0 * s, x1 * s, y1 * s))
+                quantize(lamp, 16).save(os.path.join(out, 'lamp_%s_%dx.png' % (name, s)))
             grgb, ga = d.glass
             rgba_from(np.dstack([soft(grgb[..., i], s) for i in range(3)]), soft(ga, s)).save(os.path.join(out, 'glass_%dx.png' % s))
             m = soft((d.screen_sd < 0).astype(np.float32), s)
             Image.fromarray((m * 255).astype(np.uint8), 'L').save(os.path.join(out, 'screen_mask_%dx.png' % s))
-        d.nine['lamps'] = [dict(anchor=a, x=x0, y=y0, w=x1 - x0, h=y1 - y0) for a, x0, y0, x1, y1 in d.lamps]
+        d.nine['lamps'] = [dict(name=n, anchor=a, x=b[0], y=b[1], w=b[2] - b[0], h=b[3] - b[1]) for n, a, b, _, _ in d.lamps]
         with open(os.path.join(out, 'nine.json'), 'w') as f:
             json.dump(d.nine, f, indent=1)
             f.write('\n')
