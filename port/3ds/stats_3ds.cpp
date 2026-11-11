@@ -60,6 +60,11 @@ void Stats3DS_AddFrameBegin(u64 ticks)
     sWaitTicks += ticks;
 }
 
+void Stats3DS_AddWait(u64 ticks)
+{
+    sWaitTicks += ticks;
+}
+
 void Stats3DS_AddBottom(u64 ticks, bool drawn)
 {
     sBottomTicks += ticks;

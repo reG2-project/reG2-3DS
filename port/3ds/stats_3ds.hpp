@@ -16,9 +16,11 @@ void Stats3DS_SetTextures(u32 count, u32 bytes, u32 cachedBytes, u32 evictions, 
 void Stats3DS_SetVram(u32 bytes, u32 copies, u32 drains);
 // The upload worker's ticks and jobs so far, and the jobs the main thread wrote as it needed them first.
 void Stats3DS_SetUploadWorker(u64 ticks, u32 jobs, u32 mainJobs);
+// Ticks the frame loop waited for the top screen's refresh.
+void Stats3DS_AddWait(u64 ticks);
 // Once per frame, with the ticks C3D_FrameEnd took (the wait for the GPU and the screen).
 void Stats3DS_Frame(u64 frameEndTicks);
 // Whether the main thread's sleeps count in Stats3DS_WaitTicks (two tick reads each).
 void Stats3DS_CountSleeps(bool on);
-// Ticks the main thread has waited so far: C3D_FrameBegin, C3D_FrameEnd and, when counted, its sleeps.
+// Ticks the main thread has waited so far: C3D_FrameBegin, C3D_FrameEnd, the refresh and, when counted, its sleeps.
 u64 Stats3DS_WaitTicks();
