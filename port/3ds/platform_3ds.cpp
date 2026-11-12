@@ -319,7 +319,7 @@ bool port_PrepareGameFolder(bool)
     }
     text += "\nCopy the PC version's data folder (fstyle.sty,\n"
             "e.gxt, the cities' .gmp, .sty and .scr files)\n"
-            "to the folder of gta2.3dsx or to sdmc:/3ds/gta2,\n"
+            "to the folder of reg2.3dsx or to sdmc:/3ds/gta2,\n"
             "as data/.\n"
             "\nPress START to exit.";
     ShowError(text.c_str());
