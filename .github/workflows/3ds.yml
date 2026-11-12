@@ -47,7 +47,9 @@ jobs:
 
       # On the runner: the prebuilt makerom and bannertool need a newer glibc than the image's.
       - name: Pack reg2.cia
-        run: sh port/3ds/ci.sh cia "$WORK"
+        run: |
+          sh port/3ds/ci.sh cia "$WORK"
+          ls -l "$WORK/out"
 
       - uses: actions/upload-artifact@v4
         with:
