@@ -74,10 +74,10 @@ pad) and CLASSIC D-PAD.
 | B | jump | handbrake |
 | A | get in | get out |
 | Y, X | previous, next weapon | previous, next weapon |
-| D-pad | specials | specials, roof gun |
+| D-pad | specials | specials; left and right turn the turret of the fire truck, tank or gun jeep |
 | START | pause | pause |
 | SELECT | back in menus | next radio station |
-| C-stick, ZR (New 3DS) | aim, attack | roof gun, attack |
+| C-stick, ZR (New 3DS) | aim, attack | turn the turret, attack |
 
 ## Not there yet
 
