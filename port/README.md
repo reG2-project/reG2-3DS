@@ -205,10 +205,10 @@ to unshield and libarchive.
 
 ## Packages
 
-`.github/workflows/port.yml` builds the packages on pushes to `port/**` branches, on `v*` tags (a draft
-release) and on demand. Each is `packaging/ci.sh` in a Debian 13 container, which installs the tools,
-downloads the sources pinned in `packaging/versions.sh`, builds the libraries (`packaging/deps.sh`), the
-port, then the packages. The same runs locally, from the repository's root:
+This repository's CI builds the 3DS only (`docs/3ds.md`, Releases); the PC packages are built by
+[reG2](https://github.com/reG2-project/reG2)'s `.github/workflows/port.yml`. Each is `packaging/ci.sh` in a
+Debian 13 container, which installs the tools, downloads the sources pinned in `packaging/versions.sh`, builds
+the libraries (`packaging/deps.sh`), the port, then the packages. The same runs locally, from the repository's root:
 
 ```bash
 docker run --rm -v $PWD:/src:ro -v $PWD/../work:/work -w /src debian:trixie sh port/packaging/ci.sh mingw32 /work

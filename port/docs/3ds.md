@@ -306,7 +306,7 @@ citro3d's library is built with short enums (GCC's default for `arm-none-eabi`),
 ## Build
 
 ```bash
-docker pull devkitpro/devkitarm
+# devkitpro/devkitarm pinned by date tag and digest (Dockerfile).
 docker build -t gta2-3ds-build port/3ds
 # SDL3 from its source release (3.4.18 tested), into a prefix:
 docker run --rm -u $(id -u):$(id -g) -v $PWD:$PWD -v $SDL:$SDL gta2-3ds-build \
@@ -325,6 +325,36 @@ the memory the `.3dsx` gets (see Memory) and, in `gta2.rsf`, the service names t
 which a console holds it to. Its banner is `banner.png` (the logo on black, from `banner.svg`) with a silent
 `banner.wav`. makerom (Project_CTR, 0.19.0 tested) and bannertool are not in the devkitPro image, so the normal
 build leaves the CIA out. A CIA gets no `argv[0]`: its game folder is always `sdmc:/3ds/gta2/`.
+
+The version is CMake's `GTA2_VERSION` (by default `0.1.0-dev`): the start menu's corner and, through
+`make_cia.sh`, which reads it from the build's cache, the CIA's title version (x and y at most 63, z at most 15).
+The SMDH has no version field.
+
+### Releases
+
+`.github/workflows/3ds.yml` builds on pushes to `main` and `port/**` branches, on `v*` tags (a draft release) and
+on demand, with `port/3ds/ci.sh`. Its `build` stage runs in the image: it downloads the sources pinned in
+`port/3ds/versions.sh` (SDL3 by SHA-256, OpenDSP by commit), builds them into `<work>/deps` (cached), then the game
+with OpenDSP, and writes `reg2.3dsx` and `LICENSE.OpenDSP.txt` to `<work>/out`. Its `cia` stage runs on the runner,
+as the prebuilt makerom (Project_CTR) and bannertool (carstene1ns/3ds-bannertool, a copy of Steveice10's) need glibc
+2.39, and adds `reg2.cia`. The same runs locally, from the repository's root (`$GTA2_VERSION` is optional, a tag
+such as `v0.2.0` in CI):
+
+```bash
+docker build -t gta2-3ds-build port/3ds
+docker run --rm -u $(id -u):$(id -g) -e GTA2_VERSION -v $PWD:/src:ro -v $PWD/../work:/work -w /src gta2-3ds-build \
+    sh port/3ds/ci.sh build /work
+sh port/3ds/ci.sh cia $PWD/../work
+```
+
+The file names carry no version, so `releases/latest/download/reg2.3dsx` (and `reg2.cia`) always gives the newest.
+To release:
+
+1. Actions, Release, Run workflow, on `main`, with the version (`0.2.0`). It tags the commit `v0.2.0` and
+   starts the 3DS workflow on the tag, which builds that version.
+2. Once the 3DS run is green, check the draft release it made in Releases: the files and the notes generated
+   from the pull requests since the last release.
+3. Edit the notes if needed, then Publish release.
 
 ### Profile guided optimisation
 

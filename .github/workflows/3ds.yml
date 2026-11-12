@@ -1,0 +1,73 @@
+name: 3DS
+
+# The 3DS build (port/3ds): reg2.3dsx and reg2.cia, by port/3ds/ci.sh, the same commands as a local run
+# (port/docs/3ds.md, Build). A tag v<x.y.z> (pushed, or run on by release.yml) builds that version and drafts its release.
+on:
+  push:
+    branches: ['main', 'port/**']
+    tags: ['v*']
+  workflow_dispatch:
+
+concurrency:
+  group: 3ds-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# ci.sh's version: the tag on a tag, else CMake's default.
+env:
+  GTA2_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Work folder
+        run: echo "WORK=$RUNNER_TEMP/work" >> "$GITHUB_ENV"
+
+      - name: Restore libraries
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/work/dl
+            ${{ runner.temp }}/work/deps
+          key: 3ds-deps-${{ hashFiles('port/3ds/versions.sh', 'port/3ds/Dockerfile', 'port/3ds/build_sdl3.sh', 'port/3ds/build_opendsp.sh', 'port/3ds/sdl3_audio_syscore.patch') }}
+
+      - name: Build image
+        run: docker build -t gta2-3ds-build port/3ds
+
+      - name: Build reg2.3dsx
+        run: |
+          mkdir -p "$WORK"
+          docker run --rm -u "$(id -u):$(id -g)" -e GTA2_VERSION -v "$PWD:/src:ro" -v "$WORK:/work" -w /src gta2-3ds-build \
+              sh port/3ds/ci.sh build /work
+
+      # On the runner: the prebuilt makerom and bannertool need a newer glibc than the image's.
+      - name: Pack reg2.cia
+        run: sh port/3ds/ci.sh cia "$WORK"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reG2-3DS
+          path: ${{ runner.temp }}/work/out/*
+          if-no-files-found: error
+          retention-days: 3
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: reG2-3DS
+          path: dist
+      - name: Draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --draft --generate-notes --title "reG2 3DS ${GTA2_VERSION#v}"
