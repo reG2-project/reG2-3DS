@@ -28,6 +28,12 @@ jobs:
               echo "::error::The version must be x.y.z, not $VERSION"
               exit 1
           fi
+          # The CIA's title version (make_cia.sh) has 6, 6 and 4 bits.
+          IFS=. read -r MAJOR MINOR MICRO <<< "$VERSION"
+          if [ "$MAJOR" -gt 63 ] || [ "$MINOR" -gt 63 ] || [ "$MICRO" -gt 15 ]; then
+              echo "::error::A CIA cannot encode $VERSION: x and y at most 63, z at most 15"
+              exit 1
+          fi
           git tag "v$VERSION"
           git push origin "v$VERSION"
           gh workflow run 3ds.yml --repo "$GITHUB_REPOSITORY" --ref "v$VERSION"
