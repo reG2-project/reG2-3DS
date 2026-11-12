@@ -8,6 +8,14 @@ project(gta2_3ds C CXX)
 set(PORT ${CMAKE_CURRENT_LIST_DIR}/..)
 set(ROOT ${PORT}/..)
 
+# x.y.z with an optional suffix, as in port/CMakeLists.txt; make_cia.sh reads it from the cache.
+set(GTA2_VERSION "0.1.0-dev" CACHE STRING "reG2's version")
+if(NOT GTA2_VERSION MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)")
+    message(FATAL_ERROR "GTA2_VERSION ${GTA2_VERSION} does not start with x.y.z")
+endif()
+file(CONFIGURE OUTPUT reg2_version.h CONTENT "#define GTA2_VERSION \"${GTA2_VERSION}\"
+")
+
 # The game sources are the VC6 build's gta2_lib_src list, as in port/CMakeLists.txt.
 file(READ ${ROOT}/CMakeLists.txt top)
 string(REGEX MATCH "set\\(gta2_lib_src\n([^)]*)\\)" _ "${top}")

@@ -6,6 +6,9 @@
 
 namespace PortOptionsMenu
 {
+// The start menu's corner line, our version in place of the game's. The frontend fonts have no lower case.
+void VersionText(wchar_t* pOut);
+
 // After the original pages are set up.
 void Setup(Frontend* pFrontend);
 
